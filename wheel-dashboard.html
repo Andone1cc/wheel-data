@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Wheel Dashboard · 期权年化追踪</title>
+<title>Wheel Data · 期权年化追踪</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -257,8 +257,8 @@ const ACC={
 };
 const V=(n)=>`var(--${n})`;
 const fmt=(n,d=2)=>n==null?'—':Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
-const fmtM=(n)=>n==null?'—':`${n>=0?'+$':'-$'}${Math.abs(n).toFixed(2)}`;
-const fmtA=(n)=>n==null?'—':`${n>=0?'+':''}${n.toFixed(1)}%`;
+const fmtM=(n)=>n==null?'—':(n>=0?'+$':'-$')+Math.abs(n).toFixed(2);
+const fmtA=(n)=>n==null?'—':(n>=0?'+':'')+n.toFixed(1)+'%';
 const daysBetween=(a,b)=>Math.round((new Date(b)-new Date(a))/86400000);
 const today=()=>new Date().toISOString().slice(0,10);
 const calcAnnual=(profit,capital,days)=>{
