@@ -901,23 +901,35 @@ function WatchlistPanel(){
     const results={};
     await Promise.all(tickers.map(async ticker=>{
       try{
-        // 股价 via Yahoo proxy
-        const res=await fetch(proxyBase+'/api/quote/'+ticker,{signal:AbortSignal.timeout(8000)});
+        // 股票详情 via Yahoo proxy（市值、成交量等）
+        const res=await fetch(proxyBase+'/api/quote/'+ticker,{signal:AbortSignal.timeout(10000)});
         const d=await res.json();
-        results[ticker]={price:d.price||null};
+        results[ticker]={
+          price:d.price||null,
+          marketCap:d.marketCapFmt||null,
+          marketCapRaw:d.marketCap||null,
+          volume:d.volumeFmt||null,
+          avgVolume:d.avgVolumeFmt||null,
+          change:d.change!=null?Number(d.change):null,
+          high52:d.fiftyTwoWeekHigh||null,
+          low52:d.fiftyTwoWeekLow||null,
+          beta:d.beta||null,
+          shortName:d.shortName||null,
+        };
       }catch{results[ticker]={price:null};}
-      // CBOE 期权数据（获取 iv30 等）
+      // CBOE 数据（IV30、HV）
       try{
         const res2=await fetch(proxyBase+'/api/cboe/'+ticker,{signal:AbortSignal.timeout(10000)});
         if(res2.ok){
           const cd=await res2.json();
           const dd=cd&&cd.data;
           if(dd){
-            results[ticker]=Object.assign(results[ticker]||{},{
-              iv30:dd.iv30?Number(dd.iv30)*100:null,
-              iv30Hi:dd.iv30_one_year_high?Number(dd.iv30_one_year_high)*100:null,
-              iv30Lo:dd.iv30_one_year_low?Number(dd.iv30_one_year_low)*100:null,
-              volume:dd.seqno||null,
+            Object.assign(results[ticker]||{},{
+              iv30:dd.iv30?Number(dd.iv30):null,
+              iv30Hi:dd.iv30_one_year_high?Number(dd.iv30_one_year_high):null,
+              iv30Lo:dd.iv30_one_year_low?Number(dd.iv30_one_year_low):null,
+              hv20:dd.hv20?Number(dd.hv20):null,
+              hv50:dd.hv50?Number(dd.hv50):null,
             });
           }
         }
@@ -955,9 +967,9 @@ function WatchlistPanel(){
 
       {tickers.length>0&&(
         <div style={{overflowX:'auto'}}>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 0.5fr',gap:0,padding:'0 0 8px',marginBottom:4,minWidth:500}}>
-            {['标的','股价','IV30','IV Rank','操作'].map(h=>(
-              <div key={h} style={{fontSize:10,color:V('faint'),letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',padding:'0 12px'}}>{h}</div>
+          <div style={{display:'grid',gridTemplateColumns:'1.2fr 1fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr 0.5fr',gap:0,padding:'0 0 8px',marginBottom:4,minWidth:760}}>
+            {['标的','股价','涨跌','市值','成交量','IV30','HV20','IV Rank',''].map(h=>(
+              <div key={h} style={{fontSize:10,color:V('faint'),letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',padding:'0 10px'}}>{h}</div>
             ))}
           </div>
 
@@ -965,27 +977,42 @@ function WatchlistPanel(){
             const d=stockData[t]||{};
             const ivRank=(d.iv30!=null&&d.iv30Hi!=null&&d.iv30Lo!=null&&d.iv30Hi>d.iv30Lo)?Math.round((d.iv30-d.iv30Lo)/(d.iv30Hi-d.iv30Lo)*100):null;
             const ivColor=ivRank==null?V('faint'):(ivRank>=70?ACC.profit:(ivRank>=40?ACC.amber:V('dim')));
+            const chgColor=d.change==null?V('faint'):(d.change>=0?ACC.profit:ACC.loss);
+            const chgStr=d.change!=null?((d.change>=0?'+':'')+fmt2(d.change*100,2)+'%'):'--';
             return(
-              <div key={t} className="card" style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 0.5fr',gap:0,marginBottom:6,minWidth:500}}>
+              <div key={t} className="card" style={{display:'grid',gridTemplateColumns:'1.2fr 1fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr 0.5fr',gap:0,marginBottom:6,minWidth:760,borderLeft:'3px solid '+ivColor}}>
                 <div style={cellStyle}>
                   <span style={{fontWeight:700,fontSize:15,color:V('ink')}}>{t}</span>
+                  {d.shortName&&<div style={{fontSize:10,color:V('faint'),marginTop:2}}>{d.shortName}</div>}
                 </div>
                 <div style={cellStyle}>
-                  <span style={{color:d.price?V('ink'):V('faint')}}>{d.price?('$'+fmt2(d.price)):'--'}</span>
+                  <span style={{color:d.price?V('ink'):V('faint'),fontWeight:600}}>{d.price?('$'+fmt2(d.price)):'--'}</span>
+                </div>
+                <div style={cellStyle}>
+                  <span style={{color:chgColor,fontWeight:500}}>{chgStr}</span>
+                </div>
+                <div style={cellStyle}>
+                  <span style={{color:V('dim')}}>{d.marketCap||'--'}</span>
+                </div>
+                <div style={cellStyle}>
+                  <span style={{color:V('dim')}}>{d.volume||'--'}</span>
                 </div>
                 <div style={cellStyle}>
                   <span style={{color:V('dim')}}>{d.iv30!=null?(fmt2(d.iv30,1)+'%'):'--'}</span>
                 </div>
-                <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',gap:8})}>
-                  <span style={{color:ivColor,fontWeight:600}}>{ivRank!=null?(ivRank+'%'):'--'}</span>
+                <div style={cellStyle}>
+                  <span style={{color:V('dim')}}>{d.hv20!=null?(fmt2(d.hv20,1)+'%'):'--'}</span>
+                </div>
+                <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',gap:6})}>
+                  <span style={{color:ivColor,fontWeight:600,fontSize:13}}>{ivRank!=null?(ivRank+'%'):'--'}</span>
                   {ivRank!=null&&(
-                    <div style={{height:4,borderRadius:2,background:V('line'),width:40,flexShrink:0}}>
+                    <div style={{height:4,borderRadius:2,background:V('line'),width:30,flexShrink:0}}>
                       <div style={{height:4,borderRadius:2,width:(ivRank+'%'),background:ivColor}}/>
                     </div>
                   )}
                 </div>
-                <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center'})}>
-                  <button onClick={()=>removeTicker(t)} style={{background:'none',border:'none',color:ACC.loss,cursor:'pointer',fontSize:14,padding:'2px 8px'}}>{'✕'}</button>
+                <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',justifyContent:'center'})}>
+                  <button onClick={()=>removeTicker(t)} style={{background:'none',border:'none',color:ACC.loss,cursor:'pointer',fontSize:13,padding:'2px 6px'}}>{'✕'}</button>
                 </div>
               </div>
             );
@@ -1054,7 +1081,7 @@ function ScanPanel(){
         const iv30Lo=data&&data.data&&data.data.iv30_one_year_low||null;
         let ivRank=null;
         if(iv30raw!=null&&iv30Hi!=null&&iv30Lo!=null&&iv30Hi>iv30Lo){
-          ivRank=Math.round((iv30raw-iv30Lo)/(iv30Hi-iv30Lo)*100);
+          ivRank=Math.round((Number(iv30raw)-Number(iv30Lo))/(Number(iv30Hi)-Number(iv30Lo))*100);
         }
         if(!Array.isArray(opts)||!opts.length)continue;
 
@@ -1081,7 +1108,7 @@ function ScanPanel(){
             stockPrice:stockPrice?Number(stockPrice):null,
             expiry:parsed.expiry,strike:parsed.strike,delta:delta,
             bid:bid,ask:ask,mid:mid,iv:iv,
-            iv30:iv30raw?Number(iv30raw)*100:null,
+            iv30:iv30raw?Number(iv30raw):null,
             ivRank:ivRank,annualPct:annual,dte:dte,capital:capital,
           });
         }
