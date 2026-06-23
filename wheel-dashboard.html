@@ -864,19 +864,150 @@ function CloseModal({pos,commPerSide,onConfirm,onClose}){
   );
 }
 
+/* ══ 观察列表 ══════════════════════════════════════ */
+const DEFAULT_WATCHLIST = ['IBIT','SMH','MRVL','MU','IAU','QQQ','SOFI','VOO','QQQM','GLD'];
+const WL_KEY = 'whl-watchlist';
+
+function getWatchlist(){
+  try{
+    const s=localStorage.getItem(WL_KEY);
+    return s?JSON.parse(s):DEFAULT_WATCHLIST;
+  }catch{return DEFAULT_WATCHLIST;}
+}
+function saveWatchlist(list){
+  try{localStorage.setItem(WL_KEY,JSON.stringify(list));}catch{}
+}
+
+function WatchlistPanel(){
+  const [tickers,setTickers]=useState(()=>getWatchlist());
+  const [newTicker,setNewTicker]=useState('');
+  const [stockData,setStockData]=useState({});
+  const [loading,setLoading]=useState(false);
+  const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
+
+  const addTicker=()=>{
+    const t=newTicker.trim().toUpperCase();
+    if(!t||tickers.includes(t))return;
+    const next=[...tickers,t];
+    setTickers(next);saveWatchlist(next);setNewTicker('');
+  };
+  const removeTicker=(t)=>{
+    const next=tickers.filter(x=>x!==t);
+    setTickers(next);saveWatchlist(next);
+  };
+
+  const refreshAll=async()=>{
+    setLoading(true);
+    const results={};
+    await Promise.all(tickers.map(async ticker=>{
+      try{
+        // 股价 via Yahoo proxy
+        const res=await fetch(proxyBase+'/api/quote/'+ticker,{signal:AbortSignal.timeout(8000)});
+        const d=await res.json();
+        results[ticker]={price:d.price||null};
+      }catch{results[ticker]={price:null};}
+      // CBOE 期权数据（获取 iv30 等）
+      try{
+        const res2=await fetch(proxyBase+'/api/cboe/'+ticker,{signal:AbortSignal.timeout(10000)});
+        if(res2.ok){
+          const cd=await res2.json();
+          const dd=cd&&cd.data;
+          if(dd){
+            results[ticker]=Object.assign(results[ticker]||{},{
+              iv30:dd.iv30?Number(dd.iv30)*100:null,
+              iv30Hi:dd.iv30_one_year_high?Number(dd.iv30_one_year_high)*100:null,
+              iv30Lo:dd.iv30_one_year_low?Number(dd.iv30_one_year_low)*100:null,
+              volume:dd.seqno||null,
+            });
+          }
+        }
+      }catch{}
+    }));
+    setStockData(results);setLoading(false);
+  };
+
+  useEffect(()=>{if(tickers.length)refreshAll();},[]);
+
+  const fmt2=(v,d)=>v==null?'--':Number(v).toFixed(d==null?2:d);
+  const cellStyle={padding:'10px 12px',fontFamily:'IBM Plex Mono,monospace',fontSize:13};
+
+  return(
+    <div>
+      <div style={{marginBottom:16,display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10}}>
+        <div>
+          <div style={{fontSize:17,fontWeight:700,color:V('ink')}}>{'观察列表'}</div>
+          <div style={{fontSize:12,color:V('faint'),marginTop:2}}>{'管理标的池，筛选器将从此列表扫描'}</div>
+        </div>
+        <button onClick={refreshAll} disabled={loading} className="btn" style={{background:loading?V('line'):ACC.blueBg,color:loading?V('faint'):ACC.blue,border:'1.5px solid '+(loading?V('line'):ACC.blue+'44'),fontWeight:500,padding:'8px 16px'}}>
+          {loading?'拉取中...':'↻ 刷新行情'}
+        </button>
+      </div>
+
+      <div className="card" style={{padding:'14px 18px',marginBottom:16,display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+        <input type="text" value={newTicker} onChange={e=>setNewTicker(e.target.value.toUpperCase())}
+          onKeyDown={e=>{if(e.key==='Enter')addTicker();}}
+          placeholder="输入标的代码，如 AAPL"
+          style={{flex:1,minWidth:140,padding:'8px 12px',background:V('surface'),border:'1px solid '+V('line'),borderRadius:8,color:V('ink'),fontSize:14,fontFamily:'IBM Plex Mono,monospace'}}/>
+        <button onClick={addTicker} className="btn" style={{background:ACC.amberSoft,color:ACC.amber,border:'1.5px solid '+ACC.amber+'44',fontWeight:600,padding:'8px 16px'}}>
+          {'+ 添加'}
+        </button>
+      </div>
+
+      {tickers.length>0&&(
+        <div style={{overflowX:'auto'}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 0.5fr',gap:0,padding:'0 0 8px',marginBottom:4,minWidth:500}}>
+            {['标的','股价','IV30','IV Rank','操作'].map(h=>(
+              <div key={h} style={{fontSize:10,color:V('faint'),letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',padding:'0 12px'}}>{h}</div>
+            ))}
+          </div>
+
+          {tickers.map(t=>{
+            const d=stockData[t]||{};
+            const ivRank=(d.iv30!=null&&d.iv30Hi!=null&&d.iv30Lo!=null&&d.iv30Hi>d.iv30Lo)?Math.round((d.iv30-d.iv30Lo)/(d.iv30Hi-d.iv30Lo)*100):null;
+            const ivColor=ivRank==null?V('faint'):(ivRank>=70?ACC.profit:(ivRank>=40?ACC.amber:V('dim')));
+            return(
+              <div key={t} className="card" style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 0.5fr',gap:0,marginBottom:6,minWidth:500}}>
+                <div style={cellStyle}>
+                  <span style={{fontWeight:700,fontSize:15,color:V('ink')}}>{t}</span>
+                </div>
+                <div style={cellStyle}>
+                  <span style={{color:d.price?V('ink'):V('faint')}}>{d.price?('$'+fmt2(d.price)):'--'}</span>
+                </div>
+                <div style={cellStyle}>
+                  <span style={{color:V('dim')}}>{d.iv30!=null?(fmt2(d.iv30,1)+'%'):'--'}</span>
+                </div>
+                <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',gap:8})}>
+                  <span style={{color:ivColor,fontWeight:600}}>{ivRank!=null?(ivRank+'%'):'--'}</span>
+                  {ivRank!=null&&(
+                    <div style={{height:4,borderRadius:2,background:V('line'),width:40,flexShrink:0}}>
+                      <div style={{height:4,borderRadius:2,width:(ivRank+'%'),background:ivColor}}/>
+                    </div>
+                  )}
+                </div>
+                <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center'})}>
+                  <button onClick={()=>removeTicker(t)} style={{background:'none',border:'none',color:ACC.loss,cursor:'pointer',fontSize:14,padding:'2px 8px'}}>{'✕'}</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {!tickers.length&&(
+        <div style={{textAlign:'center',padding:'40px 20px',color:V('faint'),border:'1.5px dashed '+V('line'),borderRadius:16}}>
+          <div style={{fontSize:15,marginBottom:6,color:V('dim')}}>{'观察列表为空'}</div>
+          <div style={{fontSize:12}}>{'在上方输入标的代码添加'}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ══ 期权筛选器 ══════════════════════════════════════ */
-const SCAN_WATCHLIST = [
-  {ticker:'IBIT', name:'iShares Bitcoin Trust',  sector:'加密'},
-  {ticker:'SMH',  name:'半导体 ETF',              sector:'科技'},
-  {ticker:'MRVL', name:'Marvell Technology',      sector:'科技'},
-  {ticker:'MU',   name:'Micron Technology',       sector:'科技'},
-  {ticker:'IAU',  name:'iShares Gold Trust',      sector:'贵金属'},
-  {ticker:'QQQ',  name:'Nasdaq 100 ETF',          sector:'科技'},
-  {ticker:'SOFI', name:'SoFi Technologies',       sector:'金融'},
-  {ticker:'VOO',  name:'S&P 500 ETF',             sector:'大盘'},
-  {ticker:'QQQM', name:'Nasdaq 100 ETF Mini',     sector:'科技'},
-  {ticker:'GLD',  name:'SPDR Gold Shares',        sector:'贵金属'},
-];
+// 从观察列表动态读取标的池
+function getScanWatchlist(){
+  return getWatchlist().map(t=>({ticker:t,name:t,sector:''}));
+}
 
 function parseOCCCode(code){
   const mm=/^([A-Z]+)(\d{6})([CP])(\d{8})$/.exec(code||'');
@@ -897,11 +1028,11 @@ function ScanPanel(){
   const [error,setError]=useState('');
   const [sortKey,setSortKey]=useState('annualPct');
   const [filterSector,setFilterSector]=useState('全部');
-  const [minDte,setMinDte]=useState(25);
-  const [maxDte,setMaxDte]=useState(50);
-  const [minDelta,setMinDelta]=useState(0.06);
-  const [maxDelta,setMaxDelta]=useState(0.18);
-  const [minAnnual,setMinAnnual]=useState(5);
+  const [minDte,setMinDte]=useState('25');
+  const [maxDte,setMaxDte]=useState('50');
+  const [minDelta,setMinDelta]=useState('0.06');
+  const [maxDelta,setMaxDelta]=useState('0.18');
+  const [minAnnual,setMinAnnual]=useState('5');
 
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
 
@@ -909,7 +1040,8 @@ function ScanPanel(){
     setLoading(true);setResults([]);setError('');
     const today=new Date();
     const found=[];
-    for(const w of SCAN_WATCHLIST){
+    const SCAN_LIST=getScanWatchlist();
+    for(const w of SCAN_LIST){
       setProgress('扫描 '+w.ticker+'…');
       try{
         const res=await fetch(proxyBase+'/api/cboe/'+w.ticker,{signal:AbortSignal.timeout(12000)});
@@ -931,9 +1063,9 @@ function ScanPanel(){
           if(!parsed||parsed.type!=='put')continue;
           const expDate=new Date(parsed.expiry+'T00:00:00Z');
           const dte=Math.round((expDate-today)/86400000);
-          if(dte<minDte||dte>maxDte)continue;
+          if(dte<Number(minDte)||dte>Number(maxDte))continue;
           const delta=Math.abs(Number(o.delta)||0);
-          if(delta<minDelta||delta>maxDelta)continue;
+          if(delta<Number(minDelta)||delta>Number(maxDelta))continue;
           const bid=Number(o.bid)||0;
           const ask=Number(o.ask)||0;
           const mid=(bid+ask)/2;
@@ -943,7 +1075,7 @@ function ScanPanel(){
           const premium=mid*100;
           const netPrem=premium-0.65;
           const annual=(netPrem/capital)*(365/dte)*100;
-          if(annual<minAnnual)continue;
+          if(annual<Number(minAnnual))continue;
           found.push({
             ticker:w.ticker,name:w.name,sector:w.sector,
             stockPrice:stockPrice?Number(stockPrice):null,
@@ -969,7 +1101,7 @@ function ScanPanel(){
     setLoading(false);
   };
 
-  const sectors=['全部'].concat([...new Set(SCAN_WATCHLIST.map(w=>w.sector))]);
+  const sectors=['全部'].concat([...new Set(results.map(r=>r.sector).filter(Boolean))]);
   const filtered=filterSector==='全部'?results:results.filter(r=>r.sector===filterSector);
   const fmt2=(v,d)=>v==null?'—':Number(v).toFixed(d==null?2:d);
 
@@ -978,7 +1110,7 @@ function ScanPanel(){
   const scanBtnStyle={background:loading?V('line'):ACC.amberSoft,color:loading?V('faint'):ACC.amber,border:'1.5px solid '+(loading?V('line'):ACC.amber+'44'),fontWeight:600,padding:'8px 20px'};
 
   return(
-    <div style={{maxWidth:900}}>
+    <div>
       <div style={{marginBottom:16,display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10}}>
         <div>
           <div style={{fontSize:17,fontWeight:700,color:V('ink')}}>{'期权筛选器'}</div>
@@ -993,24 +1125,24 @@ function ScanPanel(){
         <div>
           <div style={labelStyle}>{'到期天数'}</div>
           <div style={{display:'flex',gap:6,alignItems:'center'}}>
-            <input type="number" value={minDte} onChange={e=>setMinDte(+e.target.value)} style={inputStyle}/>
+            <input type="text" inputMode="numeric" value={minDte} onChange={e=>setMinDte(e.target.value)} style={inputStyle}/>
             <span style={{color:V('faint'),fontSize:11}}>{'~'}</span>
-            <input type="number" value={maxDte} onChange={e=>setMaxDte(+e.target.value)} style={inputStyle}/>
+            <input type="text" inputMode="numeric" value={maxDte} onChange={e=>setMaxDte(e.target.value)} style={inputStyle}/>
             <span style={{color:V('faint'),fontSize:11}}>{'天'}</span>
           </div>
         </div>
         <div>
           <div style={labelStyle}>{'Delta 区间'}</div>
           <div style={{display:'flex',gap:6,alignItems:'center'}}>
-            <input type="number" step="0.01" value={minDelta} onChange={e=>setMinDelta(+e.target.value)} style={inputStyle}/>
+            <input type="text" inputMode="decimal" value={minDelta} onChange={e=>setMinDelta(e.target.value)} style={inputStyle}/>
             <span style={{color:V('faint'),fontSize:11}}>{'~'}</span>
-            <input type="number" step="0.01" value={maxDelta} onChange={e=>setMaxDelta(+e.target.value)} style={inputStyle}/>
+            <input type="text" inputMode="decimal" value={maxDelta} onChange={e=>setMaxDelta(e.target.value)} style={inputStyle}/>
           </div>
         </div>
         <div>
           <div style={labelStyle}>{'最低年化'}</div>
           <div style={{display:'flex',gap:6,alignItems:'center'}}>
-            <input type="number" value={minAnnual} onChange={e=>setMinAnnual(+e.target.value)} style={inputStyle}/>
+            <input type="text" inputMode="numeric" value={minAnnual} onChange={e=>setMinAnnual(e.target.value)} style={inputStyle}/>
             <span style={{color:V('faint'),fontSize:11}}>{'%'}</span>
           </div>
         </div>
@@ -1041,7 +1173,7 @@ function ScanPanel(){
 
       {filtered.length>0&&(
         <div style={{overflowX:'auto'}}>
-          <div style={{display:'grid',gridTemplateColumns:'80px 70px 80px 60px 60px 60px 60px 60px 70px 80px',gap:0,padding:'0 0 8px',marginBottom:4,minWidth:680}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 0.7fr 0.7fr 0.7fr 0.7fr 0.8fr 0.8fr 0.8fr',gap:0,padding:'0 0 8px',marginBottom:4,minWidth:680}}>
             {['标的','股价','行权价','DTE','Delta','Bid','Ask','中间价','IV30','年化'].map(h=>(
               <div key={h} style={{fontSize:10,color:V('faint'),letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',padding:'0 6px'}}>{h}</div>
             ))}
@@ -1051,7 +1183,7 @@ function ScanPanel(){
             const ivRankColor=r.ivRank==null?V('faint'):(r.ivRank>=70?ACC.profit:(r.ivRank>=40?ACC.amber:ACC.loss));
             const annualColor=r.annualPct>=15?ACC.profit:(r.annualPct>=8?ACC.amber:V('dim'));
             const rowBorderColor=r.ivRank>=70?ACC.profit:(r.ivRank>=40?ACC.amber:V('line'));
-            const rowStyle={display:'grid',gridTemplateColumns:'80px 70px 80px 60px 60px 60px 60px 60px 70px 80px',gap:0,padding:'10px 0',marginBottom:6,minWidth:680,borderLeft:'3px solid '+rowBorderColor};
+            const rowStyle={display:'grid',gridTemplateColumns:'1fr 1fr 1fr 0.7fr 0.7fr 0.7fr 0.7fr 0.8fr 0.8fr 0.8fr',gap:0,padding:'10px 0',marginBottom:6,minWidth:680,borderLeft:'3px solid '+rowBorderColor};
             const cellCenter={padding:'0 6px',display:'flex',alignItems:'center'};
             const cellCol={padding:'0 6px',display:'flex',flexDirection:'column',justifyContent:'center'};
             const barWidth=r.ivRank!=null?(r.ivRank+'%'):'0%';
@@ -1120,8 +1252,8 @@ function ScanPanel(){
         <div style={{textAlign:'center',padding:'60px 20px',color:V('faint'),border:'1.5px dashed '+V('line'),borderRadius:16}}>
           <div style={{fontSize:36,marginBottom:12,opacity:.3}}>{'🔍'}</div>
           <div style={{fontSize:15,marginBottom:6,color:V('dim')}}>{'点击「开始扫描」'}</div>
-          <div style={{fontSize:12}}>{'将从 '+SCAN_WATCHLIST.length+' 个标的中筛选符合条件的 Put 合约'}</div>
-          <div style={{fontSize:11,marginTop:8,color:V('faint')}}>{'标的池：'+SCAN_WATCHLIST.map(w=>w.ticker).join(' · ')}</div>
+          <div style={{fontSize:12}}>{'将从观察列表中 '+getWatchlist().length+' 个标的中筛选 Put 合约'}</div>
+          <div style={{fontSize:11,marginTop:8,color:V('faint')}}>{'标的池：'+getWatchlist().join(' · ')}</div>
         </div>
       )}
     </div>
@@ -1908,6 +2040,10 @@ function App(){
           </button>
           <div className="sidebar-sep"/>
           <div className="sidebar-section">工具</div>
+          <button className={`tab-btn${tab==='watchlist'?' active':''}`} onClick={()=>setTab('watchlist')}>
+            <span className="tab-dot" style={{background:ACC.blue}}/>
+            观察列表
+          </button>
           <button className={`tab-btn${tab==='scan'?' active':''}`} onClick={()=>setTab('scan')}>
             <span className="tab-dot" style={{background:ACC.amber}}/>
             期权筛选
@@ -1995,6 +2131,9 @@ function App(){
           {tab==='sgov'&&(
             <SgovPanel sgov={sgov} onUpdate={mutateSgov} totalMarginUsed={totalMarginUsed}/>
           )}
+
+          {/* 观察列表 Tab */}
+          {tab==='watchlist'&&<WatchlistPanel/>}
 
           {/* 期权筛选 Tab */}
           {tab==='scan'&&<ScanPanel/>}
