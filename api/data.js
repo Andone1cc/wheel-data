@@ -42,19 +42,49 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  // ── 股价代理（无需密码，走服务端请求 Yahoo）
+  // ── 股价+详情代理（无需密码，走 Yahoo quoteSummary）
   if (reqUrl?.startsWith('/api/quote/')) {
     const ticker = decodeURIComponent(reqUrl.replace('/api/quote/', '').split('?')[0]);
     try {
+      // 用 quoteSummary 获取更丰富的数据
       const r = await fetch(
-        `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`,
+        `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=price,summaryDetail,defaultKeyStatistics`,
         { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } }
       );
       const data = await r.json();
-      const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice ?? null;
-      return res.status(200).json({ ticker, price });
+      const result = data?.quoteSummary?.result?.[0];
+      const price = result?.price;
+      const summary = result?.summaryDetail;
+      const stats = result?.defaultKeyStatistics;
+      
+      return res.status(200).json({
+        ticker,
+        price: price?.regularMarketPrice?.raw ?? null,
+        marketCap: price?.marketCap?.raw ?? null,
+        marketCapFmt: price?.marketCap?.fmt ?? null,
+        volume: price?.regularMarketVolume?.raw ?? null,
+        volumeFmt: price?.regularMarketVolume?.fmt ?? null,
+        avgVolume: summary?.averageVolume?.raw ?? null,
+        avgVolumeFmt: summary?.averageVolume?.fmt ?? null,
+        change: price?.regularMarketChangePercent?.raw ?? null,
+        fiftyTwoWeekHigh: summary?.fiftyTwoWeekHigh?.raw ?? null,
+        fiftyTwoWeekLow: summary?.fiftyTwoWeekLow?.raw ?? null,
+        beta: stats?.beta?.raw ?? null,
+        shortName: price?.shortName ?? null,
+      });
     } catch (e) {
-      return res.status(502).json({ ticker, price: null, error: e.message });
+      // 降级到 v8 chart
+      try {
+        const r2 = await fetch(
+          `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`,
+          { headers: { 'User-Agent': 'Mozilla/5.0' } }
+        );
+        const d2 = await r2.json();
+        const p = d2?.chart?.result?.[0]?.meta?.regularMarketPrice ?? null;
+        return res.status(200).json({ ticker, price: p });
+      } catch (e2) {
+        return res.status(502).json({ ticker, price: null, error: e2.message });
+      }
     }
   }
 
