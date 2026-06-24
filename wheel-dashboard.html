@@ -926,25 +926,63 @@ function WatchlistPanel(){
     await fetchWatchlist();
     const currentList=tickers.length?tickers:(await fetch(proxyBase+'/api/futu/watchlist').then(r=>r.json()).then(d=>d.data||[]));
     const results={};
-    await Promise.all(currentList.map(async code=>{
+    const today=new Date();
+    for(const code of currentList){
       try{
+        // 1. 股票摘要（IV/HV/IV Rank/股价）
         const res=await fetch(proxyBase+'/api/futu/stock-option-summary?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(12000)});
         const d=await res.json();
         if(d.status==='success'&&d.data){
           const s=d.data;
           results[code]={
-            iv:s.iv,
-            hv:s.hv,
-            ivRank:s.iv_rank,
-            ivPercentile:s.iv_percentile,
-            optionVolume:s.option_volume,
-            pcRatio:s.volume_pc_ratio,
+            price:s.stock_price||s.last_price||null,
+            prevClose:s.prev_close||null,
+            iv:s.iv,hv:s.hv,
+            ivRank:s.iv_rank,ivPercentile:s.iv_percentile,
+            optionVolume:s.option_volume,pcRatio:s.volume_pc_ratio,
             openInterest:s.open_interest,
-            oiPcRatio:s.oi_pc_ratio,
           };
         }
-      }catch(e){console.warn('summary '+code+':',e.message);}
-    }));
+        // 2. 找最近月度到期日（25-50天）
+        const daysRes=await fetch(proxyBase+'/api/futu/option-days?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(8000)});
+        const daysData=await daysRes.json();
+        if(daysData.status==='success'&&Array.isArray(daysData.data)){
+          let bestDate=null;let bestDte=999;
+          for(const dd of daysData.data){
+            const exp=new Date(dd.strike_time);
+            const dte=Math.round((exp-today)/86400000);
+            if(dte>=25&&dte<=50&&dte<bestDte){bestDte=dte;bestDate=dd.strike_time.split(' ')[0];}
+          }
+          // 3. 拉这个到期日的 Put 链，找最优合约（delta 0.06-0.18 里年化最高）
+          if(bestDate){
+            const chainRes=await fetch(proxyBase+'/api/futu/option-chain?code='+encodeURIComponent(code)+'&date='+bestDate+'&option_type=PUT',{signal:AbortSignal.timeout(12000)});
+            const chainData=await chainRes.json();
+            if(chainData.status==='success'&&Array.isArray(chainData.data)){
+              let bestOpt=null;
+              for(const opt of chainData.data){
+                const d2=Math.abs(opt.delta||0);
+                if(d2<0.06||d2>0.18)continue;
+                if(!opt.mid_price||opt.mid_price<=0)continue;
+                if(!bestOpt||opt.seller_annual_return>bestOpt.seller_annual_return)bestOpt=opt;
+              }
+              if(bestOpt){
+                Object.assign(results[code]||{},{
+                  bestStrike:bestOpt.strike_price,
+                  bestMid:bestOpt.mid_price,
+                  bestDelta:bestOpt.delta,
+                  bestAnnual:bestOpt.seller_annual_return,
+                  bestIV:bestOpt.implied_volatility,
+                  bestTheta:bestOpt.theta,
+                  bestExpiry:bestDate,
+                  bestDte:bestDte,
+                  bestProb:bestOpt.profit_probability,
+                });
+              }
+            }
+          }
+        }
+      }catch(e){console.warn('refresh '+code+':',e.message);}
+    }
     setStockData(results);setLoading(false);
   };
 
@@ -978,8 +1016,8 @@ function WatchlistPanel(){
 
       {tickers.length>0&&(
         <div style={{overflowX:'auto'}}>
-          <div style={{display:'grid',gridTemplateColumns:'1.3fr 0.8fr 0.8fr 0.7fr 0.7fr 0.8fr 0.7fr 0.5fr',gap:0,padding:'0 0 8px',marginBottom:4}}>
-            {['标的','IV','HV','IV Rank','IV百分位','期权成交量','P/C比',''].map(h=>(
+          <div style={{display:'grid',gridTemplateColumns:'1fr 0.7fr 0.8fr 0.7fr 0.6fr 0.7fr 0.6fr 0.6fr 0.7fr 0.6fr 0.3fr',gap:0,padding:'0 0 8px',marginBottom:4}}>
+            {['标的','股价','IV/HV','IV Rank','最优Put','行权价','中间价','Delta','年化','胜率',''].map(h=>(
               <div key={h} style={{fontSize:10,color:V('faint'),letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',padding:'0 10px'}}>{h}</div>
             ))}
           </div>
@@ -990,32 +1028,44 @@ function WatchlistPanel(){
             const rankVal=d.ivRank;
             const rankColor=rankVal==null?V('faint'):(rankVal>=70?ACC.profit:(rankVal>=40?ACC.amber:V('dim')));
             return(
-              <div key={t} className="card" style={{display:'grid',gridTemplateColumns:'1.3fr 0.8fr 0.8fr 0.7fr 0.7fr 0.8fr 0.7fr 0.5fr',gap:0,marginBottom:6,borderLeft:'3px solid '+rankColor}}>
+              <div key={t} className="card" style={{display:'grid',gridTemplateColumns:'1fr 0.7fr 0.8fr 0.7fr 0.6fr 0.7fr 0.6fr 0.6fr 0.7fr 0.6fr 0.3fr',gap:0,marginBottom:6,borderLeft:'3px solid '+rankColor}}>
                 <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',gap:10})}>
                   <span style={{fontWeight:700,fontSize:15,color:V('ink')}}>{display}</span>
                 </div>
                 <div style={cellStyle}>
-                  <span style={{color:V('dim')}}>{d.iv!=null?(d.iv.toFixed(1)+'%'):'--'}</span>
+                  <span style={{color:d.price?V('ink'):V('faint'),fontWeight:600}}>{d.price?('$'+fmt2(d.price)):'--'}</span>
                 </div>
                 <div style={cellStyle}>
-                  <span style={{color:V('dim')}}>{d.hv!=null?(d.hv.toFixed(1)+'%'):'--'}</span>
+                  <div><span style={{color:V('dim'),fontSize:12}}>{'IV '}</span><span style={{color:V('ink')}}>{d.iv!=null?(d.iv.toFixed(1)+'%'):'--'}</span></div>
+                  <div><span style={{color:V('dim'),fontSize:12}}>{'HV '}</span><span style={{color:V('faint')}}>{d.hv!=null?(d.hv.toFixed(1)+'%'):'--'}</span></div>
                 </div>
                 <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',gap:6})}>
                   <span style={{color:rankColor,fontWeight:600}}>{rankVal!=null?rankVal:'--'}</span>
                   {rankVal!=null&&(
-                    <div style={{height:4,borderRadius:2,background:V('line'),width:30,flexShrink:0}}>
+                    <div style={{height:4,borderRadius:2,background:V('line'),width:24,flexShrink:0}}>
                       <div style={{height:4,borderRadius:2,width:(Math.min(rankVal,100)+'%'),background:rankColor}}/>
                     </div>
                   )}
                 </div>
                 <div style={cellStyle}>
-                  <span style={{color:V('dim')}}>{d.ivPercentile!=null?(d.ivPercentile.toFixed(1)+'%'):'--'}</span>
+                  {d.bestExpiry?<span style={{color:V('dim'),fontSize:11}}>{d.bestExpiry+' ('+d.bestDte+'天)'}</span>:<span style={{color:V('faint')}}>{'--'}</span>}
                 </div>
                 <div style={cellStyle}>
-                  <span style={{color:V('dim')}}>{d.optionVolume!=null?d.optionVolume.toLocaleString():'--'}</span>
+                  <span style={{color:d.bestStrike?ACC.amber:V('faint'),fontWeight:600}}>{d.bestStrike?('$'+fmt2(d.bestStrike,0)):'--'}</span>
                 </div>
                 <div style={cellStyle}>
-                  <span style={{color:V('dim')}}>{d.pcRatio!=null?d.pcRatio.toFixed(2):'--'}</span>
+                  <span style={{color:d.bestMid?V('ink'):V('faint'),fontWeight:600}}>{d.bestMid?('$'+fmt2(d.bestMid,2)):'--'}</span>
+                </div>
+                <div style={cellStyle}>
+                  <span style={{color:V('dim')}}>{d.bestDelta!=null?fmt2(d.bestDelta,3):'--'}</span>
+                </div>
+                <div style={cellStyle}>
+                  {d.bestAnnual!=null?(
+                    <span style={{color:d.bestAnnual>=15?ACC.profit:(d.bestAnnual>=8?ACC.amber:V('dim')),fontWeight:700}}>{'+'+fmt2(d.bestAnnual,1)+'%'}</span>
+                  ):<span style={{color:V('faint')}}>{'--'}</span>}
+                </div>
+                <div style={cellStyle}>
+                  <span style={{color:d.bestProb!=null&&d.bestProb>=80?ACC.profit:V('dim')}}>{d.bestProb!=null?(d.bestProb.toFixed(0)+'%'):'--'}</span>
                 </div>
                 <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',justifyContent:'center'})}>
                   <button onClick={()=>removeTicker(t)} style={{background:'none',border:'none',color:ACC.loss,cursor:'pointer',fontSize:11,padding:'2px 6px',opacity:.6}}>{'\u2715'}</button>
@@ -1091,6 +1141,7 @@ function ScanPanel(){
         const daysData=await daysRes.json();
         if(daysData.status!=='success'||!Array.isArray(daysData.data))continue;
 
+        console.log(display+' 到期日数量:',daysData.data.length,daysData.data.map(d=>d.strike_time).slice(0,5));
         // 2. 筛选 DTE 在范围内的到期日
         const validDates=daysData.data.filter(d=>{
           const exp=new Date(d.strike_time);
@@ -1107,6 +1158,7 @@ function ScanPanel(){
           if(sumData.status==='success')stockSummary=sumData.data||{};
         }catch{}
 
+        console.log(display+' 符合DTE的日期:',validDates.length,validDates.map(d=>d.strike_time.split(' ')[0]));
         // 4. 对每个到期日拉 Put 期权链
         for(const dateObj of validDates){
           const dateStr=dateObj.strike_time.split(' ')[0];
@@ -1118,6 +1170,7 @@ function ScanPanel(){
           const dte=Math.round((exp-today)/86400000);
           if(dte<=0)continue;
 
+          console.log(display+' '+dateStr+' Put数量:',chainData.data.length);
           for(const opt of chainData.data){
             const delta=Math.abs(opt.delta||0);
             if(delta<Number(minDelta)||delta>Number(maxDelta))continue;
