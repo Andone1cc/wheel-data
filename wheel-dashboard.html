@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Wheel Data · 期权年化追踪</title>
+<title>Wheel Dashboard · 期权年化追踪</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -885,43 +885,69 @@ function WatchlistPanel(){
   const [loading,setLoading]=useState(false);
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
 
-  const addTicker=()=>{
-    const t=newTicker.trim().toUpperCase();
-    if(!t||tickers.includes(t))return;
-    const next=[...tickers,t];
-    setTickers(next);saveWatchlist(next);setNewTicker('');
+  // ── 富途 API 管理观察列表 ──
+  const fetchWatchlist=async()=>{
+    try{
+      const res=await fetch(proxyBase+'/api/futu/watchlist',{signal:AbortSignal.timeout(8000)});
+      const d=await res.json();
+      if(d.status==='success'&&Array.isArray(d.data)){
+        setTickers(d.data);
+      }
+    }catch(e){console.warn('fetchWatchlist:',e.message);}
   };
-  const removeTicker=(t)=>{
-    const next=tickers.filter(x=>x!==t);
-    setTickers(next);saveWatchlist(next);
+
+  const addTicker=async()=>{
+    let t=newTicker.trim().toUpperCase();
+    if(!t)return;
+    if(!t.startsWith('US.')&&!t.startsWith('HK.'))t='US.'+t;
+    if(tickers.includes(t))return;
+    try{
+      await fetch(proxyBase+'/api/futu/watchlist/add',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({code:t}),signal:AbortSignal.timeout(8000)
+      });
+      setNewTicker('');
+      await fetchWatchlist();
+    }catch(e){console.warn('addTicker:',e.message);}
+  };
+
+  const removeTicker=async(t)=>{
+    try{
+      await fetch(proxyBase+'/api/futu/watchlist/delete',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({code:t}),signal:AbortSignal.timeout(8000)
+      });
+      await fetchWatchlist();
+    }catch(e){console.warn('removeTicker:',e.message);}
   };
 
   const refreshAll=async()=>{
     setLoading(true);
+    await fetchWatchlist();
+    const currentList=tickers.length?tickers:(await fetch(proxyBase+'/api/futu/watchlist').then(r=>r.json()).then(d=>d.data||[]));
     const results={};
-    await Promise.all(tickers.map(async ticker=>{
+    await Promise.all(currentList.map(async code=>{
       try{
-        const res=await fetch(proxyBase+'/api/cboe/'+ticker,{signal:AbortSignal.timeout(12000)});
-        if(!res.ok)return;
-        const cd=await res.json();
-        const dd=cd&&cd.data;
-        if(!dd)return;
-        results[ticker]={
-          price:dd.current_price?Number(dd.current_price):null,
-          close:dd.close?Number(dd.close):null,
-          iv30:dd.iv30?Number(dd.iv30):null,
-          iv30Hi:dd.iv30_one_year_high?Number(dd.iv30_one_year_high):null,
-          iv30Lo:dd.iv30_one_year_low?Number(dd.iv30_one_year_low):null,
-          iv30Change:dd.iv30_change?Number(dd.iv30_change):null,
-          hv20:dd.hv20?Number(dd.hv20):null,
-          hv50:dd.hv50?Number(dd.hv50):null,
-        };
-      }catch(e){
-        console.warn('CBOE fetch '+ticker+':',e.message);
-      }
+        const res=await fetch(proxyBase+'/api/futu/stock-option-summary?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(12000)});
+        const d=await res.json();
+        if(d.status==='success'&&d.data){
+          const s=d.data;
+          results[code]={
+            iv:s.iv,
+            hv:s.hv,
+            ivRank:s.iv_rank,
+            ivPercentile:s.iv_percentile,
+            optionVolume:s.option_volume,
+            pcRatio:s.volume_pc_ratio,
+            openInterest:s.open_interest,
+            oiPcRatio:s.oi_pc_ratio,
+          };
+        }
+      }catch(e){console.warn('summary '+code+':',e.message);}
     }));
     setStockData(results);setLoading(false);
   };
+
 
   useEffect(()=>{if(tickers.length)refreshAll();},[]);
 
@@ -952,49 +978,47 @@ function WatchlistPanel(){
 
       {tickers.length>0&&(
         <div style={{overflowX:'auto'}}>
-          <div style={{display:'grid',gridTemplateColumns:'1.2fr 1fr 0.8fr 0.8fr 0.8fr 0.8fr 0.5fr',gap:0,padding:'0 0 8px',marginBottom:4,minWidth:580}}>
-            {['标的','股价','IV30','IV30变化','HV20','HV50','IV Rank'].map(h=>(
+          <div style={{display:'grid',gridTemplateColumns:'1.3fr 0.8fr 0.8fr 0.7fr 0.7fr 0.8fr 0.7fr 0.5fr',gap:0,padding:'0 0 8px',marginBottom:4}}>
+            {['标的','IV','HV','IV Rank','IV百分位','期权成交量','P/C比',''].map(h=>(
               <div key={h} style={{fontSize:10,color:V('faint'),letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',padding:'0 10px'}}>{h}</div>
             ))}
-            <div style={{width:30}}/>
           </div>
 
           {tickers.map(t=>{
             const d=stockData[t]||{};
-            const ivRank=(d.iv30!=null&&d.iv30Hi!=null&&d.iv30Lo!=null&&d.iv30Hi>d.iv30Lo)?Math.round((d.iv30-d.iv30Lo)/(d.iv30Hi-d.iv30Lo)*100):null;
-            const ivColor=ivRank==null?V('faint'):(ivRank>=70?ACC.profit:(ivRank>=40?ACC.amber:V('dim')));
-            const iv30Chg=d.iv30Change;
-            const iv30ChgColor=iv30Chg==null?V('faint'):(iv30Chg>0?ACC.loss:ACC.profit);
+            const display=t.replace(/^US\./,'').replace(/^HK\./,'');
+            const rankVal=d.ivRank;
+            const rankColor=rankVal==null?V('faint'):(rankVal>=70?ACC.profit:(rankVal>=40?ACC.amber:V('dim')));
             return(
-              <div key={t} className="card" style={{display:'grid',gridTemplateColumns:'1.2fr 1fr 0.8fr 0.8fr 0.8fr 0.8fr 0.5fr',gap:0,marginBottom:6,minWidth:580,borderLeft:'3px solid '+ivColor}}>
-                <div style={cellStyle}>
-                  <span style={{fontWeight:700,fontSize:15,color:V('ink')}}>{t}</span>
+              <div key={t} className="card" style={{display:'grid',gridTemplateColumns:'1.3fr 0.8fr 0.8fr 0.7fr 0.7fr 0.8fr 0.7fr 0.5fr',gap:0,marginBottom:6,borderLeft:'3px solid '+rankColor}}>
+                <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',gap:10})}>
+                  <span style={{fontWeight:700,fontSize:15,color:V('ink')}}>{display}</span>
                 </div>
                 <div style={cellStyle}>
-                  <span style={{color:d.price?V('ink'):V('faint'),fontWeight:600}}>{d.price?('$'+fmt2(d.price)):'--'}</span>
+                  <span style={{color:V('dim')}}>{d.iv!=null?(d.iv.toFixed(1)+'%'):'--'}</span>
                 </div>
                 <div style={cellStyle}>
-                  <span style={{color:V('dim')}}>{d.iv30!=null?(fmt2(d.iv30,1)+'%'):'--'}</span>
-                </div>
-                <div style={cellStyle}>
-                  <span style={{color:iv30ChgColor}}>{iv30Chg!=null?((iv30Chg>0?'+':'')+fmt2(iv30Chg,2)):'--'}</span>
-                </div>
-                <div style={cellStyle}>
-                  <span style={{color:V('dim')}}>{d.hv20!=null?(fmt2(d.hv20,1)+'%'):'--'}</span>
-                </div>
-                <div style={cellStyle}>
-                  <span style={{color:V('dim')}}>{d.hv50!=null?(fmt2(d.hv50,1)+'%'):'--'}</span>
+                  <span style={{color:V('dim')}}>{d.hv!=null?(d.hv.toFixed(1)+'%'):'--'}</span>
                 </div>
                 <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',gap:6})}>
-                  <span style={{color:ivColor,fontWeight:600,fontSize:13}}>{ivRank!=null?(ivRank+'%'):'--'}</span>
-                  {ivRank!=null&&(
+                  <span style={{color:rankColor,fontWeight:600}}>{rankVal!=null?rankVal:'--'}</span>
+                  {rankVal!=null&&(
                     <div style={{height:4,borderRadius:2,background:V('line'),width:30,flexShrink:0}}>
-                      <div style={{height:4,borderRadius:2,width:(ivRank+'%'),background:ivColor}}/>
+                      <div style={{height:4,borderRadius:2,width:(Math.min(rankVal,100)+'%'),background:rankColor}}/>
                     </div>
                   )}
                 </div>
+                <div style={cellStyle}>
+                  <span style={{color:V('dim')}}>{d.ivPercentile!=null?(d.ivPercentile.toFixed(1)+'%'):'--'}</span>
+                </div>
+                <div style={cellStyle}>
+                  <span style={{color:V('dim')}}>{d.optionVolume!=null?d.optionVolume.toLocaleString():'--'}</span>
+                </div>
+                <div style={cellStyle}>
+                  <span style={{color:V('dim')}}>{d.pcRatio!=null?d.pcRatio.toFixed(2):'--'}</span>
+                </div>
                 <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',justifyContent:'center'})}>
-                  <button onClick={()=>removeTicker(t)} style={{background:'none',border:'none',color:ACC.loss,cursor:'pointer',fontSize:13,padding:'2px 6px'}}>{'\u2715'}</button>
+                  <button onClick={()=>removeTicker(t)} style={{background:'none',border:'none',color:ACC.loss,cursor:'pointer',fontSize:11,padding:'2px 6px',opacity:.6}}>{'\u2715'}</button>
                 </div>
               </div>
             );
@@ -1049,55 +1073,88 @@ function ScanPanel(){
     setLoading(true);setResults([]);setError('');
     const today=new Date();
     const found=[];
-    const SCAN_LIST=getScanWatchlist();
-    for(const w of SCAN_LIST){
-      setProgress('扫描 '+w.ticker+'…');
-      try{
-        const res=await fetch(proxyBase+'/api/cboe/'+w.ticker,{signal:AbortSignal.timeout(12000)});
-        if(!res.ok)continue;
-        const data=await res.json();
-        const opts=data&&data.data&&data.data.options;
-        const stockPrice=data&&data.data&&(data.data.current_price||data.data.close)||null;
-        const iv30raw=data&&data.data&&data.data.iv30||null;
-        const iv30Hi=data&&data.data&&data.data.iv30_one_year_high||null;
-        const iv30Lo=data&&data.data&&data.data.iv30_one_year_low||null;
-        let ivRank=null;
-        if(iv30raw!=null&&iv30Hi!=null&&iv30Lo!=null&&iv30Hi>iv30Lo){
-          ivRank=Math.round((Number(iv30raw)-Number(iv30Lo))/(Number(iv30Hi)-Number(iv30Lo))*100);
-        }
-        if(!Array.isArray(opts)||!opts.length)continue;
+    // 从富途获取观察列表
+    let watchlist=[];
+    try{
+      const wlRes=await fetch(proxyBase+'/api/futu/watchlist',{signal:AbortSignal.timeout(8000)});
+      const wlData=await wlRes.json();
+      watchlist=wlData.data||[];
+    }catch{watchlist=getWatchlist().map(t=>t.startsWith('US.')?t:'US.'+t);}
+    if(!watchlist.length){setError('观察列表为空，请先在观察列表 Tab 添加标的');setLoading(false);return;}
 
-        for(const o of opts){
-          const parsed=parseOCCCode(o.option);
-          if(!parsed||parsed.type!=='put')continue;
-          const expDate=new Date(parsed.expiry+'T00:00:00Z');
-          const dte=Math.round((expDate-today)/86400000);
-          if(dte<Number(minDte)||dte>Number(maxDte))continue;
-          const delta=Math.abs(Number(o.delta)||0);
-          if(delta<Number(minDelta)||delta>Number(maxDelta))continue;
-          const bid=Number(o.bid)||0;
-          const ask=Number(o.ask)||0;
-          const mid=(bid+ask)/2;
-          const iv=Number(o.iv)||null;
-          if(mid<=0)continue;
-          const capital=parsed.strike*100;
-          const premium=mid*100;
-          const netPrem=premium-0.65;
-          const annual=(netPrem/capital)*(365/dte)*100;
-          if(annual<Number(minAnnual))continue;
-          found.push({
-            ticker:w.ticker,name:w.name,sector:w.sector,
-            stockPrice:stockPrice?Number(stockPrice):null,
-            expiry:parsed.expiry,strike:parsed.strike,delta:delta,
-            bid:bid,ask:ask,mid:mid,iv:iv,
-            iv30:iv30raw?Number(iv30raw):null,
-            ivRank:ivRank,annualPct:annual,dte:dte,capital:capital,
-          });
+    for(const code of watchlist){
+      const display=code.replace(/^US\./,'').replace(/^HK\./,'');
+      setProgress('扫描 '+display+'…');
+      try{
+        // 1. 获取到期日列表
+        const daysRes=await fetch(proxyBase+'/api/futu/option-days?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(10000)});
+        const daysData=await daysRes.json();
+        if(daysData.status!=='success'||!Array.isArray(daysData.data))continue;
+
+        // 2. 筛选 DTE 在范围内的到期日
+        const validDates=daysData.data.filter(d=>{
+          const exp=new Date(d.strike_time);
+          const dte=Math.round((exp-today)/86400000);
+          return dte>=Number(minDte)&&dte<=Number(maxDte);
+        });
+        if(!validDates.length)continue;
+
+        // 3. 获取正股摘要（IV/HV/IV Rank）
+        let stockSummary={};
+        try{
+          const sumRes=await fetch(proxyBase+'/api/futu/stock-option-summary?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(10000)});
+          const sumData=await sumRes.json();
+          if(sumData.status==='success')stockSummary=sumData.data||{};
+        }catch{}
+
+        // 4. 对每个到期日拉 Put 期权链
+        for(const dateObj of validDates){
+          const dateStr=dateObj.strike_time.split(' ')[0];
+          const chainRes=await fetch(proxyBase+'/api/futu/option-chain?code='+encodeURIComponent(code)+'&date='+dateStr+'&option_type=PUT',{signal:AbortSignal.timeout(12000)});
+          const chainData=await chainRes.json();
+          if(chainData.status!=='success'||!Array.isArray(chainData.data))continue;
+
+          const exp=new Date(dateStr);
+          const dte=Math.round((exp-today)/86400000);
+          if(dte<=0)continue;
+
+          for(const opt of chainData.data){
+            const delta=Math.abs(opt.delta||0);
+            if(delta<Number(minDelta)||delta>Number(maxDelta))continue;
+            const annual=opt.seller_annual_return||0;
+            if(annual<Number(minAnnual))continue;
+            const mid=opt.mid_price||0;
+            if(mid<=0)continue;
+
+            found.push({
+              ticker:display,
+              code:opt.code,
+              stockPrice:null,
+              expiry:dateStr,
+              strike:opt.strike_price,
+              delta:delta,
+              bid:opt.bid_price||0,
+              ask:opt.ask_price||0,
+              mid:mid,
+              iv:opt.implied_volatility||null,
+              theta:opt.theta||null,
+              gamma:opt.gamma||null,
+              openInterest:opt.open_interest||0,
+              annualPct:annual,
+              profitProb:opt.profit_probability||null,
+              dte:dte,
+              ivRank:stockSummary.iv_rank||null,
+              ivPct:stockSummary.iv_percentile||null,
+              stockIV:stockSummary.iv||null,
+              stockHV:stockSummary.hv||null,
+            });
+          }
         }
       }catch(err){
-        console.warn('Scan '+w.ticker+':',err.message);
+        console.warn('Scan '+code+':',err.message);
       }
     }
+    // 同一标的+到期日只取年化最高的
     const best={};
     for(const r of found){
       const key=r.ticker+'-'+r.expiry;
@@ -1106,7 +1163,7 @@ function ScanPanel(){
     const sorted=Object.values(best).sort((a,b)=>b[sortKey]-a[sortKey]);
     setResults(sorted);
     setProgress('');
-    if(!sorted.length)setError('未找到符合条件的合约，可放宽 Delta 或到期天数范围');
+    if(!sorted.length)setError('未找到符合条件的合约，请放宽筛选条件或检查富途 API 连接');
     setLoading(false);
   };
 
@@ -1182,62 +1239,36 @@ function ScanPanel(){
 
       {filtered.length>0&&(
         <div style={{overflowX:'auto'}}>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 0.7fr 0.7fr 0.7fr 0.7fr 0.8fr 0.8fr 0.8fr',gap:0,padding:'0 0 8px',marginBottom:4,minWidth:680}}>
-            {['标的','股价','行权价','DTE','Delta','Bid','Ask','中间价','IV30','年化'].map(h=>(
+          <div style={{display:'grid',gridTemplateColumns:'1.2fr 1fr 0.7fr 0.7fr 0.7fr 0.7fr 0.8fr 0.7fr 0.8fr 0.7fr',gap:0,padding:'0 0 8px',marginBottom:4,minWidth:680}}>
+            {['标的','行权价','DTE','Delta','Bid','Ask','中间价','IV','年化','胜率'].map(h=>(
               <div key={h} style={{fontSize:10,color:V('faint'),letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',padding:'0 6px'}}>{h}</div>
             ))}
           </div>
 
           {filtered.map((r,i)=>{
-            const ivRankColor=r.ivRank==null?V('faint'):(r.ivRank>=70?ACC.profit:(r.ivRank>=40?ACC.amber:ACC.loss));
             const annualColor=r.annualPct>=15?ACC.profit:(r.annualPct>=8?ACC.amber:V('dim'));
+            const ivRankColor=r.ivRank==null?V('faint'):(r.ivRank>=70?ACC.profit:(r.ivRank>=40?ACC.amber:V('dim')));
             const rowBorderColor=r.ivRank>=70?ACC.profit:(r.ivRank>=40?ACC.amber:V('line'));
-            const rowStyle={display:'grid',gridTemplateColumns:'1fr 1fr 1fr 0.7fr 0.7fr 0.7fr 0.7fr 0.8fr 0.8fr 0.8fr',gap:0,padding:'10px 0',marginBottom:6,minWidth:680,borderLeft:'3px solid '+rowBorderColor};
-            const cellCenter={padding:'0 6px',display:'flex',alignItems:'center'};
-            const cellCol={padding:'0 6px',display:'flex',flexDirection:'column',justifyContent:'center'};
-            const barWidth=r.ivRank!=null?(r.ivRank+'%'):'0%';
+            const rowStyle={display:'grid',gridTemplateColumns:'1.2fr 1fr 0.7fr 0.7fr 0.7fr 0.7fr 0.8fr 0.7fr 0.8fr 0.7fr',gap:0,padding:'10px 0',marginBottom:6,borderLeft:'3px solid '+rowBorderColor};
+            const cc={padding:'0 6px',display:'flex',alignItems:'center'};
             return(
               <div key={i} className="card" style={rowStyle}>
                 <div style={{padding:'0 6px'}}>
                   <div style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:14,color:V('ink')}}>{r.ticker}</div>
-                  <div style={{fontSize:10,color:V('faint'),marginTop:1}}>{r.sector}</div>
-                  {r.ivRank!=null&&(
-                    <div style={{fontSize:10,fontFamily:'IBM Plex Mono,monospace',color:ivRankColor,marginTop:2}}>{'IVR '+r.ivRank}</div>
-                  )}
+                  {r.stockIV!=null&&<div style={{fontSize:10,color:V('faint'),marginTop:1}}>{'IV '+r.stockIV.toFixed(1)+'%'}</div>}
                 </div>
-                <div style={cellCenter}>
-                  <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('ink')}}>{r.stockPrice?('$'+r.stockPrice.toFixed(2)):'—'}</span>
-                </div>
-                <div style={cellCol}>
+                <div style={{padding:'0 6px',display:'flex',flexDirection:'column',justifyContent:'center'}}>
                   <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,color:ACC.amber,fontWeight:600}}>{'$'+fmt2(r.strike,0)}</span>
                   <span style={{fontSize:10,color:V('faint'),marginTop:1}}>{r.expiry}</span>
                 </div>
-                <div style={cellCenter}>
-                  <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:r.dte<=35?ACC.profit:V('dim')}}>{r.dte+'天'}</span>
-                </div>
-                <div style={cellCenter}>
-                  <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('ink')}}>{'-'+fmt2(r.delta,3)}</span>
-                </div>
-                <div style={cellCenter}>
-                  <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('dim')}}>{'$'+fmt2(r.bid)}</span>
-                </div>
-                <div style={cellCenter}>
-                  <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('dim')}}>{'$'+fmt2(r.ask)}</span>
-                </div>
-                <div style={cellCenter}>
-                  <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,fontWeight:600,color:V('ink')}}>{'$'+fmt2(r.mid)}</span>
-                </div>
-                <div style={cellCol}>
-                  <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('dim')}}>{r.iv30!=null?(fmt2(r.iv30,1)+'%'):'—'}</span>
-                  {r.ivRank!=null&&(
-                    <div style={{marginTop:3,height:3,borderRadius:2,background:V('line'),width:40}}>
-                      <div style={{height:3,borderRadius:2,width:barWidth,background:ivRankColor}}/>
-                    </div>
-                  )}
-                </div>
-                <div style={cellCenter}>
-                  <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:15,fontWeight:700,color:annualColor}}>{'+'+fmt2(r.annualPct,1)+'%'}</span>
-                </div>
+                <div style={cc}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:r.dte<=35?ACC.profit:V('dim')}}>{r.dte+'天'}</span></div>
+                <div style={cc}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('ink')}}>{'-'+fmt2(r.delta,3)}</span></div>
+                <div style={cc}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('dim')}}>{'$'+fmt2(r.bid)}</span></div>
+                <div style={cc}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('dim')}}>{'$'+fmt2(r.ask)}</span></div>
+                <div style={cc}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,fontWeight:600,color:V('ink')}}>{'$'+fmt2(r.mid)}</span></div>
+                <div style={cc}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('dim')}}>{r.iv!=null?(r.iv.toFixed(1)+'%'):'--'}</span></div>
+                <div style={cc}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:15,fontWeight:700,color:annualColor}}>{'+'+fmt2(r.annualPct,1)+'%'}</span></div>
+                <div style={cc}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:r.profitProb!=null&&r.profitProb>=80?ACC.profit:V('dim')}}>{r.profitProb!=null?(r.profitProb.toFixed(0)+'%'):'--'}</span></div>
               </div>
             );
           })}
