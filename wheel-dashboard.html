@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Wheel Dashboard · 期权年化追踪</title>
+<title>Wheel Data · 期权年化追踪</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -901,39 +901,24 @@ function WatchlistPanel(){
     const results={};
     await Promise.all(tickers.map(async ticker=>{
       try{
-        // 股票详情 via Yahoo proxy（市值、成交量等）
-        const res=await fetch(proxyBase+'/api/quote/'+ticker,{signal:AbortSignal.timeout(10000)});
-        const d=await res.json();
+        const res=await fetch(proxyBase+'/api/cboe/'+ticker,{signal:AbortSignal.timeout(12000)});
+        if(!res.ok)return;
+        const cd=await res.json();
+        const dd=cd&&cd.data;
+        if(!dd)return;
         results[ticker]={
-          price:d.price||null,
-          marketCap:d.marketCapFmt||null,
-          marketCapRaw:d.marketCap||null,
-          volume:d.volumeFmt||null,
-          avgVolume:d.avgVolumeFmt||null,
-          change:d.change!=null?Number(d.change):null,
-          high52:d.fiftyTwoWeekHigh||null,
-          low52:d.fiftyTwoWeekLow||null,
-          beta:d.beta||null,
-          shortName:d.shortName||null,
+          price:dd.current_price?Number(dd.current_price):null,
+          close:dd.close?Number(dd.close):null,
+          iv30:dd.iv30?Number(dd.iv30):null,
+          iv30Hi:dd.iv30_one_year_high?Number(dd.iv30_one_year_high):null,
+          iv30Lo:dd.iv30_one_year_low?Number(dd.iv30_one_year_low):null,
+          iv30Change:dd.iv30_change?Number(dd.iv30_change):null,
+          hv20:dd.hv20?Number(dd.hv20):null,
+          hv50:dd.hv50?Number(dd.hv50):null,
         };
-      }catch{results[ticker]={price:null};}
-      // CBOE 数据（IV30、HV）
-      try{
-        const res2=await fetch(proxyBase+'/api/cboe/'+ticker,{signal:AbortSignal.timeout(10000)});
-        if(res2.ok){
-          const cd=await res2.json();
-          const dd=cd&&cd.data;
-          if(dd){
-            Object.assign(results[ticker]||{},{
-              iv30:dd.iv30?Number(dd.iv30):null,
-              iv30Hi:dd.iv30_one_year_high?Number(dd.iv30_one_year_high):null,
-              iv30Lo:dd.iv30_one_year_low?Number(dd.iv30_one_year_low):null,
-              hv20:dd.hv20?Number(dd.hv20):null,
-              hv50:dd.hv50?Number(dd.hv50):null,
-            });
-          }
-        }
-      }catch{}
+      }catch(e){
+        console.warn('CBOE fetch '+ticker+':',e.message);
+      }
     }));
     setStockData(results);setLoading(false);
   };
@@ -967,41 +952,38 @@ function WatchlistPanel(){
 
       {tickers.length>0&&(
         <div style={{overflowX:'auto'}}>
-          <div style={{display:'grid',gridTemplateColumns:'1.2fr 1fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr 0.5fr',gap:0,padding:'0 0 8px',marginBottom:4,minWidth:760}}>
-            {['标的','股价','涨跌','市值','成交量','IV30','HV20','IV Rank',''].map(h=>(
+          <div style={{display:'grid',gridTemplateColumns:'1.2fr 1fr 0.8fr 0.8fr 0.8fr 0.8fr 0.5fr',gap:0,padding:'0 0 8px',marginBottom:4,minWidth:580}}>
+            {['标的','股价','IV30','IV30变化','HV20','HV50','IV Rank'].map(h=>(
               <div key={h} style={{fontSize:10,color:V('faint'),letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',padding:'0 10px'}}>{h}</div>
             ))}
+            <div style={{width:30}}/>
           </div>
 
           {tickers.map(t=>{
             const d=stockData[t]||{};
             const ivRank=(d.iv30!=null&&d.iv30Hi!=null&&d.iv30Lo!=null&&d.iv30Hi>d.iv30Lo)?Math.round((d.iv30-d.iv30Lo)/(d.iv30Hi-d.iv30Lo)*100):null;
             const ivColor=ivRank==null?V('faint'):(ivRank>=70?ACC.profit:(ivRank>=40?ACC.amber:V('dim')));
-            const chgColor=d.change==null?V('faint'):(d.change>=0?ACC.profit:ACC.loss);
-            const chgStr=d.change!=null?((d.change>=0?'+':'')+fmt2(d.change*100,2)+'%'):'--';
+            const iv30Chg=d.iv30Change;
+            const iv30ChgColor=iv30Chg==null?V('faint'):(iv30Chg>0?ACC.loss:ACC.profit);
             return(
-              <div key={t} className="card" style={{display:'grid',gridTemplateColumns:'1.2fr 1fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr 0.5fr',gap:0,marginBottom:6,minWidth:760,borderLeft:'3px solid '+ivColor}}>
+              <div key={t} className="card" style={{display:'grid',gridTemplateColumns:'1.2fr 1fr 0.8fr 0.8fr 0.8fr 0.8fr 0.5fr',gap:0,marginBottom:6,minWidth:580,borderLeft:'3px solid '+ivColor}}>
                 <div style={cellStyle}>
                   <span style={{fontWeight:700,fontSize:15,color:V('ink')}}>{t}</span>
-                  {d.shortName&&<div style={{fontSize:10,color:V('faint'),marginTop:2}}>{d.shortName}</div>}
                 </div>
                 <div style={cellStyle}>
                   <span style={{color:d.price?V('ink'):V('faint'),fontWeight:600}}>{d.price?('$'+fmt2(d.price)):'--'}</span>
                 </div>
                 <div style={cellStyle}>
-                  <span style={{color:chgColor,fontWeight:500}}>{chgStr}</span>
-                </div>
-                <div style={cellStyle}>
-                  <span style={{color:V('dim')}}>{d.marketCap||'--'}</span>
-                </div>
-                <div style={cellStyle}>
-                  <span style={{color:V('dim')}}>{d.volume||'--'}</span>
-                </div>
-                <div style={cellStyle}>
                   <span style={{color:V('dim')}}>{d.iv30!=null?(fmt2(d.iv30,1)+'%'):'--'}</span>
                 </div>
                 <div style={cellStyle}>
+                  <span style={{color:iv30ChgColor}}>{iv30Chg!=null?((iv30Chg>0?'+':'')+fmt2(iv30Chg,2)):'--'}</span>
+                </div>
+                <div style={cellStyle}>
                   <span style={{color:V('dim')}}>{d.hv20!=null?(fmt2(d.hv20,1)+'%'):'--'}</span>
+                </div>
+                <div style={cellStyle}>
+                  <span style={{color:V('dim')}}>{d.hv50!=null?(fmt2(d.hv50,1)+'%'):'--'}</span>
                 </div>
                 <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',gap:6})}>
                   <span style={{color:ivColor,fontWeight:600,fontSize:13}}>{ivRank!=null?(ivRank+'%'):'--'}</span>
@@ -1012,7 +994,7 @@ function WatchlistPanel(){
                   )}
                 </div>
                 <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',justifyContent:'center'})}>
-                  <button onClick={()=>removeTicker(t)} style={{background:'none',border:'none',color:ACC.loss,cursor:'pointer',fontSize:13,padding:'2px 6px'}}>{'✕'}</button>
+                  <button onClick={()=>removeTicker(t)} style={{background:'none',border:'none',color:ACC.loss,cursor:'pointer',fontSize:13,padding:'2px 6px'}}>{'\u2715'}</button>
                 </div>
               </div>
             );
