@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Wheel Dashboard · 期权年化追踪</title>
+<title>Wheel Data · 期权年化追踪</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -923,8 +923,16 @@ function WatchlistPanel(){
 
   const refreshAll=async()=>{
     setLoading(true);
-    await fetchWatchlist();
-    const currentList=tickers.length?tickers:(await fetch(proxyBase+'/api/futu/watchlist').then(r=>r.json()).then(d=>d.data||[]));
+    // 始终从富途 API 获取最新列表（不依赖异步 state）
+    let currentList=[];
+    try{
+      const wlRes=await fetch(proxyBase+'/api/futu/watchlist',{signal:AbortSignal.timeout(8000)});
+      const wlData=await wlRes.json();
+      currentList=wlData.data||[];
+      setTickers(currentList);
+    }catch{currentList=tickers;}
+    // 确保所有 code 带市场前缀
+    currentList=currentList.map(c=>(c.startsWith('US.')||c.startsWith('HK.'))?c:'US.'+c);
     const results={};
     const today=new Date();
     for(const code of currentList){
@@ -1129,7 +1137,9 @@ function ScanPanel(){
       const wlRes=await fetch(proxyBase+'/api/futu/watchlist',{signal:AbortSignal.timeout(8000)});
       const wlData=await wlRes.json();
       watchlist=wlData.data||[];
-    }catch{watchlist=getWatchlist().map(t=>t.startsWith('US.')?t:'US.'+t);}
+    }catch{watchlist=getWatchlist();}
+    // 确保所有 code 带市场前缀
+    watchlist=watchlist.map(c=>(c.startsWith('US.')||c.startsWith('HK.'))?c:'US.'+c);
     if(!watchlist.length){setError('观察列表为空，请先在观察列表 Tab 添加标的');setLoading(false);return;}
 
     for(const code of watchlist){
