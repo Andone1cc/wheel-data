@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Wheel Data · 期权年化追踪</title>
+<title>Wheel Dashboard · 期权年化追踪</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -2155,15 +2155,15 @@ function App(){
           )}
 
           {/* SGOV Tab */}
-          {tab==='sgov'&&(
+          <div style={{display:tab==='sgov'?'block':'none'}}>
             <SgovPanel sgov={sgov} onUpdate={mutateSgov} totalMarginUsed={totalMarginUsed}/>
-          )}
+          </div>
 
           {/* 观察列表 Tab */}
-          {tab==='watchlist'&&<WatchlistPanel/>}
+          <div style={{display:tab==='watchlist'?'block':'none'}}><WatchlistPanel/></div>
 
           {/* 期权筛选 Tab */}
-          {tab==='scan'&&<ScanPanel/>}
+          <div style={{display:tab==='scan'?'block':'none'}}><ScanPanel/></div>
         </div>
       </div>
     </div>
