@@ -1,6 +1,6 @@
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
@@ -25,10 +25,44 @@ module.exports = async function handler(req, res) {
   Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v));
   if (req.method === 'OPTIONS') return res.status(204).end();
 
-  const { url: reqUrl } = req;
+  const reqUrl = req.url || '';
 
-  // ── CBOE 期权链代理（无需密码）
-  if (reqUrl?.startsWith('/api/cboe/')) {
+  // ══════════════════════════════════════════════════
+  // 富途 OpenD API 代理（隐藏服务器 IP）
+  // /api/futu/* → 转发到富途服务器
+  // ══════════════════════════════════════════════════
+  if (reqUrl.startsWith('/api/futu/')) {
+    const FUTU_BASE = process.env.FUTU_API_URL || 'http://43.153.137.19:8000';
+    // /api/futu/watchlist → /api/watchlist
+    // /api/futu/option-chain?code=US.IBIT&... → /api/option-chain?code=US.IBIT&...
+    const futuPath = reqUrl.replace('/api/futu', '/api');
+    const futuUrl = FUTU_BASE + futuPath;
+
+    try {
+      const fetchOpts = {
+        method: req.method,
+        headers: { 'Content-Type': 'application/json' },
+      };
+
+      // POST 请求转发 body
+      if (req.method === 'POST' || req.method === 'PUT') {
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        fetchOpts.body = Buffer.concat(chunks).toString();
+      }
+
+      const futuRes = await fetch(futuUrl, fetchOpts);
+      const data = await futuRes.json();
+      return res.status(futuRes.status).json(data);
+    } catch (e) {
+      return res.status(502).json({ error: 'Futu API 连接失败', detail: e.message });
+    }
+  }
+
+  // ══════════════════════════════════════════════════
+  // CBOE 期权链代理（保留，作备用）
+  // ══════════════════════════════════════════════════
+  if (reqUrl.startsWith('/api/cboe/')) {
     const ticker = decodeURIComponent(reqUrl.replace('/api/cboe/', '').split('?')[0]);
     try {
       const r = await fetch(
@@ -42,13 +76,15 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  // ── 股价代理（无需密码，Yahoo v8）
-  if (reqUrl?.startsWith('/api/quote/')) {
+  // ══════════════════════════════════════════════════
+  // 股价代理（Yahoo v8，给主面板刷新用）
+  // ══════════════════════════════════════════════════
+  if (reqUrl.startsWith('/api/quote/')) {
     const ticker = decodeURIComponent(reqUrl.replace('/api/quote/', '').split('?')[0]);
     try {
       const r = await fetch(
         `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`,
-        { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } }
+        { headers: { 'User-Agent': 'Mozilla/5.0' } }
       );
       const data = await r.json();
       const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice ?? null;
@@ -58,7 +94,9 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  // ── 以下需要密码
+  // ══════════════════════════════════════════════════
+  // 云端数据同步（需密码）
+  // ══════════════════════════════════════════════════
   const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
   if (token !== process.env.ACCESS_PASSWORD) {
     return res.status(401).json({ error: '密码错误' });
@@ -68,7 +106,7 @@ module.exports = async function handler(req, res) {
   const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
   const key = 'wheel_data';
 
-  if (req.method === 'GET' && reqUrl?.includes('health')) {
+  if (req.method === 'GET' && reqUrl.includes('health')) {
     return res.status(200).json({ ok: true, time: Date.now() });
   }
 
