@@ -27,7 +27,7 @@ module.exports = async function handler(req, res) {
 
   const { url: reqUrl } = req;
 
-  // ── CBOE 期权链代理（无需密码）
+  // ── CBOE 期权链代理
   if (reqUrl?.startsWith('/api/cboe/')) {
     const ticker = decodeURIComponent(reqUrl.replace('/api/cboe/', '').split('?')[0]);
     try {
@@ -42,49 +42,52 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  // ── 股价+详情代理（无需密码，走 Yahoo quoteSummary）
+  // ── 股票详情代理（多接口降级）
   if (reqUrl?.startsWith('/api/quote/')) {
     const ticker = decodeURIComponent(reqUrl.replace('/api/quote/', '').split('?')[0]);
+    const UA = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' };
+
+    // 尝试 1: Yahoo v7/finance/quote（最丰富）
     try {
-      // 用 quoteSummary 获取更丰富的数据
       const r = await fetch(
-        `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=price,summaryDetail,defaultKeyStatistics`,
-        { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } }
+        `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${ticker}`,
+        { headers: UA }
       );
       const data = await r.json();
-      const result = data?.quoteSummary?.result?.[0];
-      const price = result?.price;
-      const summary = result?.summaryDetail;
-      const stats = result?.defaultKeyStatistics;
-      
+      const q = data?.quoteResponse?.result?.[0];
+      if (q && q.regularMarketPrice) {
+        return res.status(200).json({
+          ticker,
+          price: q.regularMarketPrice ?? null,
+          marketCap: q.marketCap ?? null,
+          marketCapFmt: formatNum(q.marketCap),
+          volume: q.regularMarketVolume ?? null,
+          volumeFmt: formatNum(q.regularMarketVolume),
+          avgVolume: q.averageDailyVolume3Month ?? null,
+          avgVolumeFmt: formatNum(q.averageDailyVolume3Month),
+          change: q.regularMarketChangePercent != null ? q.regularMarketChangePercent / 100 : null,
+          fiftyTwoWeekHigh: q.fiftyTwoWeekHigh ?? null,
+          fiftyTwoWeekLow: q.fiftyTwoWeekLow ?? null,
+          shortName: q.shortName ?? q.longName ?? null,
+        });
+      }
+    } catch (e) { /* fall through */ }
+
+    // 尝试 2: Yahoo v8/finance/chart（只有价格）
+    try {
+      const r2 = await fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`,
+        { headers: UA }
+      );
+      const d2 = await r2.json();
+      const meta = d2?.chart?.result?.[0]?.meta;
       return res.status(200).json({
         ticker,
-        price: price?.regularMarketPrice?.raw ?? null,
-        marketCap: price?.marketCap?.raw ?? null,
-        marketCapFmt: price?.marketCap?.fmt ?? null,
-        volume: price?.regularMarketVolume?.raw ?? null,
-        volumeFmt: price?.regularMarketVolume?.fmt ?? null,
-        avgVolume: summary?.averageVolume?.raw ?? null,
-        avgVolumeFmt: summary?.averageVolume?.fmt ?? null,
-        change: price?.regularMarketChangePercent?.raw ?? null,
-        fiftyTwoWeekHigh: summary?.fiftyTwoWeekHigh?.raw ?? null,
-        fiftyTwoWeekLow: summary?.fiftyTwoWeekLow?.raw ?? null,
-        beta: stats?.beta?.raw ?? null,
-        shortName: price?.shortName ?? null,
+        price: meta?.regularMarketPrice ?? null,
+        shortName: meta?.shortName ?? null,
       });
-    } catch (e) {
-      // 降级到 v8 chart
-      try {
-        const r2 = await fetch(
-          `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`,
-          { headers: { 'User-Agent': 'Mozilla/5.0' } }
-        );
-        const d2 = await r2.json();
-        const p = d2?.chart?.result?.[0]?.meta?.regularMarketPrice ?? null;
-        return res.status(200).json({ ticker, price: p });
-      } catch (e2) {
-        return res.status(502).json({ ticker, price: null, error: e2.message });
-      }
+    } catch (e2) {
+      return res.status(502).json({ ticker, price: null, error: e2.message });
     }
   }
 
@@ -122,3 +125,12 @@ module.exports = async function handler(req, res) {
 
   return res.status(404).json({ error: 'Not found' });
 };
+
+function formatNum(n) {
+  if (n == null) return null;
+  if (n >= 1e12) return (n / 1e12).toFixed(2) + 'T';
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return String(n);
+}
