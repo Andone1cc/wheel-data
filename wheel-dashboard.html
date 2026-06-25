@@ -1487,7 +1487,7 @@ function SummaryBar({positions,commPerSide,sgov}){
 function AddForm({onAdd,onCancel,commPerSide}){
   const [f,setF]=useState({ticker:'',type:'P',strike:'',qty:'1',openDate:today(),expDate:'',premium:'',marginType:'cash',customMargin:''});
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
-  const autoCapital=f.marginType==='cash'?(parseFloat(f.strike)||0)*100:(parseFloat(f.customMargin)||0);
+  const autoCapital=(f.marginType==='cash'?(parseFloat(f.strike)||0)*100:(parseFloat(f.customMargin)||0))*(parseInt(f.qty)||1);
   const qty=parseInt(f.qty)||1;
   const comm=commPerSide*qty*2;
   const netPrem=f.premium?Math.max(0,parseFloat(f.premium)*100*qty-comm):null;
