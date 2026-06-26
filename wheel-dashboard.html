@@ -18,118 +18,96 @@ tailwind.config = {
         loss: '#f46a5a',
         blue: '#4fa3e0',
         teal: '#2dd4bf',
+        zinc: {
+          850: '#1c2630'
+        }
       }
     }
   }
 }
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#0c1217;--surface:#0f1820;--card:#131d26;--card-hover:#172030;
-  --line:#1c2c3a;--line-br:#263d50;
-  --ink:#dde8ef;--dim:#7a96aa;--faint:#3f5568;
-  --input-bg:#0f1820;--input-border:#263d50;--input-focus:#f5b731;
-  --shadow:0 2px 16px rgba(0,0,0,.45);--modal-overlay:rgba(0,0,0,.75);
-  --sidebar-w:200px;
+  --bg:#090d11;--surface:#0e141b;--card:#121a22;--card-hover:#17222e;
+  --line:#1a2734;--line-br:#243647;
+  --ink:#e2ecf2;--dim:#849fb4;--faint:#475f73;
+  --input-bg:#0e141b;--input-border:#243647;--input-focus:#f5b731;
+  --shadow:0 4px 24px rgba(0,0,0,.5);--modal-overlay:rgba(5,7,10,.85);
+  --sidebar-w:180px;
 }
 [data-theme="light"]{
-  --bg:#f0f4f8;--surface:#ffffff;--card:#ffffff;--card-hover:#f5f8fc;
-  --line:#dde3ea;--line-br:#c8d2dc;
-  --ink:#1a2733;--dim:#546e7a;--faint:#90a4ae;
-  --input-bg:#ffffff;--input-border:#c8d2dc;--input-focus:#e6a100;
-  --shadow:0 2px 12px rgba(0,0,0,.10);--modal-overlay:rgba(30,40,50,.6);
+  --bg:#f3f6f9;--surface:#ffffff;--card:#ffffff;--card-hover:#f6f9fc;
+  --line:#e1e6eb;--line-br:#cbd5e0;
+  --ink:#17222d;--dim:#5c7080;--faint:#9eb1c2;
+  --input-bg:#ffffff;--input-border:#cbd5e0;--input-focus:#e6a100;
+  --shadow:0 2px 12px rgba(0,0,0,.08);--modal-overlay:rgba(20,26,33,.65);
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
-body{background:var(--bg);color:var(--ink);font-family:'IBM Plex Sans','Noto Sans SC',system-ui,sans-serif;transition:background .25s,color .25s}
+body{background:var(--bg);color:var(--ink);font-family:'IBM Plex Sans','Noto Sans SC',system-ui,sans-serif;transition:background .25s,color .25s;-webkit-font-smoothing:antialiased}
 input,select,button{font-family:inherit}
 
-/* number 箭头 */
 input[type=number]{-moz-appearance:textfield}
 input[type=number]::-webkit-outer-spin-button,
 input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
-/* date — 保留原生选择器，只美化外观，让日历图标可见 */
 input[type=date]{-webkit-appearance:none;appearance:none;cursor:pointer}
 input[type=date]::-webkit-calendar-picker-indicator{
-  opacity:.5;cursor:pointer;filter:var(--date-icon-filter,invert(1));
+  opacity:.4;cursor:pointer;filter:var(--date-icon-filter,invert(1));
   transition:opacity .15s;
 }
 input[type=date]::-webkit-calendar-picker-indicator:hover{opacity:1}
 [data-theme="light"] input[type=date]::-webkit-calendar-picker-indicator{filter:none}
-/* select */
 select{-webkit-appearance:none;appearance:none}
 
-/* 输入框 */
 .field{
-  background:var(--input-bg);border:1.5px solid var(--input-border);border-radius:10px;
-  padding:9px 12px;color:var(--ink);font-size:14px;font-family:'IBM Plex Mono',monospace;
-  outline:none;width:100%;transition:border-color .18s,box-shadow .18s,background .18s;
+  background:var(--input-bg);border:1px solid var(--input-border);border-radius:8px;
+  padding:8px 12px;color:var(--ink);font-size:13px;font-family:'IBM Plex Mono',monospace;
+  outline:none;width:100%;transition:border-color .15s,box-shadow .15s;
 }
-.field:focus{border-color:var(--input-focus);box-shadow:0 0 0 3px color-mix(in srgb,var(--input-focus) 18%,transparent)}
+.field:focus{border-color:var(--input-focus);box-shadow:0 0 0 3px color-mix(in srgb,var(--input-focus) 12%,transparent)}
 .field::placeholder{color:var(--faint)}
-[data-theme="light"] .field{background:#f8fafc}
-[data-theme="light"] .field:focus{background:#fff}
 .sel-wrap{position:relative}
-.sel-wrap::after{content:'▾';position:absolute;right:11px;top:50%;transform:translateY(-50%);color:var(--faint);font-size:12px;pointer-events:none}
+.sel-wrap::after{content:'▾';position:absolute;right:11px;top:50%;transform:translateY(-50%);color:var(--faint);font-size:11px;pointer-events:none}
 .sel-wrap select{padding-right:28px;cursor:pointer}
 .sel-wrap select option{background:var(--card);color:var(--ink)}
 
-/* 滚动条 */
-::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--line-br);border-radius:3px}
+::-webkit-scrollbar-thumb{background:var(--line-br);border-radius:2px}
 
-/* 动画 */
-@keyframes fadeSlideIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
-@keyframes fadeIn{from{opacity:0}to{opacity:1}}
-@keyframes slideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-.anim-in{animation:slideUp .22s ease both}
-.anim-fade{animation:fadeIn .15s ease both}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1)}
 
-/* 卡片 */
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;transition:background .2s,border-color .2s}
-
-/* 按钮 */
-.btn{border:none;border-radius:10px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s,transform .1s,background .2s,color .2s,border-color .2s}
-.btn:active:not(:disabled){transform:scale(.96)}
-.btn-primary{background:#f5b731;color:#0c1217;border:none}
+.btn{border:none;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;transition:opacity .15s,transform .1s,background .2s,color .2s}
+.btn:active:not(:disabled){transform:scale(.97)}
+.btn-primary{background:#f5b731;color:#090d11}
 .btn-primary:disabled{background:var(--line);color:var(--faint);cursor:not-allowed;transform:none}
-.btn-ghost{background:transparent;color:var(--dim);border:1.5px solid var(--line)}
+.btn-ghost{background:transparent;color:var(--dim);border:1px solid var(--line)}
 .btn-ghost:hover{border-color:var(--line-br);color:var(--ink)}
-.btn-danger{background:rgba(244,106,90,.09);color:#f46a5a;border:1px solid rgba(244,106,90,.3)}
-.btn-close{background:rgba(244,106,90,.12);color:#f46a5a;border:1px solid rgba(244,106,90,.25);border-radius:8px;padding:7px 14px;font-size:12px;cursor:pointer;font-family:'IBM Plex Mono',monospace;transition:background .15s}
-.btn-close:hover{background:rgba(244,106,90,.22)}
+.btn-danger{background:rgba(244,106,90,.08);color:#f46a5a;border:1px solid rgba(244,106,90,.25)}
+.btn-close{background:rgba(244,106,90,.1);color:#f46a5a;border:1px solid rgba(244,106,90,.2);border-radius:6px;padding:5px 12px;font-size:11.5px}
 
-/* 主题按钮 */
-.theme-btn{width:36px;height:36px;border-radius:50%;border:1.5px solid var(--line);background:var(--surface);color:var(--dim);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;transition:background .2s,border-color .2s,transform .2s}
-.theme-btn:hover{border-color:var(--line-br);transform:rotate(22deg)}
+.theme-btn{width:32px;height:32px;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--dim);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;transition:all .2s}
+.theme-btn:hover{border-color:var(--line-br);color:var(--ink);transform:scale(1.05)}
 
-/* 标签 */
-.badge{display:inline-flex;align-items:center;border-radius:7px;padding:2px 8px;font-size:12px;font-weight:600;font-family:'IBM Plex Mono',monospace;border:1px solid}
+.badge{display:inline-flex;align-items:center;border-radius:5px;padding:1px 6px;font-size:11px;font-weight:600;font-family:'IBM Plex Mono',monospace;border:1px solid}
 
-/* Stat */
-.stat{display:flex;flex-direction:column;gap:3px}
-.stat-label{font-size:10px;color:var(--faint);letter-spacing:.12em;text-transform:uppercase;font-family:'IBM Plex Mono',monospace}
+.stat{display:flex;flex-direction:column;gap:2px}
+.stat-label{font-size:10px;color:var(--faint);letter-spacing:.08em;text-transform:uppercase;font-family:'IBM Plex Mono',monospace;font-weight:500}
 .stat-val{font-family:'IBM Plex Mono',monospace;font-weight:600;line-height:1.1}
-.stat-sub{font-size:11px;color:var(--dim);font-family:'IBM Plex Mono',monospace}
+.stat-sub{font-size:10.5px;color:var(--faint);font-family:'IBM Plex Mono',monospace}
 
-/* Modal */
-.modal-bg{position:fixed;inset:0;background:var(--modal-overlay);backdrop-filter:blur(5px);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px}
-.modal-box{background:var(--card);border:1.5px solid var(--line-br);border-radius:18px;padding:28px;width:100%;box-shadow:0 24px 60px rgba(0,0,0,.5);animation:fadeSlideIn .22s ease}
+.modal-bg{position:fixed;inset:0;background:var(--modal-overlay);backdrop-filter:blur(6px);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal-box{background:var(--card);border:1px solid var(--line-br);border-radius:14px;padding:24px;width:100%;box-shadow:0 20px 48px rgba(0,0,0,.6)}
 
-/* Toast */
-.toast{position:fixed;top:20px;right:20px;z-index:999;border-radius:12px;padding:11px 20px;font-weight:700;font-size:13px;box-shadow:0 6px 28px rgba(0,0,0,.4);animation:fadeSlideIn .2s ease}
+.toast{position:fixed;top:20px;right:20px;z-index:999;border-radius:8px;padding:10px 18px;font-weight:600;font-size:12.5px;box-shadow:0 8px 32px rgba(0,0,0,.4)}
 
-/* Section label */
-.section-label{font-size:10px;color:var(--faint);letter-spacing:.14em;text-transform:uppercase;font-family:'IBM Plex Mono',monospace}
+.section-label{font-size:10px;color:var(--faint);letter-spacing:.12em;text-transform:uppercase;font-family:'IBM Plex Mono',monospace;font-weight:600}
 
-/* 行 hover */
-.row-click{cursor:pointer;transition:background .14s}
+.row-click{cursor:pointer;transition:background .12s}
 .row-click:hover{background:var(--card-hover)!important}
 
-/* ── 仓位列表区域移动端可横滑 ── */
 .pos-list{overflow-x:auto;-webkit-overflow-scrolling:touch}
 @media(max-width:768px){
   .pos-list{margin:0 -12px;padding:0 12px}
@@ -139,106 +117,62 @@ select{-webkit-appearance:none;appearance:none}
   width:var(--sidebar-w);flex-shrink:0;
   background:var(--surface);border-right:1px solid var(--line);
   position:sticky;top:56px;height:calc(100vh - 56px);
-  display:flex;flex-direction:column;gap:4px;padding:16px 10px;
+  display:flex;flex-direction:column;gap:2px;padding:14px 8px;
   transition:background .2s,border-color .2s;overflow-y:auto;
 }
-.main-area{flex:1;min-width:0;padding:22px 24px;max-width:calc(100vw - var(--sidebar-w))}
+.main-area{flex:1;min-width:0;padding:20px 24px;max-width:calc(100vw - var(--sidebar-w))}
 .tab-btn{
-  display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:10px;
+  display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;
   cursor:pointer;border:none;background:transparent;color:var(--dim);
-  font-size:13px;font-weight:500;width:100%;text-align:left;transition:background .15s,color .15s;
+  font-size:12.5px;font-weight:500;width:100%;text-align:left;transition:all .15s;
 }
-.tab-btn:hover{background:var(--card);color:var(--ink)}
-.tab-btn.active{background:var(--card);color:var(--ink);font-weight:600}
-.tab-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.tab-count{margin-left:auto;font-size:11px;font-family:'IBM Plex Mono',monospace;
-  background:var(--line);border-radius:10px;padding:1px 7px;color:var(--dim)}
-.tab-btn.active .tab-count{background:rgba(245,183,49,.15);color:#f5b731}
+.tab-btn:hover{background:var(--card-hover);color:var(--ink)}
+.tab-btn.active{background:var(--card);color:var(--ink);font-weight:600;box-shadow:inset 0 0 0 1px var(--line-br)}
+.tab-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.tab-count{margin-left:auto;font-size:10.5px;font-family:'IBM Plex Mono',monospace;
+  background:var(--line);border-radius:8px;padding:0px 6px;color:var(--faint)}
+.tab-btn.active .tab-count{background:rgba(245,183,49,.12);color:#f5b731}
 .sidebar-sep{height:1px;background:var(--line);margin:6px 4px}
-.sidebar-section{font-size:10px;color:var(--faint);letter-spacing:.12em;text-transform:uppercase;padding:4px 12px 2px;font-family:'IBM Plex Mono',monospace}
+.sidebar-section{font-size:9.5px;color:var(--faint);letter-spacing:.1em;text-transform:uppercase;padding:4px 10px 2px;font-family:'IBM Plex Mono',monospace;font-weight:600}
 
-/* ── 移动端响应式 ── */
 @media(max-width:768px){
   :root{--sidebar-w:0px}
-
-  /* ─ 底部 Tab 导航 ─ */
   .sidebar{
     position:fixed;bottom:0;left:0;right:0;top:auto !important;height:auto !important;
     width:100%;flex-direction:row;flex-wrap:nowrap;
     border-right:none;border-top:1px solid var(--line);
-    padding:6px 8px calc(6px + env(safe-area-inset-bottom));gap:0;
+    padding:6px 6px calc(6px + env(safe-area-inset-bottom));gap:0;
     z-index:40;overflow-x:hidden;overflow-y:hidden;
     background:var(--surface);
   }
   .tab-btn{
     flex-direction:column;align-items:center;gap:2px;
-    padding:6px 2px;font-size:10px;flex:1;min-width:0;
-    border-radius:8px;white-space:nowrap;
+    padding:5px 2px;font-size:10px;flex:1;min-width:0;
+    border-radius:6px;white-space:nowrap;
   }
   .tab-dot{width:5px;height:5px}
-  .tab-count{margin-left:0;font-size:10px;padding:1px 5px}
+  .tab-count{margin-left:0;font-size:9.5px;padding:0px 4px}
   .sidebar-sep,.sidebar-section{display:none}
-
-  /* ─ 主内容区 ─ */
   .layout{flex-direction:column}
   .main-area{padding:10px 12px 80px !important;max-width:100vw !important}
-
-  /* ─ Header ─ */
-  /* 整个 header 容器左右缩小 padding */
-  .main-area + * {}
-  .header-btns{gap:6px !important;flex-wrap:nowrap !important;overflow:visible !important}
-  .header-btns .btn{font-size:11px !important;padding:6px 10px !important;white-space:nowrap;flex-shrink:0}
-  /* 隐藏不重要的 header 元素 */
-  .header-time{display:none !important}
-  .btn-comm{display:none !important}   /* 手续费按钮移动端隐藏 */
-
-  /* ─ 汇总卡片 ─ */
-  .summary-grid{grid-template-columns:1fr 1fr !important;gap:8px !important}
-  /* 汇总卡片字体缩小 */
-  .summary-box-val{font-size:16px !important}
-  .summary-box-sub{font-size:10px !important}
-  .summary-big-main{font-size:20px !important}
-
-  /* ─ 仓位行：移动端卡片布局 ─ */
+  .header-btns{gap:4px !important}
+  .header-btns .btn{font-size:11px !important;padding:5px 8px !important}
+  .header-time,.btn-comm{display:none !important}
+  .summary-grid{grid-template-columns:1fr 1fr !important;gap:6px !important}
   .pos-table-header{display:none !important}
-  /* 把 grid 行改成两行卡片布局 */
   .pos-row-inner{
     display:grid !important;
     grid-template-columns:3px 1fr auto !important;
     min-height:auto !important;
   }
-  .pos-row-col-streak{height:100% !important;min-height:52px !important}
-  .pos-row-col-main{
-    padding:10px 10px !important;
-    grid-column:2 !important;
-  }
-  .pos-row-col-strike{display:none !important}  /* 行权价在 main 里显示 */
-  .pos-row-col-expiry{display:none !important}
-  .pos-row-col-theta{display:none !important}
-  .pos-row-col-price{
-    padding:10px 10px 10px 0 !important;
-    grid-column:3 !important;
-    align-items:flex-end !important;
-  }
-  .pos-row-col-now{display:none !important}
-  .pos-row-col-exp{display:none !important}
-  .pos-row-col-arrow{display:none !important}
-  /* 移动端在 main 列显示更多信息 */
+  .pos-row-col-streak{min-height:52px !important}
+  .pos-row-col-main{padding:8px 10px !important;grid-column:2 !important}
+  .pos-row-col-strike,.pos-row-col-expiry,.pos-row-col-theta,.pos-row-col-now,.pos-row-col-exp,.pos-row-col-arrow{display:none !important}
+  .pos-row-col-price{padding:8px 10px 8px 0 !important;grid-column:3 !important;align-items:flex-end !important}
   .pos-row-mobile-extra{display:flex !important}
-
-  /* ─ Modal ─ */
   .modal-bg{padding:0 !important;align-items:flex-end !important}
-  .modal-box{
-    padding:20px 18px !important;border-radius:20px 20px 0 0 !important;
-    max-height:90vh !important;overflow-y:auto !important;
-  }
-
-  /* ─ Toast ─ */
-  .toast{
-    top:auto !important;bottom:82px !important;
-    right:12px !important;left:12px !important;
-    text-align:center !important;font-size:12px !important;
-  }
+  .modal-box{padding:18px 16px !important;border-radius:16px 16px 0 0 !important;max-height:85vh !important;overflow-y:auto !important}
+  .toast{top:auto !important;bottom:76px !important;right:12px !important;left:12px !important;text-align:center !important;font-size:12px !important}
 }
 </style>
 </head>
@@ -248,16 +182,16 @@ select{-webkit-appearance:none;appearance:none}
 const {useState,useEffect,useCallback}=React;
 
 const ACC={
-  amber:'#f5b731',amberSoft:'rgba(245,183,49,.12)',
-  profit:'#3dd68c',profitBg:'rgba(61,214,140,.10)',
-  loss:'#f46a5a',lossBg:'rgba(244,106,90,.10)',
-  blue:'#4fa3e0',blueBg:'rgba(79,163,224,.10)',
-  purple:'#a78bfa',purpleBg:'rgba(167,139,250,.10)',
-  teal:'#2dd4bf',tealBg:'rgba(45,212,191,.10)',
+  amber:'#f5b731',amberSoft: 'rgba(245,183,49,.08)',
+  profit:'#3dd68c',profitBg:'rgba(61,214,140,.06)',
+  loss:'#f46a5a',lossBg:'rgba(244,106,90,.06)',
+  blue:'#4fa3e0',blueBg:'rgba(79,163,224,.06)',
+  purple:'#a78bfa',purpleBg:'rgba(167,139,250,.06)',
+  teal:'#2dd4bf',tealBg:'rgba(45,212,191,.06)',
 };
 const V=(n)=>`var(--${n})`;
 const fmt=(n,d=2)=>n==null?'—':Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
-const fmtM=(n)=>n==null?'—':(n>=0?'+$':'-$')+Math.abs(n).toFixed(2);
+const fmtM=(n)=>n==null?'—':(n style={{fontFamily:'IBM Plex Mono'}}>{n>=0?'+$':'-$'}{Math.abs(n).toFixed(2)}</span>);
 const fmtA=(n)=>n==null?'—':(n>=0?'+':'')+n.toFixed(1)+'%';
 const daysBetween=(a,b)=>Math.round((new Date(b)-new Date(a))/86400000);
 const today=()=>new Date().toISOString().slice(0,10);
@@ -269,14 +203,11 @@ const calcAnnual=(profit,capital,days)=>{
 const DEFAULT_COMM=0.65;
 const SK={POS:'whl-pos-v2',CLOSED:'whl-closed-v1',STOCKS:'whl-stocks-v1',SGOV:'whl-sgov-v3',CFG:'whl-cfg-v2',KEY:'whl-api-key',FH_KEY:'whl-finnhub-key',THEME:'whl-theme'};
 
-/* ── 本地缓存（localStorage）：仅作本设备快速启动用，云端为主 ── */
 const ls=(k,fb=null)=>{try{const s=localStorage.getItem(k);return s?JSON.parse(s):fb}catch{return fb}};
 const lss=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}};
 
-/* ── 云端存储配置（已内置，任何设备打开自动同步）── */
 const DEFAULT_CLOUD_URL = 'https://wheel-data.vercel.app';
 const DEFAULT_CLOUD_PWD = '123456';
-// 首次打开时自动写入 localStorage
 if (!localStorage.getItem('whl-cloud-url')) {
   localStorage.setItem('whl-cloud-url', DEFAULT_CLOUD_URL);
 }
@@ -295,7 +226,6 @@ async function cloudGet(password) {
     });
     if (!res.ok) return null;
     let data = await res.json();
-    // 自动解码：处理多重 JSON 编码（兼容历史脏数据）
     let guard = 0;
     while (typeof data === 'string' && guard < 5) {
       try { data = JSON.parse(data); guard++; }
@@ -323,7 +253,6 @@ async function cloudPut(data, password) {
   } catch(e) { console.warn('cloudPut error:', e); return false; }
 }
 
-/* ── 云端配置弹层 ── */
 function CloudSetupModal({onSave, onClose}) {
   const [url, setUrl] = useState(localStorage.getItem('whl-cloud-url') || '');
   const [pwd, setPwd] = useState(localStorage.getItem('whl-cloud-pwd') || '');
@@ -355,7 +284,7 @@ function CloudSetupModal({onSave, onClose}) {
 
   return (
     <Modal title="☁ 云端同步设置" onClose={onClose} maxW={540}>
-      <div style={{background:`${ACC.teal}10`,border:`1px solid ${ACC.teal}33`,borderRadius:10,padding:'12px 14px',marginBottom:18,fontSize:12,color:V('dim'),lineHeight:1.8}}>
+      <div style={{background:`${ACC.teal}08`,border:`1px solid ${ACC.teal}22`,borderRadius:8,padding:'12px 14px',marginBottom:18,fontSize:12,color:V('dim'),lineHeight:1.8}}>
         <div style={{color:ACC.teal,fontWeight:700,marginBottom:6}}>部署步骤（5分钟，永久免费）</div>
         <div>1. 登录 <a href="https://dash.cloudflare.com" target="_blank" rel="noopener" style={{color:ACC.amber}}>dash.cloudflare.com</a> → Workers & Pages → Create Worker</div>
         <div>2. 把 <b style={{color:V('ink')}}>worker.js</b> 的代码粘贴进去 → Deploy</div>
@@ -380,10 +309,7 @@ function CloudSetupModal({onSave, onClose}) {
     </Modal>
   );
 }
-/* ═══════════════════════════════════════════════════
-   股价拉取：走 Vercel 代理（服务端请求 Yahoo，无 CORS 问题）
-   路由：/api/quote/:ticker → 服务端返回 {ticker, price}
-═══════════════════════════════════════════════════ */
+
 async function fetchStockPrices(tickers){
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
   const uniq=[...new Set(tickers)];
@@ -398,10 +324,6 @@ async function fetchStockPrices(tickers){
   return results;
 }
 
-/* ═══════════════════════════════════════════════════
-   OCC 合约代码解析（从 CBOE 返回的 option 字段解析）
-   格式：MRVL  260702P00190000（ticker可变长，后跟6位日期+P/C+8位行权价）
-═══════════════════════════════════════════════════ */
 function buildOCCSymbol(ticker, expDate, type, strike){
   const [y,m,d]=expDate.split('-');
   const yy=y.slice(2);
@@ -419,18 +341,8 @@ function parseOCC(occ){
   };
 }
 
-/* ═══════════════════════════════════════════════════
-   期权现价 - 主源：CBOE CDN 公开延迟行情
-   
-   URL: https://cdn.cboe.com/api/global/delayed_quotes/options/{SYMBOL}.json
-   - 完全免 Key，无 CORS 限制（CDN 直接返回）
-   - 返回真实 bid/ask/last/delta/gamma/theta/iv/OI
-   - 约 15 分钟延迟，数据权威
-   - 一次请求拿到该 ticker 所有期权合约，然后按到期日+行权价筛选
-═══════════════════════════════════════════════════ */
 async function fetchOptionPriceCBOE(ticker, expDate, strike, type){
   try{
-    // 优先走 Vercel 代理（解决 CORS 问题），没配置时直连 CBOE
     const proxyBase=localStorage.getItem('whl-cloud-url');
     const url=proxyBase
       ?`${proxyBase}/api/cboe/${encodeURIComponent(ticker)}`
@@ -469,9 +381,6 @@ async function fetchOptionPriceCBOE(ticker, expDate, strike, type){
   }
 }
 
-/* ═══════════════════════════════════════════════════
-   期权现价 - 备用源1：Finnhub /quote（OCC合约代码）
-═══════════════════════════════════════════════════ */
 async function fetchOptionPriceFinnhub(ticker, expDate, strike, type, fhKey){
   if(!fhKey) return null;
   const symbol=buildOCCSymbol(ticker, expDate, type, strike);
@@ -486,9 +395,6 @@ async function fetchOptionPriceFinnhub(ticker, expDate, strike, type, fhKey){
   }catch(e){return null;}
 }
 
-/* ═══════════════════════════════════════════════════
-   期权现价 - 备用源2：Yahoo chart（OCC合约代码）
-═══════════════════════════════════════════════════ */
 async function fetchOptionPriceYahooChart(ticker, expDate, strike, type){
   const symbol=buildOCCSymbol(ticker, expDate, type, strike);
   const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
@@ -505,7 +411,6 @@ async function fetchOptionPriceYahooChart(ticker, expDate, strike, type){
   }catch(e){return null;}
 }
 
-/* ── 三源瀑布：CBOE（主） → Finnhub → Yahoo ── */
 async function fetchAllOptionPrices(positions, fhKey){
   const results={};
   await Promise.all(positions.map(async p=>{
@@ -517,9 +422,6 @@ async function fetchAllOptionPrices(positions, fhKey){
   return results;
 }
 
-/* ═══════════════════════════════════════════════════
-   数据源 3：Anthropic AI（备备用，需要 AI Key）
-═══════════════════════════════════════════════════ */
 async function fetchAIPrices(tickers,apiKey){
   const list=[...new Set(tickers)].join(', ');
   const res=await fetch('https://api.anthropic.com/v1/messages',{
@@ -536,7 +438,6 @@ async function fetchAIPrices(tickers,apiKey){
   return m?JSON.parse(m[0]):{};
 }
 
-/* ── 计算核心（活跃仓位）── */
 function calc(p,comm=DEFAULT_COMM){
   const qty=p.qty||1;
   const commTotal=comm*qty*2;
@@ -562,13 +463,12 @@ function calc(p,comm=DEFAULT_COMM){
   return{qty,commTotal,commExp,openPrem,capital,daysHeld,daysTotal,daysLeft,thetaPct,profitNow,yieldNow,annualNow,capturedPct,profitExp,yieldExp,annualExp,buffer};
 }
 
-/* ── 计算已平仓收益 ── */
 function calcClosed(c,comm=DEFAULT_COMM){
   const qty=c.qty||1;
   const openPrem=c.premium*100*qty;
   const capital=(c.marginType==='cash'?c.strike*100:(c.customMargin||0))*qty;
-  const closeType=c.closeType||'manual'; // 'manual'|'expired'
-  const commUsed=closeType==='expired'?comm*qty:comm*qty*2;
+  const closeType=c.closeType||'manual'; 
+  const commUsed=closeType==='expired'?comm*qty:closeType==='assigned'?comm*qty:comm*qty*2;
   const closePrem=(c.closePrice||0)*100*qty;
   const profit=openPrem-closePrem-commUsed;
   const daysHeld=Math.max(1,daysBetween(c.openDate,c.closeDate||today()));
@@ -586,52 +486,47 @@ function calcSgov(s){
   return{days,rate,autoInt,total};
 }
 
-/* ══ 通用组件 ══════════════════════════════════════ */
 function ThetaBar({pct,small}){
   return(
-    <div style={{background:V('line'),borderRadius:3,height:small?3:5,overflow:'hidden',width:'100%'}}>
-      <div style={{width:`${pct}%`,height:'100%',borderRadius:3,
-        background:pct>75?`linear-gradient(90deg,${ACC.profit},${ACC.loss})`:`linear-gradient(90deg,${ACC.profit},${ACC.amber})`,
-        boxShadow:`0 0 6px ${pct>75?ACC.loss:ACC.amber}66`,transition:'width .5s ease'}}/>
+    <div style={{background:V('line'),borderRadius:2,height:small?3:4,overflow:'hidden',width:'100%'}}>
+      <div style={{width:`${pct}%`,height:'100%',borderRadius:2,
+        background:pct>75?`linear-gradient(90deg,${ACC.profit},${ACC.teal})`:`linear-gradient(90deg,${ACC.profit},${ACC.amber})`,
+        transition:'width .4s ease'}}/>
     </div>
   );
 }
-function Stat({label,value,sub,color,sz=15,hl}){
+function Stat({label,value,sub,color,sz=14,hl}){
   return(
-    <div className="stat" style={hl?{borderLeft:`2px solid ${hl}`,paddingLeft:10}:{}}>
-      <span className="stat-label">{label}</span>
-      <span className="stat-val" style={{fontSize:sz,color:color||V('ink')}}>{value}</span>
-      {sub&&<span className="stat-sub">{sub}</span>}
+    <div className="stat" style={hl?{borderLeft:`2px solid ${hl}`,paddingLeft:8}:{}}>
+      <span className="stat-label text-[10px] tracking-wider text-zinc-500">{label}</span>
+      <span className="stat-val font-mono" style={{fontSize:sz,color:color||V('ink')}}>{value}</span>
+      {sub&&<span className="stat-sub text-[10.5px] text-zinc-500">{sub}</span>}
     </div>
   );
 }
 
-/* 文本输入 */
 function Field({label,hint,value,onChange,placeholder,type='text',prefix,suffix,readOnly,color}){
   const [focused,setFocused]=useState(false);
   return(
-    <div style={{display:'flex',flexDirection:'column',gap:5}}>
+    <div style={{display:'flex',flexDirection:'column',gap:4}}>
       {label&&<div style={{display:'flex',alignItems:'center',gap:5}}>
         <span className="section-label">{label}</span>
         {hint&&<span style={{fontSize:10,color:V('faint'),fontStyle:'italic'}}>{hint}</span>}
       </div>}
       <div style={{position:'relative',display:'flex',alignItems:'center'}}>
-        {prefix&&<span style={{position:'absolute',left:12,color:focused?ACC.amber:V('faint'),fontSize:13,fontFamily:'IBM Plex Mono,monospace',pointerEvents:'none',transition:'color .18s',zIndex:1}}>{prefix}</span>}
+        {prefix&&<span style={{position:'absolute',left:12,color:focused?ACC.amber:V('faint'),fontSize:13,fontFamily:'IBM Plex Mono',pointerEvents:'none',zIndex:1}}>{prefix}</span>}
         <input className="field" type={type} value={value??''} onChange={e=>onChange(e.target.value)}
           placeholder={placeholder} readOnly={readOnly}
           onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)}
-          style={{paddingLeft:prefix?28:12,paddingRight:suffix?32:12,color:color||V('ink'),cursor:readOnly?'default':'text',background:readOnly?'transparent':undefined,borderStyle:readOnly?'dashed':undefined}}/>
-        {suffix&&<span style={{position:'absolute',right:11,color:V('faint'),fontSize:12,fontFamily:'IBM Plex Mono,monospace',pointerEvents:'none'}}>{suffix}</span>}
+          style={{paddingLeft:prefix?24:12,paddingRight:suffix?28:12,color:color||V('ink'),cursor:readOnly?'default':'text',background:readOnly?'transparent':undefined,borderStyle:readOnly?'dashed':undefined}}/>
+        {suffix&&<span style={{position:'absolute',right:11,color:V('faint'),fontSize:11,fontFamily:'IBM Plex Mono',pointerEvents:'none'}}>{suffix}</span>}
       </div>
     </div>
   );
 }
 function NumField({label,hint,value,onChange,placeholder,prefix,suffix,readOnly,color}){
-  // 用 type=text 避免中文输入法吞小数点；内部维护 raw string，只在合法时向上传 number
   const [raw,setRaw]=useState(value!=null?String(value):'');
-  // 当外部 value 变化（比如重置）时同步 raw
   React.useEffect(()=>{
-    // 只有在不是 "4." / "-0." 等中间态时才同步，避免打断输入
     const ext=value!=null?String(value):'';
     const parsed=parseFloat(raw);
     if(isNaN(parsed)||Math.abs(parsed-(value??NaN))>1e-9)setRaw(ext);
@@ -639,17 +534,15 @@ function NumField({label,hint,value,onChange,placeholder,prefix,suffix,readOnly,
   const handleChange=v=>{
     setRaw(v);
     if(v===''||v==='-'){onChange('');return;}
-    // 接受中间态：末尾是小数点，或小数点后带0
     if(/^-?\d*\.?\d*$/.test(v))onChange(v);
   };
   return<Field label={label} hint={hint} placeholder={placeholder} prefix={prefix} suffix={suffix}
     type="text" inputMode="decimal" readOnly={readOnly} color={color}
     value={raw} onChange={handleChange}/>;
 }
-/* 日期 — 恢复原生选择器，只美化样式 */
 function DateField({label,value,onChange,readOnly}){
   return(
-    <div style={{display:'flex',flexDirection:'column',gap:5}}>
+    <div style={{display:'flex',flexDirection:'column',gap:4}}>
       {label&&<span className="section-label">{label}</span>}
       <input className="field" type="date" value={value??''} onChange={e=>onChange(e.target.value)}
         readOnly={readOnly} style={{cursor:readOnly?'default':'pointer',
@@ -659,7 +552,7 @@ function DateField({label,value,onChange,readOnly}){
 }
 function SelectField({label,value,onChange,options,disabled}){
   return(
-    <div style={{display:'flex',flexDirection:'column',gap:5}}>
+    <div style={{display:'flex',flexDirection:'column',gap:4}}>
       {label&&<span className="section-label">{label}</span>}
       <div className="sel-wrap">
         <select className="field" value={value} onChange={e=>onChange(e.target.value)} disabled={disabled} style={{cursor:'pointer'}}>
@@ -674,31 +567,29 @@ function InlineEdit({value,onSave}){
   const [v,setV]=useState('');
   const confirm=()=>{const n=parseFloat(v);if(!isNaN(n))onSave(n);setEditing(false);};
   if(editing)return(
-    <span style={{display:'inline-flex',alignItems:'center',gap:6}}>
+    <span style={{display:'inline-flex',alignItems:'center',gap:4}}>
       <input value={v} onChange={e=>setV(e.target.value)} type="text" inputMode="decimal" autoFocus
-        style={{width:80,background:V('surface'),border:`1.5px solid ${ACC.amber}`,borderRadius:8,padding:'4px 9px',color:ACC.amber,fontSize:13,fontFamily:'IBM Plex Mono,monospace',outline:'none'}}
+        style={{width:70,background:V('surface'),border:`1px solid ${ACC.amber}`,borderRadius:6,padding:'2px 6px',color:ACC.amber,fontSize:12.5,fontFamily:'IBM Plex Mono',outline:'none'}}
         onKeyDown={e=>{if(e.key==='Enter')confirm();if(e.key==='Escape')setEditing(false);}}/>
-      <button onClick={confirm} className="btn btn-primary" style={{padding:'4px 10px',fontSize:12,borderRadius:7}}>✓</button>
-      <button onClick={()=>setEditing(false)} className="btn btn-ghost" style={{padding:'4px 8px',fontSize:12,borderRadius:7}}>✕</button>
+      <button onClick={confirm} className="btn btn-primary" style={{padding:'2px 6px',fontSize:11,borderRadius:4}}>✓</button>
+      <button onClick={()=>setEditing(false)} className="btn btn-ghost" style={{padding:'2px 5px',fontSize:11,borderRadius:4}}>✕</button>
     </span>
   );
   return(
     <span onClick={()=>{setV(value??'');setEditing(true);}} title="点击编辑"
-      style={{color:value!=null?V('ink'):V('faint'),cursor:'pointer',fontFamily:'IBM Plex Mono,monospace',
-        fontSize:13,textDecoration:'underline',textDecorationStyle:'dotted',textUnderlineOffset:3}}>
+      className="font-mono text-[13px] text-zinc-300 hover:text-amber cursor-pointer underline decoration-dotted underline-offset-4">
       {value!=null?`$${fmt(value)}`:'点击录入'}
     </span>
   );
 }
 
-/* ══ Modal ════════════════════════════════════════ */
 function Modal({title,children,onClose,maxW=460}){
   return(
     <div className="modal-bg" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
       <div className="modal-box" style={{maxWidth:maxW}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
-          <span style={{fontSize:16,fontWeight:700,color:ACC.amber}}>{title}</span>
-          <button onClick={onClose} className="btn btn-ghost" style={{padding:'4px 10px',borderRadius:8,fontSize:14}}>✕</button>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+          <span style={{fontSize:15,fontWeight:700,color:ACC.amber}}>{title}</span>
+          <button onClick={onClose} className="btn btn-ghost" style={{padding:'2px 8px',borderRadius:6,fontSize:13}}>✕</button>
         </div>
         {children}
       </div>
@@ -708,9 +599,9 @@ function Modal({title,children,onClose,maxW=460}){
 function ApiKeyModal({onSave,onClose}){
   const [v,setV]=useState('');
   return<Modal title="Anthropic API Key" onClose={onClose}>
-    <p style={{fontSize:12,color:V('dim'),marginBottom:18,lineHeight:1.7}}>用于刷新股价 AI 联网查询，Key 仅存本地浏览器。</p>
+    <p style={{fontSize:12,color:V('dim'),marginBottom:14,lineHeight:1.6}}>用于刷新股价 AI 联网查询，Key 仅存本地浏览器。</p>
     <Field label="API Key" type="password" value={v} onChange={setV} placeholder="sk-ant-api03-..."/>
-    <div style={{display:'flex',gap:8,marginTop:16}}>
+    <div style={{display:'flex',gap:6,marginTop:14}}>
       <button onClick={()=>{if(v.trim())onSave(v.trim());}} className="btn btn-primary">保存</button>
       <button onClick={onClose} className="btn btn-ghost">跳过</button>
     </div>
@@ -719,9 +610,9 @@ function ApiKeyModal({onSave,onClose}){
 function CommModal({current,onSave,onClose}){
   const [v,setV]=useState(String(current));
   return<Modal title="手续费设置" onClose={onClose} maxW={400}>
-    <p style={{fontSize:12,color:V('dim'),marginBottom:18,lineHeight:1.7}}>单边手续费（美元/张）。平仓扣双边，到期归零只扣单边开仓费。</p>
+    <p style={{fontSize:12,color:V('dim'),marginBottom:14,lineHeight:1.6}}>单边手续费（美元/张）。平仓扣双边，到期归零只扣单边开仓费。</p>
     <NumField label="单边手续费 $ / 张" value={v} onChange={setV} placeholder="0.65" prefix="$"/>
-    <div style={{display:'flex',gap:8,marginTop:16}}>
+    <div style={{display:'flex',gap:6,marginTop:14}}>
       <button onClick={()=>{const n=parseFloat(v);if(!isNaN(n)&&n>=0)onSave(n);}} className="btn btn-primary">保存</button>
       <button onClick={onClose} className="btn btn-ghost">取消</button>
     </div>
@@ -732,25 +623,24 @@ function FinnhubModal({current,onSave,onClose}){
   const [v,setV]=useState(current||'');
   return(
     <Modal title="Finnhub API Key 设置" onClose={onClose} maxW={520}>
-      {/* 说明区 */}
-      <div style={{background:V('surface'),border:`1px solid ${ACC.teal}33`,borderRadius:10,padding:'12px 14px',marginBottom:18}}>
-        <div style={{fontSize:12,color:ACC.teal,fontWeight:600,marginBottom:6}}>✦ 为什么推荐 Finnhub？</div>
-        <div style={{fontSize:12,color:V('dim'),lineHeight:1.8}}>
+      <div style={{background:V('surface'),border:`1px solid ${ACC.teal}22`,borderRadius:8,padding:'12px 14px',marginBottom:14}}>
+        <div style={{fontSize:12,color:ACC.teal,fontWeight:600,marginBottom:4}}>✦ 为什么推荐 Finnhub？</div>
+        <div style={{fontSize:12,color:V('dim'),lineHeight:1.7}}>
           • 免费注册，秒拿 Key，无需信用卡<br/>
           • 真实时报价，60次/分钟完全够用<br/>
-          • 原生支持 CORS，浏览器直接 fetch，<b style={{color:V('ink')}}>不需要代理</b><br/>
+          • 原生支持 CORS，浏览器直接 fetch，不需要代理<br/>
           • 比 Yahoo 稳定得多，不会被随机限速
         </div>
         <a href="https://finnhub.io/register" target="_blank" rel="noopener"
-          style={{display:'inline-flex',alignItems:'center',gap:5,marginTop:10,color:ACC.amber,fontSize:12,fontWeight:600,textDecoration:'none'}}>
+          style={{display:'inline-flex',alignItems:'center',gap:5,marginTop:8,color:ACC.amber,fontSize:12,fontWeight:600,textDecoration:'none'}}>
           → 点这里免费注册 finnhub.io ↗
         </a>
       </div>
       <Field label="Finnhub API Key" type="password" value={v} onChange={setV} placeholder="d1a2b3c4e5f6..."/>
-      <div style={{fontSize:11,color:V('faint'),marginTop:6,fontFamily:'IBM Plex Mono,monospace'}}>
+      <div style={{fontSize:11,color:V('faint'),marginTop:4,fontFamily:'IBM Plex Mono'}}>
         Key 仅存浏览器本地，不上传任何服务器
       </div>
-      <div style={{display:'flex',gap:8,marginTop:16}}>
+      <div style={{display:'flex',gap:6,marginTop:14}}>
         <button onClick={()=>{if(v.trim())onSave(v.trim());}} className="btn btn-primary">保存</button>
         <button onClick={onClose} className="btn btn-ghost">跳过</button>
       </div>
@@ -758,33 +648,26 @@ function FinnhubModal({current,onSave,onClose}){
   );
 }
 
-/* ══ 平仓弹层 ══════════════════════════════════════ */
 function CloseModal({pos,commPerSide,onConfirm,onClose}){
   const [closePrice,setClosePrice]=useState('');
   const [closeDate,setCloseDate]=useState(today());
-  const [closeType,setCloseType]=useState('manual'); // manual | expired | assigned
+  const [closeType,setCloseType]=useState('manual'); 
   const qty=pos.qty||1;
   const openPrem=pos.premium*100*qty;
   const capital=(pos.marginType==='cash'?pos.strike*100:(pos.customMargin||0))*qty;
-  const shares=qty*100; // 期权行权 1手 = 100股
+  const shares=qty*100; 
 
-  // 不同平仓方式的手续费和收益
-  const commUsed=closeType==='expired'?commPerSide*qty
-    :closeType==='assigned'?commPerSide*qty   // 接货只扣单边（到期行权）
-    :commPerSide*qty*2;
-  const closePrem=closeType==='expired'||closeType==='assigned'
-    ?0:(parseFloat(closePrice)||0)*100*qty;
+  const commUsed=closeType==='expired'?commPerSide*qty :closeType==='assigned'?commPerSide*qty :commPerSide*qty*2;
+  const closePrem=closeType==='expired'||closeType==='assigned' ?0:(parseFloat(closePrice)||0)*100*qty;
   const profit=openPrem-closePrem-commUsed;
   const daysHeld=Math.max(1,daysBetween(pos.openDate,closeDate||today()));
   const annual=calcAnnual(profit,capital,daysHeld);
 
-  // 接货场景：股票成本 = 行权价 - 已收权利金/股（权利金摊到每股）
-  const premPerShare=pos.premium-(commPerSide/100); // 每股净权利金
-  const effectiveCost=pos.strike-premPerShare;      // 实际每股成本
-  const assignedMarketValue=pos.strike*shares;      // 接货占用资金（从SGOV扣）
+  const premPerShare=pos.premium-(commPerSide/100); 
+  const effectiveCost=pos.strike-premPerShare;      
+  const assignedMarketValue=pos.strike*shares;      
 
-  const valid=closeType==='expired'||closeType==='assigned'
-    ||(closePrice!==''&&!isNaN(parseFloat(closePrice)));
+  const valid=closeType==='expired'||closeType==='assigned' ||(closePrice!=='''&&!isNaN(parseFloat(closePrice)));
 
   const typeOptions=[
     {value:'manual',label:'主动平仓（买回期权）'},
@@ -794,68 +677,64 @@ function CloseModal({pos,commPerSide,onConfirm,onClose}){
 
   return(
     <Modal title="确认平仓" onClose={onClose} maxW={540}>
-      {/* 仓位信息 */}
-      <div style={{background:V('surface'),borderRadius:10,padding:'10px 14px',marginBottom:16,display:'flex',gap:16,flexWrap:'wrap',alignItems:'center'}}>
-        <span style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:15,color:V('ink')}}>{pos.ticker}</span>
-        <span style={{fontFamily:'IBM Plex Mono,monospace',color:ACC.amber}}>卖 {pos.type==='P'?'Put':'Call'} ${fmt(pos.strike,0)}</span>
-        <span style={{fontFamily:'IBM Plex Mono,monospace',color:V('dim')}}>{qty}手 · 开仓 {pos.openDate}</span>
+      <div className="bg-zinc-900/50 rounded-lg p-3 mb-4 flex gap-4 flex-wrap items-center border border-zinc-800">
+        <span className="font-mono font-bold text-sm text-zinc-100">{pos.ticker}</span>
+        <span className="font-mono text-xs text-amber">卖 {pos.type==='P'?'Put':'Call'} ${fmt(pos.strike,0)}</span>
+        <span className="font-mono text-xs text-zinc-400">{qty}手 · 开仓 {pos.openDate}</span>
       </div>
 
-      <div style={{display:'grid',gridTemplateColumns:'1.4fr 1fr',gap:12,marginBottom:14}}>
+      <div style={{display:'grid',gridTemplateColumns:'1.4fr 1fr',gap:10,marginBottom:12}}>
         <SelectField label="平仓方式" value={closeType} onChange={setCloseType} options={typeOptions}/>
         <DateField label="平仓 / 行权日期" value={closeDate} onChange={setCloseDate}/>
       </div>
 
       {closeType==='manual'&&(
-        <div style={{marginBottom:14}}>
+        <div style={{marginBottom:12}}>
           <NumField label="买回价格（期权现价）" prefix="$" suffix="/股" value={closePrice} onChange={setClosePrice} placeholder="0.50"/>
         </div>
       )}
 
-      {/* 接货专属信息框 */}
       {closeType==='assigned'&&(
-        <div style={{background:`${ACC.amber}0f`,border:`1px solid ${ACC.amber}33`,borderRadius:10,padding:'14px 16px',marginBottom:14}}>
-          <div style={{fontSize:10,color:ACC.amber,letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',marginBottom:12}}>📦 接货详情</div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14}}>
+        <div style={{background:`${ACC.amber}08`,border:`1px solid ${ACC.amber}22`,borderRadius:8,padding:'12px 14px',marginBottom:12}}>
+          <div style={{fontSize:10,color:ACC.amber,letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'IBM Plex Mono',marginBottom:10}}>📦 接货详情</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12}}>
             <Stat label="接货股数" value={`${shares} 股`} color={V('ink')} sub={`${qty}手 × 100`}/>
-            <Stat label="行权价（买入价）" value={`$${fmt(pos.strike,0)}`} color={ACC.amber}/>
+            <Stat label="行权价" value={`$${fmt(pos.strike,0)}`} color={ACC.amber}/>
             <Stat label="实际每股成本" value={`$${fmt(effectiveCost,2)}`} color={ACC.profit} sub="行权价 − 净权利金"/>
           </div>
-          <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${ACC.amber}22`,display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+          <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${ACC.amber}15`,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
             <Stat label="接货占用资金" value={`$${fmt(assignedMarketValue,0)}`} color={ACC.loss} sub="将从 SGOV 扣减"/>
             <Stat label="期权收益（已锁定）" value={fmtM(profit)} color={ACC.profit} sub="权利金 − 手续费"/>
           </div>
         </div>
       )}
 
-      {/* 盈亏预览（非接货） */}
       {closeType!=='assigned'&&(
-        <div style={{background:V('surface'),border:`1px solid ${V('line')}`,borderRadius:10,padding:'14px 16px',marginBottom:16}}>
-          <div style={{fontSize:10,color:V('faint'),letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',marginBottom:12}}>平仓预览</div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14}}>
+        <div className="bg-zinc-900/20 border border-zinc-800 rounded-lg p-3.5 mb-4">
+          <div style={{fontSize:10,color:V('faint'),letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'IBM Plex Mono',marginBottom:10}}>平仓预览</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12}}>
             <Stat label="开仓收入" value={`$${fmt(openPrem)}`} color={ACC.amber}/>
             <Stat label={closeType==='expired'?'到期归零':'买回成本'} value={closeType==='expired'?'$0.00':`-$${fmt(closePrem)}`} color={closeType==='expired'?ACC.profit:ACC.loss}/>
             <Stat label="手续费" value={`-$${fmt(commUsed)}`} color={ACC.loss}/>
           </div>
-          <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${V('line')}`,display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
-            <Stat label="净利润" value={fmtM(profit)} color={profit>=0?ACC.profit:ACC.loss} sz={18}/>
-            <Stat label="年化收益率" value={fmtA(annual)} sub={`持有 ${daysHeld} 天`} color={profit>=0?ACC.profit:ACC.loss} sz={18}/>
+          <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${V('line')}`,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+            <Stat label="净利润" value={fmtM(profit)} color={profit>=0?ACC.profit:ACC.loss} sz={16}/>
+            <Stat label="年化收益率" value={fmtA(annual)} sub={`持有 ${daysHeld} 天`} color={profit>=0?ACC.profit:ACC.loss} sz={16}/>
           </div>
         </div>
       )}
 
-      <div style={{display:'flex',gap:8}}>
+      <div style={{display:'flex',gap:6}}>
         <button disabled={!valid} onClick={()=>onConfirm({
           closePrice:closeType==='assigned'||closeType==='expired'?0:parseFloat(closePrice),
           closeDate,closeType,
-          // 接货额外信息
           ...(closeType==='assigned'?{
             assignedShares:shares,
             assignedCostPerShare:effectiveCost,
             assignedMarketValue,
             assignedTicker:pos.ticker,
           }:{}),
-        })} className="btn btn-primary" style={{minWidth:100}}>
+        })} className="btn btn-primary" style={{minWidth:90}}>
           {closeType==='assigned'?'确认接货':'确认平仓'}
         </button>
         <button onClick={onClose} className="btn btn-ghost">取消</button>
@@ -864,7 +743,6 @@ function CloseModal({pos,commPerSide,onConfirm,onClose}){
   );
 }
 
-/* ══ 观察列表 ══════════════════════════════════════ */
 const DEFAULT_WATCHLIST = ['IBIT','SMH','MRVL','MU','IAU','QQQ','SOFI','VOO','QQQM','GLD'];
 const WL_KEY = 'whl-watchlist';
 
@@ -874,9 +752,6 @@ function getWatchlist(){
     return s?JSON.parse(s):DEFAULT_WATCHLIST;
   }catch{return DEFAULT_WATCHLIST;}
 }
-function saveWatchlist(list){
-  try{localStorage.setItem(WL_KEY,JSON.stringify(list));}catch{}
-}
 
 function WatchlistPanel(){
   const [tickers,setTickers]=useState(()=>getWatchlist());
@@ -885,7 +760,6 @@ function WatchlistPanel(){
   const [loading,setLoading]=useState(false);
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
 
-  // ── 富途 API 管理观察列表 ──
   const fetchWatchlist=async()=>{
     try{
       const res=await fetch(proxyBase+'/api/futu/watchlist',{signal:AbortSignal.timeout(8000)});
@@ -937,13 +811,11 @@ function WatchlistPanel(){
     for(const code of currentList){
       const display=code.replace(/^US\./,'').replace(/^HK\./,'');
       try{
-        // ── 1. 富途：股价 ──
         const sumRes=await fetch(proxyBase+'/api/futu/stock-option-summary?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(10000)});
         const sumData=await sumRes.json();
         const price=(sumData.status==='success'&&sumData.data)?sumData.data.stock_price||sumData.data.last_price:null;
         results[code]={price:price};
 
-        // ── 2. CBOE：IV30 / IV Rank ──
         try{
           const cboeRes=await fetch(proxyBase+'/api/cboe/'+display,{signal:AbortSignal.timeout(10000)});
           if(cboeRes.ok){
@@ -959,7 +831,6 @@ function WatchlistPanel(){
           }
         }catch{}
 
-        // ── 3. 富途：最优 Put 合约（25-50 DTE）──
         const daysRes=await fetch(proxyBase+'/api/futu/option-days?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(8000)});
         const daysData=await daysRes.json();
         if(daysData.status==='success'&&Array.isArray(daysData.data)){
@@ -975,7 +846,6 @@ function WatchlistPanel(){
             const chainRes=await fetch(proxyBase+'/api/futu/option-chain?code='+encodeURIComponent(code)+'&date='+bestDate+'&option_type=PUT',{signal:AbortSignal.timeout(12000)});
             const chainData=await chainRes.json();
             if(chainData.status==='success'&&Array.isArray(chainData.data)&&chainData.data.length){
-              // 有 delta 时用 delta 筛，没有时用行权价距离
               let bestOpt=null;
               const hasDelta=chainData.data.some(o=>o.delta!=null&&Math.abs(o.delta)>0.01);
               if(hasDelta){
@@ -1013,111 +883,106 @@ function WatchlistPanel(){
             }
           }
         }
-      }catch(e){console.warn('refresh '+code+':',e.message);}
+      }catch(e) {console.warn('refresh '+code+':',e.message);}
     }
     setStockData(results);setLoading(false);
   };
 
-
   useEffect(()=>{if(tickers.length)refreshAll();},[]);
 
   const fmt2=(v,d)=>v==null?'--':Number(v).toFixed(d==null?2:d);
-  const cellStyle={padding:'10px 12px',fontFamily:'IBM Plex Mono,monospace',fontSize:13};
 
   return(
-    <div>
-      <div style={{marginBottom:16,display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10}}>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <div style={{fontSize:17,fontWeight:700,color:V('ink')}}>{'观察列表'}</div>
-          <div style={{fontSize:12,color:V('faint'),marginTop:2}}>{'管理标的池，筛选器将从此列表扫描'}</div>
+          <h2 className="text-base font-bold text-zinc-100">观察列表</h2>
+          <p className="text-xs text-zinc-500 mt-0.5">管理标的池，筛选器将从此列表扫描</p>
         </div>
-        <button onClick={refreshAll} disabled={loading} className="btn" style={{background:loading?V('line'):ACC.blueBg,color:loading?V('faint'):ACC.blue,border:'1.5px solid '+(loading?V('line'):ACC.blue+'44'),fontWeight:500,padding:'8px 16px'}}>
+        <button onClick={refreshAll} disabled={loading} className="btn bg-blue/10 text-blue border border-blue/20 hover:bg-blue/20 font-medium px-4 py-2">
           {loading?'拉取中...':'↻ 刷新行情'}
         </button>
       </div>
 
-      <div className="card" style={{padding:'14px 18px',marginBottom:16,display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+      <div className="card p-3 flex gap-2 items-center flex-wrap bg-zinc-900/20">
         <input type="text" value={newTicker} onChange={e=>setNewTicker(e.target.value.toUpperCase())}
           onKeyDown={e=>{if(e.key==='Enter')addTicker();}}
           placeholder="输入标的代码，如 AAPL"
-          style={{flex:1,minWidth:140,padding:'8px 12px',background:V('surface'),border:'1px solid '+V('line'),borderRadius:8,color:V('ink'),fontSize:14,fontFamily:'IBM Plex Mono,monospace'}}/>
-        <button onClick={addTicker} className="btn" style={{background:ACC.amberSoft,color:ACC.amber,border:'1.5px solid '+ACC.amber+'44',fontWeight:600,padding:'8px 16px'}}>
+          className="flex-1 min-w-[140px] px-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-md text-zinc-100 font-mono text-sm outline-none focus:border-amber"/>
+        <button onClick={addTicker} className="btn bg-amber/10 text-amber border border-amber/20 font-semibold px-4 py-2">
           {'+ 添加'}
         </button>
       </div>
 
       {tickers.length>0&&(
-        <div style={{overflowX:'auto'}}>
-          <div style={{display:'grid',gridTemplateColumns:'1.1fr 0.8fr 0.7fr 0.6fr 0.9fr 0.7fr 0.9fr 0.7fr 0.7fr 0.3fr',gap:0,padding:'0 0 8px',marginBottom:4}}>
-            {['标的','股价','IV30','IVR','到期/DTE','行权价','Bid/Ask','中间价','年化',''].map(h=>(
-              <div key={h} style={{fontSize:10,color:V('faint'),letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',padding:'0 10px'}}>{h}</div>
-            ))}
-          </div>
-
-          {tickers.map(t=>{
-            const d=stockData[t]||{};
-            const display=t.replace(/^US\./,'').replace(/^HK\./,'');
-            const rankVal=d.ivRank!=null?d.ivRank:null;
-            const rankColor=rankVal==null?V('faint'):(rankVal>=70?ACC.profit:(rankVal>=40?ACC.amber:V('dim')));
-            return(
-              <div key={t} className="card" style={{display:'grid',gridTemplateColumns:'1.1fr 0.8fr 0.7fr 0.6fr 0.9fr 0.7fr 0.9fr 0.7fr 0.7fr 0.3fr',gap:0,marginBottom:6,borderLeft:'3px solid '+rankColor}}>
-                <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',gap:10})}>
-                  <span style={{fontWeight:700,fontSize:15,color:V('ink')}}>{display}</span>
-                </div>
-                <div style={cellStyle}>
-                  <span style={{color:d.price?V('ink'):V('faint'),fontWeight:600}}>{d.price?('$'+fmt2(d.price)):'--'}</span>
-                </div>
-                <div style={cellStyle}>
-                  <span style={{color:V('dim')}}>{d.iv30!=null?(d.iv30.toFixed(1)+'%'):'--'}</span>
-                </div>
-                <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',gap:5})}>
-                  <span style={{color:rankColor,fontWeight:600,fontSize:13}}>{rankVal!=null?rankVal:'--'}</span>
-                  {rankVal!=null&&(
-                    <div style={{height:4,borderRadius:2,background:V('line'),width:22,flexShrink:0}}>
-                      <div style={{height:4,borderRadius:2,width:(Math.min(rankVal,100)+'%'),background:rankColor}}/>
-                    </div>
-                  )}
-                </div>
-                <div style={cellStyle}>
-                  {d.bestExpiry?<span style={{color:V('dim'),fontSize:11}}>{d.bestExpiry.slice(5)+' ('+d.bestDte+'天)'}</span>:<span style={{color:V('faint')}}>{'--'}</span>}
-                </div>
-                <div style={cellStyle}>
-                  <span style={{color:d.bestStrike?ACC.amber:V('faint'),fontWeight:600}}>{d.bestStrike?('$'+fmt2(d.bestStrike,0)):'--'}</span>
-                </div>
-                <div style={cellStyle}>
-                  {d.bestBid!=null?(
-                    <span style={{color:V('dim'),fontSize:12}}>{fmt2(d.bestBid)+' / '+fmt2(d.bestAsk)}</span>
-                  ):<span style={{color:V('faint')}}>{'--'}</span>}
-                </div>
-                <div style={cellStyle}>
-                  <span style={{color:d.bestMid?V('ink'):V('faint'),fontWeight:600}}>{d.bestMid?('$'+fmt2(d.bestMid,2)):'--'}</span>
-                </div>
-                <div style={cellStyle}>
-                  {d.bestAnnual!=null?(
-                    <span style={{color:d.bestAnnual>=15?ACC.profit:(d.bestAnnual>=8?ACC.amber:V('dim')),fontWeight:700}}>{'+'+fmt2(d.bestAnnual,1)+'%'}</span>
-                  ):<span style={{color:V('faint')}}>{'--'}</span>}
-                </div>
-                <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',justifyContent:'center'})}>
-                  <button onClick={()=>removeTicker(t)} style={{background:'none',border:'none',color:ACC.loss,cursor:'pointer',fontSize:11,padding:'2px 6px',opacity:.6}}>{'\u2715'}</button>
-                </div>
-              </div>
-            );
-          })}
+        <div className="overflow-x-auto border border-zinc-800 rounded-lg">
+          <table className="w-full text-left border-collapse bg-zinc-900/10">
+            <thead>
+              <tr className="border-b border-zinc-800 text-[10px] text-zinc-500 tracking-wider font-mono uppercase bg-zinc-950/40">
+                <th className="p-3">标的</th>
+                <th className="p-3">股价</th>
+                <th className="p-3">IV30</th>
+                <th className="p-3">IVR</th>
+                <th className="p-3">到期/DTE</th>
+                <th className="p-3">行权价</th>
+                <th className="p-3">Bid/Ask</th>
+                <th className="p-3">中间价</th>
+                <th className="p-3">年化</th>
+                <th className="p-3 text-center w-10"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800/50 font-mono text-xs">
+              {tickers.map(t=>{
+                const d=stockData[t]||{};
+                const display=t.replace(/^US\./,'').replace(/^HK\./,'');
+                const rankVal=d.ivRank!=null?d.ivRank:null;
+                const rankColor=rankVal==null?'text-zinc-500':(rankVal>=70?'text-profit':(rankVal>=40?'text-amber':'text-zinc-400'));
+                const barColor=rankVal==null?'bg-zinc-800':(rankVal>=70?'bg-profit':(rankVal>=40?'bg-amber':'bg-zinc-500'));
+                return(
+                  <tr key={t} className="hover:bg-zinc-800/20 transition-colors">
+                    <td className="p-3 font-bold text-sm text-zinc-100">{display}</td>
+                    <td className="p-3 font-bold text-zinc-200">{d.price?(`$${fmt2(d.price)}`):'--'}</td>
+                    <td className="p-3 text-zinc-400">{d.iv30!=null?(d.iv30.toFixed(1)+'%'):'--'}</td>
+                    <td className="p-3">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`font-bold ${rankColor}`}>{rankVal!=null?rankVal:'--'}</span>
+                        {rankVal!=null&&(
+                          <div className="h-1 rounded-full bg-zinc-800 w-12 overflow-hidden">
+                            <div className={`h-full ${barColor}`} style={{width:(Math.min(rankVal,100)+'%')}}/>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-3 text-zinc-400">{d.bestExpiry?`${d.bestExpiry.slice(5)} (${d.bestDte}天)`:'--'}</td>
+                    <td className="p-3 font-bold text-amber">{d.bestStrike?(`$${fmt2(d.bestStrike,0)}`):'--'}</td>
+                    <td className="p-3 text-zinc-400 text-[11px]">{d.bestBid!=null?`${fmt2(d.bestBid)} / ${fmt2(d.bestAsk)}`:'--'}</td>
+                    <td className="p-3 font-bold text-zinc-200">{d.bestMid?(`$${fmt2(d.bestMid,2)}`):'--'}</td>
+                    <td className="p-3">
+                      {d.bestAnnual!=null?(
+                        <span className={`font-bold ${d.bestAnnual>=15?'text-profit':(d.bestAnnual>=8?'text-amber':'text-zinc-400')}`}>{'+'+fmt2(d.bestAnnual,1)+'%'}</span>
+                      ):'--'}
+                    </td>
+                    <td className="p-3 text-center">
+                      <button onClick={()=>removeTicker(t)} className="text-loss/60 hover:text-loss transition-colors p-1 text-sm">✕</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
       {!tickers.length&&(
-        <div style={{textAlign:'center',padding:'40px 20px',color:V('faint'),border:'1.5px dashed '+V('line'),borderRadius:16}}>
-          <div style={{fontSize:15,marginBottom:6,color:V('dim')}}>{'观察列表为空'}</div>
-          <div style={{fontSize:12}}>{'在上方输入标的代码添加'}</div>
+        <div className="text-center py-10 text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/5">
+          <div className="text-sm font-medium text-zinc-400">观察列表为空</div>
+          <div className="text-xs mt-1">在上方输入标的代码添加</div>
         </div>
       )}
     </div>
   );
 }
 
-/* ══ 期权筛选器 ══════════════════════════════════════ */
-// 从观察列表动态读取标的池
 function getScanWatchlist(){
   return getWatchlist().map(t=>({ticker:t,name:t,sector:''}));
 }
@@ -1153,14 +1018,12 @@ function ScanPanel(){
     setLoading(true);setResults([]);setError('');
     const today=new Date();
     const found=[];
-    // 从富途获取观察列表
     let watchlist=[];
     try{
       const wlRes=await fetch(proxyBase+'/api/futu/watchlist',{signal:AbortSignal.timeout(8000)});
       const wlData=await wlRes.json();
       watchlist=wlData.data||[];
     }catch{watchlist=getWatchlist();}
-    // 确保所有 code 带市场前缀
     watchlist=watchlist.map(c=>(c.startsWith('US.')||c.startsWith('HK.'))?c:'US.'+c);
     if(!watchlist.length){setError('观察列表为空，请先在观察列表 Tab 添加标的');setLoading(false);return;}
 
@@ -1168,13 +1031,10 @@ function ScanPanel(){
       const display=code.replace(/^US\./,'').replace(/^HK\./,'');
       setProgress('扫描 '+display+'…');
       try{
-        // 1. 获取到期日列表
         const daysRes=await fetch(proxyBase+'/api/futu/option-days?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(10000)});
         const daysData=await daysRes.json();
         if(daysData.status!=='success'||!Array.isArray(daysData.data))continue;
 
-        console.log(display+' 到期日数量:',daysData.data.length,daysData.data.map(d=>d.strike_time).slice(0,5));
-        // 2. 筛选 DTE 在范围内的到期日
         const validDates=daysData.data.filter(d=>{
           const exp=new Date(d.strike_time);
           const dte=Math.round((exp-today)/86400000);
@@ -1182,7 +1042,6 @@ function ScanPanel(){
         });
         if(!validDates.length)continue;
 
-        // 3. 获取正股摘要（IV/HV/IV Rank）
         let stockSummary={};
         try{
           const sumRes=await fetch(proxyBase+'/api/futu/stock-option-summary?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(10000)});
@@ -1190,8 +1049,6 @@ function ScanPanel(){
           if(sumData.status==='success')stockSummary=sumData.data||{};
         }catch{}
 
-        console.log(display+' 符合DTE的日期:',validDates.length,validDates.map(d=>d.strike_time.split(' ')[0]));
-        // 4. 对每个到期日拉 Put 期权链
         for(const dateObj of validDates){
           const dateStr=dateObj.strike_time.split(' ')[0];
           const chainRes=await fetch(proxyBase+'/api/futu/option-chain?code='+encodeURIComponent(code)+'&date='+dateStr+'&option_type=PUT',{signal:AbortSignal.timeout(12000)});
@@ -1202,7 +1059,6 @@ function ScanPanel(){
           const dte=Math.round((exp-today)/86400000);
           if(dte<=0)continue;
 
-          console.log(display+' '+dateStr+' Put数量:',chainData.data.length);
           for(const opt of chainData.data){
             const delta=Math.abs(opt.delta||0);
             if(delta<Number(minDelta)||delta>Number(maxDelta))continue;
@@ -1239,7 +1095,6 @@ function ScanPanel(){
         console.warn('Scan '+code+':',err.message);
       }
     }
-    // 同一标的+到期日只取年化最高的
     const best={};
     for(const r of found){
       const key=r.ticker+'-'+r.expiry;
@@ -1256,170 +1111,166 @@ function ScanPanel(){
   const filtered=filterSector==='全部'?results:results.filter(r=>r.sector===filterSector);
   const fmt2=(v,d)=>v==null?'—':Number(v).toFixed(d==null?2:d);
 
-  const inputStyle={width:55,padding:'4px 6px',background:V('surface'),border:'1px solid '+V('line'),borderRadius:6,color:V('ink'),fontSize:13,fontFamily:'IBM Plex Mono,monospace'};
-  const labelStyle={fontSize:10,color:V('faint'),letterSpacing:'.1em',textTransform:'uppercase',marginBottom:6};
-  const scanBtnStyle={background:loading?V('line'):ACC.amberSoft,color:loading?V('faint'):ACC.amber,border:'1.5px solid '+(loading?V('line'):ACC.amber+'44'),fontWeight:600,padding:'8px 20px'};
-
   return(
-    <div>
-      <div style={{marginBottom:16,display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10}}>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <div style={{fontSize:17,fontWeight:700,color:V('ink')}}>{'期权筛选器'}</div>
-          <div style={{fontSize:12,color:V('faint'),marginTop:2}}>{'卖 Put 候选 · CBOE 延迟数据（约15分钟）'}</div>
+          <h2 className="text-base font-bold text-zinc-100">期权筛选器</h2>
+          <p className="text-xs text-zinc-500 mt-0.5">卖 Put 候选 · 智能深度扫描中枢</p>
         </div>
-        <button onClick={scan} disabled={loading} className="btn" style={scanBtnStyle}>
-          {loading?('⟳ '+progress):'🔍 开始扫描'}
+        <button onClick={scan} disabled={loading} className="btn bg-amber/10 text-amber border border-amber/20 font-semibold px-4 py-2">
+          {loading?(`⟳ ${progress}`):'🔍 开始扫描'}
         </button>
       </div>
 
-      <div className="card" style={{padding:'14px 18px',marginBottom:14,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:12}}>
+      <div className="card p-3.5 bg-zinc-900/10 grid grid-cols-2 md:grid-cols-4 gap-4">
         <div>
-          <div style={labelStyle}>{'到期天数'}</div>
-          <div style={{display:'flex',gap:6,alignItems:'center'}}>
-            <input type="text" inputMode="numeric" value={minDte} onChange={e=>setMinDte(e.target.value)} style={inputStyle}/>
-            <span style={{color:V('faint'),fontSize:11}}>{'~'}</span>
-            <input type="text" inputMode="numeric" value={maxDte} onChange={e=>setMaxDte(e.target.value)} style={inputStyle}/>
-            <span style={{color:V('faint'),fontSize:11}}>{'天'}</span>
+          <label className="text-[10px] text-zinc-500 tracking-wider font-mono uppercase block mb-1">到期天数</label>
+          <div className="flex gap-1.5 items-center font-mono text-xs text-zinc-400">
+            <input type="text" inputMode="numeric" value={minDte} onChange={e=>setMinDte(e.target.value)} className="w-12 px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-center text-zinc-100 outline-none"/>
+            <span>~</span>
+            <input type="text" inputMode="numeric" value={maxDte} onChange={e=>setMaxDte(e.target.value)} className="w-12 px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-center text-zinc-100 outline-none"/>
+            <span className="text-[11px] text-zinc-500 ml-1">天</span>
           </div>
         </div>
         <div>
-          <div style={labelStyle}>{'Delta 区间'}</div>
-          <div style={{display:'flex',gap:6,alignItems:'center'}}>
-            <input type="text" inputMode="decimal" value={minDelta} onChange={e=>setMinDelta(e.target.value)} style={inputStyle}/>
-            <span style={{color:V('faint'),fontSize:11}}>{'~'}</span>
-            <input type="text" inputMode="decimal" value={maxDelta} onChange={e=>setMaxDelta(e.target.value)} style={inputStyle}/>
+          <label className="text-[10px] text-zinc-500 tracking-wider font-mono uppercase block mb-1">Delta 区间</label>
+          <div className="flex gap-1.5 items-center font-mono text-xs text-zinc-400">
+            <input type="text" inputMode="decimal" value={minDelta} onChange={e=>setMinDelta(e.target.value)} className="w-14 px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-center text-zinc-100 outline-none"/>
+            <span>~</span>
+            <input type="text" inputMode="decimal" value={maxDelta} onChange={e=>setMaxDelta(e.target.value)} className="w-14 px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-center text-zinc-100 outline-none"/>
           </div>
         </div>
         <div>
-          <div style={labelStyle}>{'最低年化'}</div>
-          <div style={{display:'flex',gap:6,alignItems:'center'}}>
-            <input type="text" inputMode="numeric" value={minAnnual} onChange={e=>setMinAnnual(e.target.value)} style={inputStyle}/>
-            <span style={{color:V('faint'),fontSize:11}}>{'%'}</span>
+          <label className="text-[10px] text-zinc-500 tracking-wider font-mono uppercase block mb-1">最低年化</label>
+          <div className="flex gap-1 items-center font-mono text-xs text-zinc-400">
+            <input type="text" inputMode="numeric" value={minAnnual} onChange={e=>setMinAnnual(e.target.value)} className="w-12 px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-center text-zinc-100 outline-none"/>
+            <span className="text-zinc-500 ml-0.5">%</span>
           </div>
         </div>
         <div>
-          <div style={labelStyle}>{'排序'}</div>
-          <select value={sortKey} onChange={e=>setSortKey(e.target.value)} style={{padding:'4px 8px',background:V('surface'),border:'1px solid '+V('line'),borderRadius:6,color:V('ink'),fontSize:12}}>
-            <option value="annualPct">{'年化收益'}</option>
-            <option value="ivRank">{'IV Rank'}</option>
-            <option value="delta">{'Delta'}</option>
-            <option value="dte">{'到期天数'}</option>
+          <label className="text-[10px] text-zinc-500 tracking-wider font-mono uppercase block mb-1">排序</label>
+          <select value={sortKey} onChange={e=>setSortKey(e.target.value)} className="px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-zinc-200 text-xs font-mono outline-none cursor-pointer">
+            <option value="annualPct">年化收益</option>
+            <option value="ivRank">IV Rank</option>
+            <option value="delta">Delta</option>
+            <option value="dte">到期天数</option>
           </select>
         </div>
       </div>
 
       {results.length>0&&(
-        <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}}>
+        <div className="flex gap-1.5 flex-wrap">
           {sectors.map(s=>{
             const active=filterSector===s;
-            const chipStyle={padding:'4px 12px',borderRadius:20,fontSize:12,cursor:'pointer',background:active?ACC.amberSoft:V('surface'),color:active?ACC.amber:V('dim'),border:'1px solid '+(active?ACC.amber+'44':V('line'))};
-            return <button key={s} onClick={()=>setFilterSector(s)} style={chipStyle}>{s}</button>;
+            return <button key={s} onClick={()=>setFilterSector(s)} className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${active?'bg-amber/10 text-amber border-amber/20':'bg-zinc-900/40 text-zinc-400 border-zinc-800 hover:text-zinc-200'}`}>{s}</button>;
           })}
         </div>
       )}
 
       {error&&(
-        <div style={{padding:'12px 16px',background:ACC.amber+'10',border:'1px solid '+ACC.amber+'33',borderRadius:10,fontSize:13,color:ACC.amber,marginBottom:12}}>{error}</div>
+        <div className="p-3 bg-amber/5 border border-amber/20 rounded-lg text-xs text-amber font-medium">{error}</div>
       )}
 
       {filtered.length>0&&(
-        <div style={{overflowX:'auto'}}>
-          <div style={{display:'grid',gridTemplateColumns:'1.2fr 1fr 0.7fr 0.7fr 0.7fr 0.7fr 0.8fr 0.7fr 0.8fr 0.7fr',gap:0,padding:'0 0 8px',marginBottom:4,minWidth:680}}>
-            {['标的','行权价','DTE','Delta','Bid','Ask','中间价','IV','年化','胜率'].map(h=>(
-              <div key={h} style={{fontSize:10,color:V('faint'),letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',padding:'0 6px'}}>{h}</div>
-            ))}
-          </div>
-
-          {filtered.map((r,i)=>{
-            const annualColor=r.annualPct>=15?ACC.profit:(r.annualPct>=8?ACC.amber:V('dim'));
-            const ivRankColor=r.ivRank==null?V('faint'):(r.ivRank>=70?ACC.profit:(r.ivRank>=40?ACC.amber:V('dim')));
-            const rowBorderColor=r.ivRank>=70?ACC.profit:(r.ivRank>=40?ACC.amber:V('line'));
-            const rowStyle={display:'grid',gridTemplateColumns:'1.2fr 1fr 0.7fr 0.7fr 0.7fr 0.7fr 0.8fr 0.7fr 0.8fr 0.7fr',gap:0,padding:'10px 0',marginBottom:6,borderLeft:'3px solid '+rowBorderColor};
-            const cc={padding:'0 6px',display:'flex',alignItems:'center'};
-            return(
-              <div key={i} className="card" style={rowStyle}>
-                <div style={{padding:'0 6px'}}>
-                  <div style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:14,color:V('ink')}}>{r.ticker}</div>
-                  {r.stockIV!=null&&<div style={{fontSize:10,color:V('faint'),marginTop:1}}>{'IV '+r.stockIV.toFixed(1)+'%'}</div>}
-                </div>
-                <div style={{padding:'0 6px',display:'flex',flexDirection:'column',justifyContent:'center'}}>
-                  <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,color:ACC.amber,fontWeight:600}}>{'$'+fmt2(r.strike,0)}</span>
-                  <span style={{fontSize:10,color:V('faint'),marginTop:1}}>{r.expiry}</span>
-                </div>
-                <div style={cc}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:r.dte<=35?ACC.profit:V('dim')}}>{r.dte+'天'}</span></div>
-                <div style={cc}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('ink')}}>{'-'+fmt2(r.delta,3)}</span></div>
-                <div style={cc}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('dim')}}>{'$'+fmt2(r.bid)}</span></div>
-                <div style={cc}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('dim')}}>{'$'+fmt2(r.ask)}</span></div>
-                <div style={cc}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,fontWeight:600,color:V('ink')}}>{'$'+fmt2(r.mid)}</span></div>
-                <div style={cc}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('dim')}}>{r.iv!=null?(r.iv.toFixed(1)+'%'):'--'}</span></div>
-                <div style={cc}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:15,fontWeight:700,color:annualColor}}>{'+'+fmt2(r.annualPct,1)+'%'}</span></div>
-                <div style={cc}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:r.profitProb!=null&&r.profitProb>=80?ACC.profit:V('dim')}}>{r.profitProb!=null?(r.profitProb.toFixed(0)+'%'):'--'}</span></div>
-              </div>
-            );
-          })}
-
-          <div style={{fontSize:11,color:V('faint'),marginTop:12,lineHeight:1.8,padding:'0 4px'}}>
-            <div>{'年化 = (中间价×100 − 手续费$0.65) ÷ (行权价×100) × (365÷DTE)，实际成交以券商盘口为准'}</div>
-            <div>{'IVR = IV Rank，基于 CBOE iv30 过去52周高低点估算，仅供参考'}</div>
-            <div style={{marginTop:4}}>
-              <span style={{color:ACC.profit}}>{'■'}</span>
-              <span>{' IVR≥70 高IV适合卖方   '}</span>
-              <span style={{color:ACC.amber}}>{'■'}</span>
-              <span>{' IVR 40-70   '}</span>
-              <span style={{color:V('faint')}}>{'■'}</span>
-              <span>{' IVR较低'}</span>
+        <div className="overflow-x-auto border border-zinc-800 rounded-lg">
+          <table className="w-full text-left border-collapse bg-zinc-900/10 min-w-[680px]">
+            <thead>
+              <tr className="border-b border-zinc-800 text-[10px] text-zinc-500 tracking-wider font-mono uppercase bg-zinc-950/40">
+                <th className="p-3">标的</th>
+                <th className="p-3">行权价</th>
+                <th className="p-3">DTE</th>
+                <th className="p-3">Delta</th>
+                <th className="p-3">Bid</th>
+                <th className="p-3">Ask</th>
+                <th className="p-3">中间价</th>
+                <th className="p-3">IV</th>
+                <th className="p-3">年化</th>
+                <th className="p-3 font-medium">胜率</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800/40 font-mono text-xs">
+              {filtered.map((r,i)=>{
+                const annualColor=r.annualPct>=15?'text-profit':(r.annualPct>=8?'text-amber':'text-zinc-400');
+                const rowBorderColor=r.ivRank>=70?'border-l-[3px] border-l-profit':(r.ivRank>=40?'border-l-[3px] border-l-amber':'border-l-[3px] border-l-zinc-800');
+                return(
+                  <tr key={i} className={`hover:bg-zinc-800/15 transition-colors ${rowBorderColor}`}>
+                    <td className="p-3">
+                      <div className="font-bold text-zinc-100 text-sm">{r.ticker}</div>
+                      {r.stockIV!=null&&<div className="text-[10px] text-zinc-500 mt-0.5">IV {r.stockIV.toFixed(1)}%</div>}
+                    </td>
+                    <td className="p-3">
+                      <div className="font-bold text-amber text-sm">${fmt2(r.strike,0)}</div>
+                      <div className="text-[10px] text-zinc-500 mt-0.5">{r.expiry}</div>
+                    </td>
+                    <td className={`p-3 font-semibold ${r.dte<=35?'text-profit':'text-zinc-400'}`}>{r.dte}天</td>
+                    <td className="p-3 text-zinc-200">-{fmt2(r.delta,3)}</td>
+                    <td className="p-3 text-zinc-400">${fmt2(r.bid)}</td>
+                    <td className="p-3 text-zinc-400">${fmt2(r.ask)}</td>
+                    <td className="p-3 font-bold text-zinc-200">${fmt2(r.mid)}</td>
+                    <td className="p-3 text-zinc-400">{r.iv!=null?(r.iv.toFixed(1)+'%'):'--'}</td>
+                    <td className={`p-3 font-bold text-sm ${annualColor}`}>+{fmt2(r.annualPct,1)}%</td>
+                    <td className={`p-3 font-medium ${r.profitProb!=null&&r.profitProb>=80?'text-profit':'text-zinc-400'}`}>{r.profitProb!=null?(r.profitProb.toFixed(0)+'%'):'--'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className="p-3 border-t border-zinc-800 text-[11px] text-zinc-500 space-y-1 bg-zinc-950/20">
+            <div>• 年化 = (中间价×100 − 手续费$0.65) ÷ (行权价×100) × (365÷DTE)，实际成交以券商盘口为准</div>
+            <div>• IVR = IV Rank，基于 CBOE iv30 过去52周高低点估算，高IVR更适合充当卖方流派</div>
+            <div className="pt-1 flex gap-4 text-[10.5px]">
+              <span><span className="text-profit">■</span> IVR ≥ 70 高IV区</span>
+              <span><span className="text-amber">■</span> IVR 40 - 70 中度活跃</span>
+              <span><span className="text-zinc-600">■</span> IVR 较低</span>
             </div>
           </div>
         </div>
       )}
 
       {!loading&&!results.length&&!error&&(
-        <div style={{textAlign:'center',padding:'60px 20px',color:V('faint'),border:'1.5px dashed '+V('line'),borderRadius:16}}>
-          <div style={{fontSize:36,marginBottom:12,opacity:.3}}>{'🔍'}</div>
-          <div style={{fontSize:15,marginBottom:6,color:V('dim')}}>{'点击「开始扫描」'}</div>
-          <div style={{fontSize:12}}>{'将从观察列表中 '+getWatchlist().length+' 个标的中筛选 Put 合约'}</div>
-          <div style={{fontSize:11,marginTop:8,color:V('faint')}}>{'标的池：'+getWatchlist().join(' · ')}</div>
+        <div className="text-center py-14 text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/5">
+          <div className="text-3xl opacity-30 mb-2">🔍</div>
+          <div className="text-sm font-medium text-zinc-400">点击「开始扫描」</div>
+          <div className="text-xs mt-1">将自动从观察列表中的 {getWatchlist().length} 个标的中寻找理想 Put 候选</div>
         </div>
       )}
     </div>
   );
 }
 
-/* ══ SGOV 面板 ══════════════════════════════════════ */
 function SgovPanel({sgov,onUpdate,totalMarginUsed}){
   const s=sgov||{};
   const si=calcSgov(s);
   const sgovVsMargin=(si?.total&&totalMarginUsed>0)?calcAnnual(si.total,totalMarginUsed,si.days):null;
-  return(
-    <div className="card anim-in" style={{borderColor:`rgba(45,212,191,.25)`,padding:'16px 20px',marginBottom:16}}>
-      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
-        <div style={{width:3,height:16,borderRadius:2,background:ACC.teal,flexShrink:0}}/>
-        <span style={{fontWeight:700,fontSize:14,color:ACC.teal}}>SGOV 保证金底仓</span>
-        <span style={{fontSize:11,color:V('faint'),fontFamily:'IBM Plex Mono,monospace'}}>嘉信杠杆 · 利息来源</span>
+  return (
+    <div className="card border border-teal/20 p-4 bg-zinc-900/10 rounded-xl">
+      <div className="flex items-center gap-2 mb-4">
+        <div className="w-0.5 h-3.5 bg-teal rounded-full" />
+        <h3 className="font-bold text-sm text-teal">SGOV 保证金底仓</h3>
+        <span className="text-[11px] text-zinc-500 font-mono">嘉信低风风险套利资金源</span>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'1.6fr 1fr .9fr 1.1fr',gap:12,marginBottom:si?14:0}}>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <NumField label="当前市值" prefix="$" value={s.marketValue??''} placeholder="100000" onChange={v=>onUpdate({...s,marketValue:parseFloat(v)||null})}/>
         <DateField label="计息起始日" value={s.startDate??''} onChange={v=>onUpdate({...s,startDate:v})}/>
         <NumField label="年化利率" hint="默认4%" suffix="%" value={s.annualRate??''} placeholder="4.0" onChange={v=>onUpdate({...s,annualRate:parseFloat(v)||null})}/>
-        <NumField label="手动修正" hint="可±" prefix="$" value={s.manualAdj??''} placeholder="0" onChange={v=>onUpdate({...s,manualAdj:parseFloat(v)||null})}/>
+        <NumField label="手动修正" hint="可跨周期" prefix="$" value={s.manualAdj??''} placeholder="0" onChange={v=>onUpdate({...s,manualAdj:parseFloat(v)||null})}/>
       </div>
       {si&&(
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))',gap:14,paddingTop:12,borderTop:`1px solid ${V('line')}`}}>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-3 border-t border-zinc-800/60 bg-zinc-950/10 p-2.5 rounded-lg">
           <Stat label="SGOV 市值" value={`$${fmt(s.marketValue,0)}`} color={ACC.teal}/>
-          <Stat label={`累计利息·${si.days}天`} value={fmtM(si.total)} color={ACC.profit} sub={`自动 $${fmt(si.autoInt)}${s.manualAdj?` + 修正 $${fmt(s.manualAdj)}`:''}`}/>
-          <Stat label="SGOV 年化" value={fmtA(si.rate)} color={ACC.teal}/>
-          {totalMarginUsed>0&&s.marketValue&&<Stat label="保证金占用比"
+          <Stat label={`累计利息 · ${si.days}天`} value={fmtM(si.total)} color={ACC.profit} sub={`自动 $${fmt(si.autoInt)}`}/>
+          <Stat label="SGOV 静态年化" value={fmtA(si.rate)} color={ACC.teal}/>
+          {totalMarginUsed>0&&s.marketValue&&<Stat label="保证金占用率"
             value={`${((totalMarginUsed/s.marketValue)*100).toFixed(1)}%`}
             color={(totalMarginUsed/s.marketValue)*100>80?ACC.loss:(totalMarginUsed/s.marketValue)*100>60?ACC.amber:ACC.profit}
             sub={`$${fmt(totalMarginUsed,0)} / $${fmt(s.marketValue,0)}`}/>}
-          {sgovVsMargin!=null&&<Stat label="利息÷期权保证金" value={fmtA(sgovVsMargin)} color={ACC.purple} sub="SGOV利息相对保证金年化" hl={ACC.purple}/>}
         </div>
       )}
     </div>
   );
 }
 
-/* ══ 汇总栏 ══════════════════════════════════════ */
 function SummaryBar({positions,commPerSide,sgov}){
   const rs=positions.map(p=>calc(p,commPerSide));
   const totalMargin=rs.reduce((s,r)=>s+r.capital,0);
@@ -1429,15 +1280,12 @@ function SummaryBar({positions,commPerSide,sgov}){
   const withOpt=positions.filter(p=>p.optionPrice!=null);
   const totalProfitNow=withOpt.reduce((s,p)=>s+(calc(p,commPerSide).profitNow||0),0);
 
-  // ── 年化：用总利润÷总保证金，资金加权，避免简单平均失真 ──
-  // 「持到到期」：净权利金 ÷ 总保证金，天数用资金加权平均持有天数
   const avgExp=(()=>{
     if(!positions.length||totalMargin===0)return null;
     const wDays=rs.reduce((s,r)=>s+r.daysTotal*(r.capital||0),0)/totalMargin;
     return calcAnnual(totalNet,totalMargin,wDays);
   })();
 
-  // 「现在卖出」：当前浮动利润 ÷ 总保证金（仅有期权现价的仓位参与）
   const avgNow=(()=>{
     if(!withOpt.length)return null;
     const margin=withOpt.reduce((s,p)=>s+(calc(p,commPerSide).capital||0),0);
@@ -1450,54 +1298,55 @@ function SummaryBar({positions,commPerSide,sgov}){
   const si=calcSgov(sgov);
   const marginRatio=sgovMV&&totalMargin>0?(totalMargin/sgovMV)*100:null;
 
-  // 对SGOV年化：总利润 ÷ SGOV市值
-  const nowVsSgov=(totalProfitNow!=null&&sgovMV&&withOpt.length)?(()=>{
+  const nowVsSgov=(totalProfitNow!=null&&sgovMV&&withOpt.length)?(()=> {
     const margin=withOpt.reduce((s,p)=>s+(calc(p,commPerSide).capital||0),0);
     const wDays=withOpt.map(p=>calc(p,commPerSide)).reduce((s,r)=>s+r.daysHeld*(r.capital||0),0)/Math.max(1,margin);
     return calcAnnual(totalProfitNow,sgovMV,wDays);
   })():null;
-  const expVsSgov=(avgExp!=null&&sgovMV)?(()=>{
+  const expVsSgov=(avgExp!=null&&sgovMV)?(()=> {
     const wDays=rs.reduce((s,r)=>s+r.daysTotal*(r.capital||0),0)/Math.max(1,totalMargin);
     return calcAnnual(totalNet,sgovMV,wDays);
   })():null;
-  const Box=({label,value,color,sub,hl,sz=20})=>(
-    <div style={{display:'flex',flexDirection:'column',gap:4,...(hl?{borderLeft:`2px solid ${hl}`,paddingLeft:10}:{})}}>
-      <span className="section-label">{label}</span>
-      <span style={{fontSize:sz,fontWeight:700,color:color||V('ink'),fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{value}</span>
-      {sub&&<span style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>{sub}</span>}
+
+  const Box=({label,value,color,sub,hl,sz=18})=>(
+    <div className={`flex flex-col gap-1 ${hl?'border-l-2 border-l-profit pl-2.5':''}`}>
+      <span className="text-[10px] text-zinc-500 font-mono tracking-wider uppercase">{label}</span>
+      <span className="font-mono font-bold text-zinc-100" style={{fontSize:sz,color:color}}>{value}</span>
+      {sub&&<span className="text-[10.5px] text-zinc-500 font-mono truncate">{sub}</span>}
     </div>
   );
+  
   const BigA=({label,main,mainColor,vs,sub})=>(
-    <div style={{display:'flex',flexDirection:'column',gap:6}}>
-      <span className="section-label">{label}</span>
-      <div style={{display:'flex',alignItems:'baseline',gap:8,flexWrap:'wrap'}}>
-        <span style={{fontSize:24,fontWeight:700,color:mainColor,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{main}</span>
-        {vs!=null&&<span className="badge" style={{color:ACC.purple,background:ACC.purpleBg,borderColor:`${ACC.purple}44`,fontSize:13}}>{fmtA(vs)} /SGOV</span>}
+    <div className="flex flex-col gap-1.5 p-3 rounded-lg bg-zinc-950/20 border border-zinc-850/40">
+      <span className="text-[10px] text-zinc-500 font-mono tracking-wider uppercase">{label}</span>
+      <div className="flex items-baseline gap-2 flex-wrap">
+        <span className="text-xl font-mono font-bold" style={{color:mainColor}}>{main}</span>
+        {vs!=null&&<span className="badge text-purple bg-purple/5 border-purple/10 text-[11.5px] font-mono">{fmtA(vs)} /SGOV</span>}
       </div>
-      {sub&&<span style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>{sub}</span>}
+      {sub&&<span className="text-[11px] text-zinc-500 font-mono">{sub}</span>}
     </div>
   );
-  return(
-    <div className="card anim-in" style={{padding:'16px 20px',marginBottom:16}}>
-      <div className="summary-grid" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:14,marginBottom:14,paddingBottom:14,borderBottom:`1px solid ${V('line')}`}}>
-        <Box label="期权总保证金" value={`$${fmt(totalMargin,0)}`} color={V('dim')} sub={`${positions.length} 个仓位`}/>
-        <Box label="收入权利金" value={`$${fmt(totalGross)}`} color={ACC.amber} sub="开仓时收取的总权利金"/>
-        <Box label="手续费合计" value={`-$${fmt(totalComm)}`} color={ACC.loss} sub="持到到期单边×仓位数"/>
-        <Box label="净权利金（到期）" value={`$${fmt(totalNet)}`} color={ACC.profit} hl={ACC.profit}/>
-        {withOpt.length>0&&<Box label="当前浮动净利" value={fmtM(totalProfitNow)} color={totalProfitNow>=0?ACC.profit:ACC.loss} sub={`${withOpt.length}/${positions.length} 已录价`}/>}
-        {sgovMV&&marginRatio!=null&&<Box label="保证金/SGOV" value={`${marginRatio.toFixed(1)}%`} color={marginRatio>80?ACC.loss:marginRatio>60?ACC.amber:ACC.profit} sub={`$${fmt(totalMargin,0)}/$${fmt(sgovMV,0)}`}/>}
+
+  return (
+    <div className="card p-4 mb-4 bg-zinc-900/10">
+      <div className="summary-grid grid grid-cols-2 md:grid-cols-5 gap-4 mb-4 pb-4 border-b border-zinc-800/50">
+        <Box label="期权总保证金" value={`$${fmt(totalMargin,0)}`} color="#dde8ef" sub={`${positions.length}仓位占用`}/>
+        <Box label="总收权利金" value={`$${fmt(totalGross)}`} color="#f5b731"/>
+        <Box label="预估手续费" value={`-$${fmt(totalComm)}`} color="#f46a5a"/>
+        <Box label="净权利金收益" value={`$${fmt(totalNet)}`} color="#3dd68c" hl/>
+        {withOpt.length>0&&<Box label="今日浮动净利" value={fmtM(totalProfitNow)} color={totalProfitNow>=0?'#3dd68c':'#f46a5a'} sub={`${withOpt.length}个已对价`}/>}
       </div>
-      <div className="summary-grid" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:18}}>
-        {avgNow!=null&&<BigA label="现在卖出年化" main={fmtA(avgNow)} mainColor={ACC.blue} vs={nowVsSgov} sub={nowVsSgov?`对保证金 ${fmtA(avgNow)} · 对SGOV ${fmtA(nowVsSgov)}`:'录入期权现价后计算'}/>}
-        {avgExp!=null&&<BigA label="持到到期年化" main={fmtA(avgExp)} mainColor={ACC.amber} vs={expVsSgov} sub={expVsSgov?`对保证金 ${fmtA(avgExp)} · 对SGOV ${fmtA(expVsSgov)}`:'录入SGOV市值后计算'}/>}
+      <div className="summary-grid grid grid-cols-1 md:grid-cols-3 gap-3">
+        {avgNow!=null&&<BigA label="现在卖出综合年化" main={fmtA(avgNow)} mainColor="#4fa3e0" vs={nowVsSgov} sub={nowVsSgov?`组合实际杠杆对等年化`:''}/>}
+        {avgExp!=null&&<BigA label="持有到期预计年化" main={fmtA(avgExp)} mainColor="#f5b731" vs={expVsSgov} sub={expVsSgov?`若期权最终全额归零`:''}/>}
         {si&&sgovMV&&(
-          <div style={{display:'flex',flexDirection:'column',gap:6}}>
-            <span className="section-label">SGOV 利息</span>
-            <div style={{display:'flex',alignItems:'baseline',gap:8}}>
-              <span style={{fontSize:24,fontWeight:700,color:ACC.teal,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtA(si.rate)}</span>
-              <span style={{fontSize:13,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>年化</span>
+          <div className="flex flex-col gap-1 p-3 rounded-lg bg-zinc-950/10 border border-teal/5">
+            <span className="text-[10px] text-zinc-500 font-mono tracking-wider uppercase">SGOV 无风险收益流</span>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-xl font-mono font-bold text-teal">{fmtA(si.rate)}</span>
+              <span className="text-xs text-zinc-500 font-mono">复合利息</span>
             </div>
-            <span style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>累计 {fmtM(si.total)} · {si.days} 天</span>
+            <span className="text-[11px] text-zinc-500 font-mono">累积实现已落袋 {fmtM(si.total)}</span>
           </div>
         )}
       </div>
@@ -1505,7 +1354,6 @@ function SummaryBar({positions,commPerSide,sgov}){
   );
 }
 
-/* ══ 添加表单 ══════════════════════════════════════ */
 function AddForm({onAdd,onCancel,commPerSide}){
   const [f,setF]=useState({ticker:'',type:'P',strike:'',qty:'1',openDate:today(),expDate:'',premium:'',marginType:'cash',customMargin:''});
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
@@ -1521,295 +1369,360 @@ function AddForm({onAdd,onCancel,commPerSide}){
       customMargin:parseFloat(f.customMargin)||0,currentPrice:null,optionPrice:null});
   };
   return(
-    <div className="card anim-in" style={{padding:22,marginBottom:16,borderColor:`${ACC.amber}33`}}>
-      <div style={{fontSize:13,fontWeight:700,color:ACC.amber,marginBottom:18}}>＋ 添加期权仓位</div>
-      <div style={{display:'grid',gridTemplateColumns:'2fr 110px 1fr 80px',gap:12,marginBottom:12}}>
+    <div className="card p-4 mb-4 border border-amber/10 bg-zinc-950/20">
+      <div className="text-xs font-bold text-amber mb-3">＋ 新建车轮期权单</div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
         <Field label="标的代码" value={f.ticker} onChange={v=>set('ticker',v.toUpperCase())} placeholder="MRVL"/>
-        <SelectField label="方向" value={f.type} onChange={v=>set('type',v)} options={[{value:'P',label:'卖 Put'},{value:'C',label:'卖 Call'}]}/>
+        <SelectField label="合约方向" value={f.type} onChange={v=>set('type',v)} options={[{value:'P',label:'卖 Put (赚现金流)'},{value:'C',label:'卖 Call (覆盖正股)'}]}/>
         <NumField label="行权价" prefix="$" value={f.strike} onChange={v=>set('strike',v)} placeholder="190"/>
         <NumField label="手数" value={f.qty} onChange={v=>set('qty',v)} placeholder="1" suffix="手"/>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12}}>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
         <DateField label="开仓日期" value={f.openDate} onChange={v=>set('openDate',v)}/>
         <DateField label="到期日期" value={f.expDate} onChange={v=>set('expDate',v)}/>
-        <NumField label="开仓权利金" prefix="$" suffix="/股" value={f.premium} onChange={v=>set('premium',v)} placeholder="3.24"/>
+        <NumField label="单股权利金" prefix="$" suffix="/股" value={f.premium} onChange={v=>set('premium',v)} placeholder="3.24"/>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
-        <SelectField label="保证金类型" value={f.marginType} onChange={v=>set('marginType',v)}
-          options={[{value:'cash',label:'现金担保（行权价×100）'},{value:'custom',label:'自定义（券商实际占用）'}]}/>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+        <SelectField label="保证金担保" value={f.marginType} onChange={v=>set('marginType',v)}
+          options={[{value:'cash',label:'完全现金（行权价 × 100）'},{value:'custom',label:'跨式自定义（券商实时占用）'}]}/>
         {f.marginType==='custom'
           ?<NumField label="自定义占用资金" prefix="$" value={f.customMargin} onChange={v=>set('customMargin',v)} placeholder="5000"/>
-          :<Field label="占用资金（自动）" value={`$${fmt(autoCapital,0)}`} onChange={()=>{}} readOnly color={ACC.amber}/>}
+          :f.strike?<Field label="预计冻结资金" value={`$${fmt(autoCapital,0)}`} onChange={()=>{}} readOnly color="#f5b731"/>:null}
       </div>
-      {f.premium&&<div style={{background:V('surface'),border:`1px solid ${V('line')}`,borderRadius:10,padding:'10px 14px',marginBottom:14,display:'flex',gap:24,flexWrap:'wrap'}}>
-        <span style={{fontSize:12,fontFamily:'IBM Plex Mono,monospace',color:V('dim')}}>手续费双边：<span style={{color:ACC.loss}}>${fmt(comm)}</span></span>
-        {netPrem!=null&&<span style={{fontSize:12,fontFamily:'IBM Plex Mono,monospace',color:V('dim')}}>净权利金：<span style={{color:ACC.profit}}>${fmt(netPrem)}</span></span>}
+      {f.premium&&<div className="bg-zinc-900/30 border border-zinc-800 rounded-lg p-2.5 mb-3 flex gap-4 text-xs font-mono text-zinc-500">
+        <span>双边中转费: <span className="text-loss">${fmt(comm)}</span></span>
+        {netPrem!=null&&<span>净期权金收入: <span className="text-profit">${fmt(netPrem)}</span></span>}
       </div>}
-      <div style={{display:'flex',gap:8}}>
-        <button onClick={submit} disabled={!valid} className="btn btn-primary" style={{minWidth:100}}>添加仓位</button>
+      <div className="flex gap-2">
+        <button onClick={submit} disabled={!valid} className="btn btn-primary px-5">添加仓位</button>
         <button onClick={onCancel} className="btn btn-ghost">取消</button>
       </div>
     </div>
   );
 }
 
-/* ══ 详情抽屉 ══════════════════════════════════════ */
 function DetailDrawer({p,r,commPerSide,onUpdateOptionPrice,onClose,onDelete}){
   return(
-    <div className="anim-fade" style={{borderTop:`1px solid ${V('line')}`,background:V('surface'),borderRadius:'0 0 14px 14px',padding:'18px 20px'}}>
-      <div style={{marginBottom:16}}>
-        <div style={{display:'flex',justifyContent:'space-between',fontSize:10,color:V('dim'),marginBottom:5,fontFamily:'IBM Plex Mono,monospace'}}>
-          <span>开仓 {p.openDate}</span>
-          <span style={{color:ACC.amber}}>Θ {r.thetaPct.toFixed(0)}% · 剩 {r.daysLeft} 天</span>
-          <span>到期 {p.expDate}</span>
+    <div className="border-t border-zinc-800/80 bg-zinc-950/40 p-4 space-y-4">
+      <div>
+        <div className="flex justify-between text-[10px] font-mono text-zinc-500 mb-1.5 uppercase tracking-wider">
+          <span>开仓点 {p.openDate}</span>
+          <span className="text-amber font-semibold">🕒 已经历 {r.thetaPct.toFixed(0)}% 时间轴 · 剩余 {r.daysLeft} 天</span>
+          <span>到期点 {p.expDate}</span>
         </div>
         <ThetaBar pct={r.thetaPct}/>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:12,marginBottom:16,paddingBottom:16,borderBottom:`1px solid ${V('line')}`}}>
-        <Stat label="开仓权利金" value={`$${fmt(r.openPrem)}`} sub={`$${fmt(p.premium)}/股×${r.qty}手`} color={ACC.amber}/>
-        <Stat label="手续费双边" value={`-$${fmt(r.commTotal)}`} sub={`$${commPerSide}/张×${r.qty}×2`} color={ACC.loss}/>
-        <Stat label="净权利金" value={`$${fmt(r.openPrem-r.commTotal)}`} color={ACC.profit}/>
-        <Stat label="占用资金" value={`$${fmt(r.capital,0)}`} sub={p.marginType==='cash'?'现金担保':'自定义'} color={V('dim')}/>
-        <Stat label="持有天数" value={`${r.daysHeld} 天`} sub={`共 ${r.daysTotal} 天`} color={V('dim')}/>
-        {r.capturedPct!=null&&<Stat label="权利金捕获" value={`${r.capturedPct.toFixed(1)}%`} color={r.capturedPct>=50?ACC.profit:ACC.amber}/>}
-        {r.buffer!=null&&<Stat label={p.type==='P'?'价外缓冲':'价外距离'} value={`${r.buffer>0?'+':''}${r.buffer.toFixed(1)}%`} sub={`现价 $${fmt(p.currentPrice)}`} color={r.buffer>0?ACC.profit:ACC.loss}/>}
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 py-3 border-b border-zinc-800/50">
+        <Stat label="毛权利金" value={`$${fmt(r.openPrem)}`} sub={`$${fmt(p.premium)}/股`} color={ACC.amber}/>
+        <Stat label="预估双边费" value={`-$${fmt(r.commTotal)}`} color={ACC.loss}/>
+        <Stat label="净落袋利金" value={`$${fmt(r.openPrem-r.commTotal)}`} color={ACC.profit}/>
+        <Stat label="名义总对价" value={`$${fmt(r.capital,0)}`} color={V('dim')}/>
+        <Stat label="生命周期" value={`${r.daysHeld}天 / ${r.daysTotal}天`} color={V('faint')}/>
+        {r.capturedPct!=null&&<Stat label="时间价值回收" value={`${r.capturedPct.toFixed(1)}%`} color={r.capturedPct>=50?ACC.profit:ACC.amber}/>}
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
-        <div className="card" style={{padding:14}}>
-          <div style={{fontSize:10,color:ACC.blue,letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',marginBottom:10}}>场景 A · 现在卖出</div>
-          {/* OCC 合约代码 + CBOE 查价链接 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="card p-3 bg-zinc-950/10 border-zinc-850/50 space-y-2.5">
+          <div className="text-[10px] text-blue tracking-wider font-mono uppercase font-bold">场景 1 · 提早平仓买回</div>
           {(()=>{
             const occ=buildOCCSymbol(p.ticker,p.expDate,p.type,p.strike);
             const cboeUrl=`https://www.cboe.com/delayed_quotes/options/${p.ticker}`;
             return(
-              <div style={{background:V('surface'),borderRadius:7,padding:'6px 10px',marginBottom:10,display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,flexWrap:'wrap'}}>
-                <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('faint'),letterSpacing:'.04em'}}>{occ}</span>
-                <a href={cboeUrl} target="_blank" rel="noopener"
-                  style={{fontSize:11,color:ACC.teal,textDecoration:'none',fontWeight:600,whiteSpace:'nowrap'}}>
-                  CBOE 查价 ↗
-                </a>
+              <div className="bg-zinc-950/80 px-2 py-1 rounded border border-zinc-850 flex items-center justify-between text-[11px] font-mono text-zinc-500">
+                <span className="select-all">{occ}</span>
+                <a href={cboeUrl} target="_blank" rel="noopener" className="text-teal hover:underline font-semibold">CBOE 盘口 ↗</a>
               </div>
             );
           })()}
-          <div style={{marginBottom:10}}>
-            <div className="section-label" style={{marginBottom:5}}>期权现价（自动 / 手动录入）</div>
+          <div>
+            <label className="text-[10px] text-zinc-500 font-mono uppercase block mb-1">期权市价现价录入</label>
             <InlineEdit value={p.optionPrice} onSave={onUpdateOptionPrice}/>
           </div>
           {r.profitNow!=null?(
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-              <Stat label="净利润" value={fmtM(r.profitNow)} color={r.profitNow>=0?ACC.profit:ACC.loss} sz={16}/>
-              <Stat label="年化" value={fmtA(r.annualNow)} sub={`区间${r.yieldNow?.toFixed(1)}%`} color={r.annualNow>0?ACC.profit:ACC.loss} sz={16}/>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <Stat label="账面净盈亏" value={fmtM(r.profitNow)} color={r.profitNow>=0?ACC.profit:ACC.loss} sz={14}/>
+              <Stat label="动态滚动年化" value={fmtA(r.annualNow)} color={r.annualNow>0?ACC.profit:ACC.loss} sz={14}/>
             </div>
-          ):<span style={{fontSize:12,color:V('faint'),fontFamily:'IBM Plex Mono,monospace'}}>点击上方录入期权现价</span>}
+          ):null}
         </div>
-        <div className="card" style={{padding:14}}>
-          <div style={{fontSize:10,color:ACC.amber,letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',marginBottom:10}}>场景 B · 到期归零</div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:10}}>
-            <Stat label="净利润" value={`+$${fmt(r.profitExp)}`} color={ACC.profit} sz={16}/>
-            <Stat label="年化" value={fmtA(r.annualExp)} sub={`区间${r.yieldExp?.toFixed(1)}%`} color={ACC.amber} sz={16}/>
+        <div className="card p-3 bg-zinc-950/10 border-zinc-850/50 flex flex-col justify-between">
+          <div>
+            <div className="text-[10px] text-amber tracking-wider font-mono uppercase font-bold mb-2">场景 2 · 坚持静待到期</div>
+            <div className="grid grid-cols-2 gap-2">
+              <Stat label="预期最终净利" value={`+$${fmt(r.profitExp)}`} color={ACC.profit} sz={14}/>
+              <Stat label="预期闭合年化" value={fmtA(r.annualExp)} color={ACC.amber} sz={14}/>
+            </div>
           </div>
-          <span style={{fontSize:11,color:V('faint'),fontFamily:'IBM Plex Mono,monospace'}}>仅扣单边 ${fmt(r.commExp)} · 剩 {r.daysLeft} 天</span>
+          <p className="text-[10px] text-zinc-500 font-mono mt-3">到期直接结算无二次回购成本 · 归零单边收费 ${fmt(r.commExp)}</p>
         </div>
       </div>
-      <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
-        <button onClick={onClose} className="btn btn-primary" style={{background:ACC.blue,color:'#fff'}}>↩ 平仓</button>
-        <button onClick={onDelete} className="btn btn-danger">删除</button>
+      <div className="flex justify-between items-center pt-2">
+        <button onClick={onClose} className="btn bg-blue text-white hover:opacity-90 font-semibold px-4 py-1.5 shadow-sm">↩ 录入结算 / 平仓</button>
+        <button onClick={onDelete} className="btn btn-danger text-xs py-1">丢弃该记录</button>
       </div>
     </div>
   );
 }
 
-/* ══ 活跃仓位行 ══════════════════════════════════════ */
 function PositionRow({p,commPerSide,expanded,onToggle,onUpdateOptionPrice,onClose,onDelete}){
   const r=calc(p,commPerSide);
   const isCall=p.type==='C';
-  const typeColor=isCall?ACC.loss:ACC.profit;
-  const urgency=r.daysLeft<=7?ACC.loss:r.daysLeft<=21?ACC.amber:V('dim');
+  const typeColor=isCall?'bg-loss':'bg-profit';
+  const urgency=r.daysLeft<=7?'text-loss font-semibold':r.daysLeft<=21?'text-amber':'text-zinc-400';
+  
+  let riskStatus = "text-zinc-300"; 
+  let riskBadge = null;
+  if(p.currentPrice && p.strike) {
+    const otmDist = r.buffer; 
+    if(p.type === 'P') {
+      if(p.currentPrice < p.strike) {
+        riskStatus = "text-loss animate-pulse font-bold";
+        riskBadge = <span className="badge text-loss bg-loss/5 border-loss/20 ml-2">📦 破位 ITM</span>;
+      } else if (otmDist <= 3) {
+        riskStatus = "text-amber font-semibold";
+      }
+    } else {
+      if(p.currentPrice > p.strike) {
+        riskStatus = "text-loss animate-pulse font-bold";
+        riskBadge = <span className="badge text-loss bg-loss/5 border-loss/20 ml-2">📦 破位 ITM</span>;
+      } else if (otmDist <= 3) {
+        riskStatus = "text-amber font-semibold";
+      }
+    }
+  }
+
   return(
-    <div style={{borderRadius:14,overflow:'hidden',border:`1px solid ${expanded?V('line-br'):V('line')}`,marginBottom:8,transition:'border-color .2s,box-shadow .2s',boxShadow:expanded?'0 4px 20px rgba(0,0,0,.15)':'none'}}>
-      <div className="row-click pos-row-inner" onClick={onToggle}
-        style={{display:'grid',gridTemplateColumns:'4px 110px 86px 96px 1fr 90px 116px 116px 116px 36px',
-          alignItems:'center',background:expanded?V('card-hover'):V('card'),minHeight:60}}>
-        <div className="pos-row-col-streak" style={{background:typeColor,height:'100%',minHeight:60}}/>
-        <div className="pos-row-col-main" style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:3}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:15,color:V('ink')}}>{p.ticker}</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:typeColor,letterSpacing:'.06em'}}>卖出 {isCall?'Call':'Put'}</span>
-          {/* 移动端额外信息 */}
-          <div className="pos-row-mobile-extra" style={{display:'none',gap:8,marginTop:2,flexWrap:'wrap'}}>
-            <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:ACC.amber,fontWeight:600}}>${fmt(p.strike,0)}</span>
-            <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:urgency}}>{r.daysLeft}天·{p.expDate}</span>
+    <div className={`bg-zinc-900/10 border-b border-zinc-800/40 last:border-0 transition-colors ${expanded?'bg-zinc-800/10':''}`}>
+      <div className="row-click flex items-center min-h-[52px] py-1 text-xs" onClick={onToggle}>
+        <div className={`w-1 self-stretch ${typeColor} opacity-70`} />
+        
+        <div className="w-[120px] pl-4 flex flex-col">
+          <span className="font-mono font-bold text-[13.5px] text-zinc-100">{p.ticker}</span>
+          <span className={`font-mono text-[9.5px] uppercase tracking-wider ${isCall?'text-loss':'text-profit'}`}>Sell {isCall?'Call':'Put'}</span>
+          <div className="pos-row-mobile-extra hidden flex-wrap gap-2 mt-0.5">
+            <span className="font-mono text-amber font-semibold">${fmt(p.strike,0)}</span>
+            <span className={`font-mono ${urgency}`}>{r.daysLeft}天</span>
           </div>
         </div>
-        <div className="pos-row-col-strike" style={{display:'flex',flexDirection:'column',gap:3}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,color:ACC.amber,fontWeight:600}}>${fmt(p.strike,0)}</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>×{p.qty}手</span>
+
+        <div className="w-[100px] pos-row-col-strike flex flex-col font-mono">
+          <span className="text-[13px] text-amber font-bold">${fmt(p.strike,0)}</span>
+          <span className="text-[10px] text-zinc-500">× {p.qty}手</span>
         </div>
-        <div className="pos-row-col-expiry" style={{display:'flex',flexDirection:'column',gap:4}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:12,color:urgency,fontWeight:r.daysLeft<=21?600:400}}>{r.daysLeft}天后</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{p.expDate}</span>
+
+        <div className="w-[110px] pos-row-col-expiry flex flex-col font-mono">
+          <span className={`text-[12px] ${urgency}`}>{r.daysLeft} 天后</span>
+          <span className="text-[10px] text-zinc-500">{p.expDate}</span>
         </div>
-        <div className="pos-row-col-theta" style={{padding:'0 16px',display:'flex',flexDirection:'column',gap:5}}>
+
+        <div className="flex-1 pos-row-col-theta px-4 flex flex-col gap-1">
+          <div className="flex items-center justify-between text-[10px] font-mono text-zinc-500">
+            <span>时间衰减</span>
+            <span>{r.thetaPct.toFixed(0)}%</span>
+          </div>
           <ThetaBar pct={r.thetaPct} small/>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>Θ {r.thetaPct.toFixed(0)}%</span>
         </div>
-        <div className="pos-row-col-prem" style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-end',paddingRight:8}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.profit,fontWeight:600}}>{'$'+fmt(r.openPrem,0)}</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{'$'+fmt(p.premium)+'/股'}</span>
+
+        <div className="w-[100px] flex flex-col items-end font-mono pr-4">
+          <span className="text-[12.5px] text-profit font-semibold">${fmt(r.openPrem,0)}</span>
+          <span className="text-[10px] text-zinc-500">${fmt(p.premium)}/股</span>
         </div>
-        <div className="pos-row-col-price" style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-end',paddingRight:8}}>
-          {p.currentPrice?(<>
-            <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('ink'),fontWeight:600}}>${fmt(p.currentPrice)}</span>
-            {r.buffer!=null&&<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:r.buffer>0?ACC.profit:ACC.loss,fontWeight:600}}>{r.buffer>0?'↑':'↓'}{Math.abs(r.buffer).toFixed(1)}%</span>}
-          </>):<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('faint')}}>—</span>}
-          {/* 移动端在价格下面补充年化 */}
-          <div className="pos-row-mobile-extra" style={{display:'none',flexDirection:'column',gap:1,alignItems:'flex-end',marginTop:2}}>
-            <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:ACC.amber,fontWeight:600}}>{fmtA(r.annualExp)}</span>
-          </div>
+
+        <div className="w-[120px] pos-row-col-price flex flex-col items-end font-mono pr-4">
+          {p.currentPrice ? (
+            <>
+              <span className={`text-[13px] ${riskStatus}` arrangement}>${fmt(p.currentPrice)}</span>
+              <div className="flex items-center text-[10.5px]">
+                <span className={r.buffer > 0 ? 'text-profit' : 'text-loss'}>
+                  {r.buffer > 0 ? '安全 ' : '深入 '}{Math.abs(r.buffer).toFixed(1)}%
+                </span>
+                {riskBadge}
+              </div>
+            </>
+          ) : <span className="text-zinc-600">—</span>}
         </div>
-        <div className="pos-row-col-now" style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-end',paddingRight:8}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:ACC.blue,letterSpacing:'.05em'}}>现在卖出</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,fontWeight:600,color:r.annualNow!=null?(r.annualNow>0?ACC.profit:ACC.loss):V('faint')}}>{r.annualNow!=null?fmtA(r.annualNow):'—'}</span>
+
+        <div className="w-[110px] pos-row-col-now flex flex-col items-end font-mono pr-4">
+          <span className="text-[13px] font-bold" style={{color: r.annualNow != null ? (r.annualNow > 0 ? ACC.blue : ACC.loss) : V('faint')}}>
+            {r.annualNow != null ? fmtA(r.annualNow) : '—'}
+          </span>
         </div>
-        <div className="pos-row-col-exp" style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-end',paddingRight:8}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:ACC.amber,letterSpacing:'.05em'}}>持到到期</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,fontWeight:600,color:ACC.amber}}>{fmtA(r.annualExp)}</span>
+
+        <div className="w-[110px] pos-row-col-exp flex flex-col items-end font-mono pr-4">
+          <span className="text-[13px] text-amber font-bold">{fmtA(r.annualExp)}</span>
         </div>
-        <div className="pos-row-col-arrow" style={{display:'flex',justifyContent:'center',color:V('faint'),fontSize:11,transform:expanded?'rotate(180deg)':'rotate(0)',transition:'transform .22s ease'}}>▼</div>
+
+        <div className="w-8 flex justify-center text-zinc-600 text-[10px] font-mono transition-transform duration-200" style={{transform:expanded?'rotate(180deg)':'none'}}>▼</div>
       </div>
       {expanded&&<DetailDrawer p={p} r={r} commPerSide={commPerSide}
         onUpdateOptionPrice={v=>onUpdateOptionPrice(p.id,v)}
-        onClose={onClose} onDelete={onDelete}/>}
+        onClose={()=>{onClose();}} onDelete={onDelete}/>}
     </div>
   );
 }
 
 function ActiveTableHeader(){
-  const H=({t,right})=><div style={{fontSize:10,color:V('faint'),letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',textAlign:right?'right':'left',padding:'0 4px'}}>{t}</div>;
   return(
-    <div className="pos-table-header" style={{display:'grid',gridTemplateColumns:'4px 110px 86px 96px 1fr 90px 116px 116px 116px 36px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
-      <div/><H t="标的"/><H t="行权价"/><H t="到期"/><H t="Θ 衰减"/><H t="权利金" right/><H t="股价" right/><H t="现在卖出" right/><H t="持到到期" right/><div/>
+    <div className="pos-table-header flex items-center text-[10px] text-zinc-500 tracking-wider font-mono uppercase bg-zinc-950/40 py-2 border-b border-zinc-800">
+      <div className="w-1" />
+      <div className="w-[120px] pl-4">标的</div>
+      <div className="w-[100px]">行权价</div>
+      <div className="w-[110px]">到期</div>
+      <div className="flex-1 px-4">Θ 衰减进度</div>
+      <div className="w-[100px] text-right pr-4">总权利金</div>
+      <div className="w-[120px] text-right pr-4">正股股价</div>
+      <div className="w-[110px] text-right pr-4">卖平年化</div>
+      <div className="w-[110px] text-right pr-4">到期年化</div>
+      <div className="w-8" />
     </div>
   );
 }
 
-/* ══ 已平仓历史行 ══════════════════════════════════════ */
 function ClosedRow({c,commPerSide,onDelete}){
   const r=calcClosed(c,commPerSide);
   const isCall=c.type==='C';
-  const typeColor=isCall?ACC.loss:ACC.profit;
+  const typeColor=isCall?'bg-loss':'bg-profit';
   const isExpired=c.closeType==='expired';
   const isAssigned=c.closeType==='assigned';
-  const badgeStyle=isAssigned
-    ?{color:ACC.amber,background:ACC.amberSoft,borderColor:`${ACC.amber}44`}
-    :isExpired
-      ?{color:ACC.teal,background:ACC.tealBg,borderColor:`${ACC.teal}44`}
-      :{color:ACC.blue,background:ACC.blueBg,borderColor:`${ACC.blue}44`};
+  const badgeStyle=isAssigned ?'text-amber bg-amber/5 border-amber/10' :isExpired ?'text-teal bg-teal/5 border-teal/10' :'text-blue bg-blue/5 border-blue/10';
   return(
-    <div className="card" style={{marginBottom:8,padding:'0',overflow:'hidden'}}>
-      <div style={{display:'grid',gridTemplateColumns:'4px 110px 86px 96px 110px 1fr 120px 120px 36px',alignItems:'center',minHeight:56}}>
-        <div style={{background:typeColor,height:'100%',minHeight:56,opacity:.5}}/>
-        <div style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:2}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:14,color:V('dim')}}>{c.ticker}</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:typeColor,opacity:.7,letterSpacing:'.06em'}}>卖 {isCall?'Call':'Put'}</span>
-        </div>
-        <div>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.amber,fontWeight:600}}>${fmt(c.strike,0)}</span>
-          <div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>×{c.qty}手</div>
-        </div>
-        <div>
-          <div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('dim')}}>{c.openDate}</div>
-          <div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('faint')}}>→ {c.closeDate}</div>
-        </div>
-        <div style={{paddingRight:8}}>
-          <span className="badge" style={badgeStyle}>
-            {isAssigned?'📦 接货':isExpired?'到期归零':'主动平仓'}
-          </span>
-          {isAssigned&&<div style={{fontSize:10,color:V('faint'),fontFamily:'IBM Plex Mono,monospace',marginTop:3}}>{c.assignedShares}股 @ ${fmt(c.assignedCostPerShare)}</div>}
-        </div>
-        <div style={{padding:'0 10px',display:'flex',gap:16,flexWrap:'wrap'}}>
-          <Stat label="开仓收入" value={`$${fmt(r.openPrem)}`} color={ACC.amber}/>
-          {!isExpired&&!isAssigned&&<Stat label="买回成本" value={`-$${fmt(r.closePrem)}`} color={ACC.loss}/>}
-          {isAssigned&&<Stat label="接货市值" value={`-$${fmt(c.assignedMarketValue,0)}`} color={ACC.loss}/>}
-          <Stat label="手续费" value={`-$${fmt(r.commUsed)}`} color={ACC.loss}/>
-        </div>
-        <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-end',paddingRight:8}}>
-          <span className="section-label">期权收益</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:16,fontWeight:700,color:r.profit>=0?ACC.profit:ACC.loss}}>{fmtM(r.profit)}</span>
-        </div>
-        <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-end',paddingRight:8}}>
-          <span className="section-label">实现年化</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:16,fontWeight:700,color:r.annual>=0?ACC.profit:ACC.loss}}>{fmtA(r.annual)}</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{r.daysHeld}天</span>
-        </div>
-        <div style={{display:'flex',justifyContent:'center'}}>
-          <button onClick={onDelete} style={{background:'none',border:'none',color:V('faint'),cursor:'pointer',fontSize:14,padding:4}} title="删除记录">×</button>
-        </div>
+    <div className="bg-zinc-900/10 border-b border-zinc-800/40 last:border-0 hover:bg-zinc-800/5 flex items-center min-h-[50px] text-xs font-mono">
+      <div className={`w-1 self-stretch ${typeColor} opacity-40`} />
+      <div className="w-[120px] pl-4 flex flex-col">
+        <span className="font-bold text-sm text-zinc-400">{c.ticker}</span>
+        <span className={`text-[9.5px] uppercase ${isCall?'text-loss':'text-profit'} opacity-70`}>Sell {isCall?'Call':'Put'}</span>
+      </div>
+      <div className="w-[100px]">
+        <span className="font-bold text-amber">${fmt(c.strike,0)}</span>
+        <div className="text-[10px] text-zinc-500">× {c.qty}手</div>
+      </div>
+      <div className="w-[140px] text-zinc-400 text-[11px]">
+        <div>开: {c.openDate}</div>
+        <div>平: {c.closeDate}</div>
+      </div>
+      <div className="w-[110px]">
+        <span className={`badge ${badgeStyle}`}>
+          {isAssigned?'📦 被动接货':isExpired?'到期归零':'主动买回'}
+        </span>
+        {isAssigned&&<div className="text-[9.5px] text-zinc-500 mt-1">{c.assignedShares}股 @ ${fmt(c.assignedCostPerShare)}</div>}
+      </div>
+      <div className="flex-1 px-2 flex gap-4 text-zinc-400 text-[11px] truncate">
+        <div>开仓收: <span className="text-amber">${fmt(r.openPrem,0)}</span></div>
+        {!isExpired&&!isAssigned&&<div>平仓平: <span className="text-loss">-${fmt(r.closePrem,0)}</span></div>}
+        {isAssigned&&<div>扣底仓: <span className="text-loss">-${fmt(c.assignedMarketValue,0)}</span></div>}
+        <div>费用: <span>-${fmt(r.commUsed)}</span></div>
+      </div>
+      <div className="w-[120px] text-right pr-4 flex flex-col">
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wider">净盈亏</span>
+        <span className={`font-bold text-sm ${r.profit>=0?'text-profit':'text-loss'}`}>{fmtM(r.profit)}</span>
+      </div>
+      <div className="w-[120px] text-right pr-4 flex flex-col">
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wider">实现年化</span>
+        <span className={`font-bold text-sm ${r.annual>=0?'text-profit':'text-loss'}`}>{fmtA(r.annual)}</span>
+        <span className="text-[10px] text-zinc-500">{r.daysHeld}天</span>
+      </div>
+      <div className="w-8 flex justify-center">
+        <button onClick={onDelete} className="text-zinc-600 hover:text-loss p-1 text-sm">✕</button>
       </div>
     </div>
   );
 }
 
-/* ══ 股票仓位组件 ══════════════════════════════════════ */
+function ClosedTableHeader(){
+  return(
+    <div className="flex items-center text-[10px] text-zinc-500 tracking-wider font-mono uppercase bg-zinc-950/40 py-2 border-b border-zinc-800">
+      <div className="w-1" />
+      <div className="w-[120px] pl-4">标的</div>
+      <div className="w-[100px]">行权价</div>
+      <div className="w-[140px]">生命周期周期</div>
+      <div className="w-[110px]">平仓结算</div>
+      <div className="flex-1 px-2">收支明细明细</div>
+      <div className="w-[120px] text-right pr-4">净利润</div>
+      <div className="w-[120px] text-right pr-4">实现年化</div>
+      <div className="w-8" />
+    </div>
+  );
+}
+
+function ClosedSummary({closed,commPerSide}){
+  if(!closed.length)return null;
+  const rs=closed.map(c=>calcClosed(c,commPerSide));
+  const totalProfit=rs.reduce((s,r)=>s+r.profit,0);
+  const avgAnnual=rs.reduce((s,r)=>s+(r.annual||0),0)/rs.length;
+  const wins=rs.filter(r=>r.profit>0).length;
+  return(
+    <div className="card p-4 mb-4 bg-zinc-900/10 flex gap-6 flex-wrap items-center">
+      <div>
+        <span className="text-[10px] text-zinc-500 font-mono tracking-wider uppercase block mb-1">累计已实现利润</span>
+        <span className="text-xl font-mono font-bold" style={{color:totalProfit>=0?'#3dd68c':'#f46a5a'}}>{fmtM(totalProfit)}</span>
+      </div>
+      <div>
+        <span className="text-[10px] text-zinc-500 font-mono tracking-wider uppercase block mb-1">平均实现年化</span>
+        <span className="text-xl font-mono font-bold" style={{color:avgAnnual>=0?'#3dd68c':'#f46a5a'}}>{fmtA(avgAnnual)}</span>
+      </div>
+      <div>
+        <span className="text-[10px] text-zinc-500 font-mono tracking-wider uppercase block mb-1">历史胜率统计</span>
+        <div className="flex items-baseline gap-1">
+          <span className="text-xl font-mono font-bold text-blue">{((wins/closed.length)*100).toFixed(0)}%</span>
+          <span className="text-[11px] text-zinc-500 font-mono">({wins}/{closed.length} 盈利)</span>
+        </div>
+      </div>
+      <div className="ml-auto">
+        <span className="text-[10px] text-zinc-500 font-mono tracking-wider uppercase block mb-1">总完结笔数</span>
+        <span className="text-xl font-mono font-bold text-zinc-500">{closed.length} 笔</span>
+      </div>
+    </div>
+  );
+}
+
 function StockRow({s,onUpdatePrice,onDelete}){
   const costBasis=s.costPerShare*s.shares;
   const currentValue=s.currentPrice?s.currentPrice*s.shares:null;
   const unrealized=currentValue!=null?currentValue-costBasis:null;
   const unrealizedPct=unrealized!=null?(unrealized/costBasis)*100:null;
-  const daysHeld=s.acquireDate?Math.max(1,daysBetween(s.acquireDate,today())):null;
   return(
-    <div className="card" style={{marginBottom:8,overflow:'hidden',padding:0}}>
-      <div style={{display:'grid',gridTemplateColumns:'4px 130px 120px 120px 1fr 130px 130px 36px',alignItems:'center',minHeight:60}}>
-        <div style={{background:ACC.profit,height:'100%',minHeight:60,opacity:.6}}/>
-        {/* 标的 */}
-        <div style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:3}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:15,color:V('ink')}}>{s.ticker}</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>
-            {s.source==='assigned'?'📦 接货':s.source==='manual'?'手动录入':''}
-          </span>
-        </div>
-        {/* 持股信息 */}
-        <div style={{display:'flex',flexDirection:'column',gap:3}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,color:V('ink'),fontWeight:600}}>{s.shares} 股</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>成本 ${fmt(s.costPerShare)} / 股</span>
-        </div>
-        {/* 成本 */}
-        <div style={{display:'flex',flexDirection:'column',gap:3}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.amber,fontWeight:600}}>${fmt(costBasis,0)}</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>总成本基础</span>
-        </div>
-        {/* 现价（可点击编辑） */}
-        <div style={{padding:'0 12px',display:'flex',flexDirection:'column',gap:3}}>
-          <span className="section-label">当前价格</span>
-          <InlineEdit value={s.currentPrice} onSave={v=>onUpdatePrice(s.id,v)}/>
-        </div>
-        {/* 当前市值 */}
-        <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-end',paddingRight:8}}>
-          <span className="section-label">当前市值</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:15,fontWeight:600,color:V('ink')}}>
-            {currentValue!=null?`$${fmt(currentValue,0)}`:'—'}
-          </span>
-        </div>
-        {/* 浮盈 */}
-        <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-end',paddingRight:8}}>
-          <span className="section-label">浮动盈亏</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:15,fontWeight:700,color:unrealized==null?V('faint'):unrealized>=0?ACC.profit:ACC.loss}}>
-            {unrealized!=null?fmtM(unrealized):'录入现价'}
-          </span>
-          {unrealizedPct!=null&&<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:unrealizedPct>=0?ACC.profit:ACC.loss}}>{fmtA(unrealizedPct)}</span>}
-        </div>
-        <div style={{display:'flex',justifyContent:'center'}}>
-          <button onClick={()=>onDelete(s.id)} style={{background:'none',border:'none',color:V('faint'),cursor:'pointer',fontSize:14,padding:4}}>×</button>
-        </div>
+    <div className="bg-zinc-900/10 border-b border-zinc-800/40 last:border-0 hover:bg-zinc-800/5 flex items-center min-h-[52px] text-xs font-mono">
+      <div className="w-1 self-stretch bg-profit opacity-50" />
+      <div className="w-[140px] pl-4 flex flex-col">
+        <span className="font-bold text-sm text-zinc-100">{s.ticker}</span>
+        <span className="text-[9.5px] text-zinc-500">{s.source==='assigned'?'📦 被动行权接货':'手动建仓'}</span>
+      </div>
+      <div className="w-[130px] flex flex-col">
+        <span className="text-[13px] text-zinc-200 font-bold">{s.shares} 股</span>
+        <span className="text-[10px] text-zinc-500">${fmt(s.costPerShare)}/股</span>
+      </div>
+      <div className="w-[130px]">
+        <span className="text-[13px] text-amber font-semibold">${fmt(costBasis,0)}</span>
+      </div>
+      <div className="flex-1 px-2">
+        <InlineEdit value={s.currentPrice} onSave={v=>onUpdatePrice(s.id,v)}/>
+      </div>
+      <div className="w-[140px] text-right pr-4">
+        <span className="text-[13px] font-bold text-zinc-200">{currentValue!=null?`$${fmt(currentValue,0)}`:'—'}</span>
+      </div>
+      <div className="w-[140px] text-right pr-4 flex flex-col">
+        <span className={`font-bold text-sm ${unrealized==null?'text-zinc-600':unrealized>=0?'text-profit':'text-loss'}`}>
+          {unrealized!=null?fmtM(unrealized):'录入价格'}
+        </span>
+        {unrealizedPct!=null&&<span className={`text-[10px] ${unrealizedPct>=0?'text-profit':'text-loss'}`}>{fmtA(unrealizedPct)}</span>}
+      </div>
+      <div className="w-8 flex justify-center">
+        <button onClick={()=>onDelete(s.id)} className="text-zinc-600 hover:text-loss p-1">✕</button>
       </div>
     </div>
   );
 }
 
 function StocksTableHeader(){
-  const H=({t,right})=><div style={{fontSize:10,color:V('faint'),letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',textAlign:right?'right':'left',padding:'0 4px'}}>{t}</div>;
   return(
-    <div style={{display:'grid',gridTemplateColumns:'4px 130px 120px 120px 1fr 130px 130px 36px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
-      <div/><H t="标的"/><H t="持仓"/><H t="成本基础"/><H t="现价"/><H t="当前市值" right/><H t="浮动盈亏" right/><div/>
+    <div className="flex items-center text-[10px] text-zinc-500 tracking-wider font-mono uppercase bg-zinc-950/40 py-2 border-b border-zinc-800">
+      <div className="w-1" />
+      <div className="w-[140px] pl-4">标的资产</div>
+      <div className="w-[130px]">持仓总数</div>
+      <div className="w-[130px]">总成本基础</div>
+      <div className="flex-1 px-2">当前市价对价</div>
+      <div className="w-[140px] text-right pr-4">当前市值</div>
+      <div className="w-[140px] text-right pr-4">账面浮动盈亏</div>
+      <div className="w-8" />
     </div>
   );
 }
@@ -1820,90 +1733,51 @@ function StocksSummary({stocks}){
   const totalValue=stocks.filter(st=>st.currentPrice).reduce((s,st)=>s+st.currentPrice*st.shares,0);
   const totalUnreal=stocks.filter(st=>st.currentPrice).length?totalValue-stocks.filter(st=>st.currentPrice).reduce((s,st)=>s+st.costPerShare*st.shares,0):null;
   return(
-    <div className="card anim-in" style={{padding:'14px 20px',marginBottom:14,display:'flex',gap:24,flexWrap:'wrap',alignItems:'center'}}>
-      <div style={{display:'flex',flexDirection:'column',gap:3}}>
-        <span className="section-label">总成本基础</span>
-        <span style={{fontSize:20,fontWeight:700,color:ACC.amber,fontFamily:'IBM Plex Mono,monospace'}}>${fmt(totalCost,0)}</span>
+    <div className="card p-4 mb-4 bg-zinc-900/10 flex gap-6 flex-wrap items-center">
+      <div>
+        <span className="text-[10px] text-zinc-500 font-mono tracking-wider uppercase block mb-1">总计开仓持股成本</span>
+        <span className="text-xl font-mono font-bold text-amber">${fmt(totalCost,0)}</span>
       </div>
-      {totalValue>0&&<div style={{display:'flex',flexDirection:'column',gap:3}}>
-        <span className="section-label">当前总市值</span>
-        <span style={{fontSize:20,fontWeight:700,color:V('ink'),fontFamily:'IBM Plex Mono,monospace'}}>${fmt(totalValue,0)}</span>
+      {totalValue>0&&<div>
+        <span className="text-[10px] text-zinc-500 font-mono tracking-wider uppercase block mb-1">当前存续总市值</span>
+        <span className="text-xl font-mono font-bold text-zinc-100">${fmt(totalValue,0)}</span>
       </div>}
-      {totalUnreal!=null&&<div style={{display:'flex',flexDirection:'column',gap:3}}>
-        <span className="section-label">总浮动盈亏</span>
-        <span style={{fontSize:20,fontWeight:700,color:totalUnreal>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace'}}>{fmtM(totalUnreal)}</span>
-        <span style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>{fmtA(totalCost>0?(totalUnreal/totalCost)*100:null)}</span>
+      {totalUnreal!=null&&<div>
+        <span className="text-[10px] text-zinc-500 font-mono tracking-wider uppercase block mb-1">总计浮动盈亏</span>
+        <div className="flex items-baseline gap-1.5">
+          <span className={`text-xl font-mono font-bold ${totalUnreal>=0?'text-profit':'text-loss'}`}>{fmtM(totalUnreal)}</span>
+          <span className={`text-xs font-mono ${totalUnreal>=0?'text-profit':'text-loss'}`}>{fmtA(totalCost>0?(totalUnreal/totalCost)*100:null)}</span>
+        </div>
       </div>}
-      <div style={{display:'flex',flexDirection:'column',gap:3}}>
-        <span className="section-label">持股标的</span>
-        <span style={{fontSize:20,fontWeight:700,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>{stocks.length}</span>
+      <div className="ml-auto">
+        <span className="text-[10px] text-zinc-500 font-mono tracking-wider uppercase block mb-1">有效底层正股</span>
+        <span className="text-xl font-mono font-bold text-zinc-500">{stocks.length} 个标的</span>
       </div>
     </div>
   );
 }
 
-/* 手动添加股票表单 */
 function AddStockForm({onAdd,onCancel}){
   const [f,setF]=useState({ticker:'',shares:'',costPerShare:'',acquireDate:today()});
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
   const valid=f.ticker&&f.shares&&f.costPerShare;
   return(
-    <div className="card anim-in" style={{padding:20,marginBottom:14,borderColor:`${ACC.profit}33`}}>
-      <div style={{fontSize:13,fontWeight:700,color:ACC.profit,marginBottom:16}}>＋ 手动录入股票仓位</div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:12,marginBottom:14}}>
+    <div className="card p-4 mb-4 border border-profit/10 bg-zinc-950/20">
+      <div className="text-xs font-bold text-profit mb-3">＋ 手动录入存续股票</div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <Field label="标的代码" value={f.ticker} onChange={v=>set('ticker',v.toUpperCase())} placeholder="MRVL"/>
         <NumField label="持仓股数" value={f.shares} onChange={v=>set('shares',v)} placeholder="100" suffix="股"/>
         <NumField label="每股成本" prefix="$" value={f.costPerShare} onChange={v=>set('costPerShare',v)} placeholder="190.00"/>
         <DateField label="买入日期" value={f.acquireDate} onChange={v=>set('acquireDate',v)}/>
       </div>
-      <div style={{display:'flex',gap:8}}>
-        <button onClick={()=>{if(!valid)return;onAdd({id:Date.now(),ticker:f.ticker,shares:parseInt(f.shares),costPerShare:parseFloat(f.costPerShare),acquireDate:f.acquireDate,source:'manual',currentPrice:null});}} disabled={!valid} className="btn btn-primary">添加</button>
+      <div className="flex gap-2">
+        <button onClick={()=>{if(!valid)return;onAdd({id:Date.now(),ticker:f.ticker,shares:parseInt(f.shares),costPerShare:parseFloat(f.costPerShare),acquireDate:f.acquireDate,source:'manual',currentPrice:null});}} disabled={!valid} className="btn btn-primary px-5">添加</button>
         <button onClick={onCancel} className="btn btn-ghost">取消</button>
       </div>
     </div>
   );
 }
 
-function ClosedTableHeader(){
-  const H=({t,right})=><div style={{fontSize:10,color:V('faint'),letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',textAlign:right?'right':'left',padding:'0 4px'}}>{t}</div>;
-  return(
-    <div style={{display:'grid',gridTemplateColumns:'4px 110px 86px 96px 100px 1fr 120px 120px 36px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
-      <div/><H t="标的"/><H t="行权价"/><H t="开/平仓日"/><H t="方式"/><H t="收支明细"/><H t="净利润" right/><H t="实现年化" right/><div/>
-    </div>
-  );
-}
-
-/* 已平仓汇总 */
-function ClosedSummary({closed,commPerSide}){
-  if(!closed.length)return null;
-  const rs=closed.map(c=>calcClosed(c,commPerSide));
-  const totalProfit=rs.reduce((s,r)=>s+r.profit,0);
-  const avgAnnual=rs.reduce((s,r)=>s+(r.annual||0),0)/rs.length;
-  const wins=rs.filter(r=>r.profit>0).length;
-  return(
-    <div className="card anim-in" style={{padding:'14px 20px',marginBottom:16,display:'flex',gap:24,flexWrap:'wrap',alignItems:'center'}}>
-      <div style={{display:'flex',flexDirection:'column',gap:3}}>
-        <span className="section-label">累计已实现利润</span>
-        <span style={{fontSize:22,fontWeight:700,color:totalProfit>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace'}}>{fmtM(totalProfit)}</span>
-      </div>
-      <div style={{display:'flex',flexDirection:'column',gap:3}}>
-        <span className="section-label">平均实现年化</span>
-        <span style={{fontSize:22,fontWeight:700,color:avgAnnual>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace'}}>{fmtA(avgAnnual)}</span>
-      </div>
-      <div style={{display:'flex',flexDirection:'column',gap:3}}>
-        <span className="section-label">胜率</span>
-        <span style={{fontSize:22,fontWeight:700,color:ACC.blue,fontFamily:'IBM Plex Mono,monospace'}}>{((wins/closed.length)*100).toFixed(0)}%</span>
-        <span style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>{wins}/{closed.length} 盈利</span>
-      </div>
-      <div style={{display:'flex',flexDirection:'column',gap:3}}>
-        <span className="section-label">总笔数</span>
-        <span style={{fontSize:22,fontWeight:700,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>{closed.length}</span>
-      </div>
-    </div>
-  );
-}
-
-/* ══ 主应用 ══════════════════════════════════════ */
 function App(){
   const [theme,setTheme]=useState(()=>localStorage.getItem(SK.THEME)||'dark');
   const [positions,setPositions]=useState(()=>ls(SK.POS,[]));
@@ -1913,10 +1787,9 @@ function App(){
   const [cfg,setCfg]=useState(()=>ls(SK.CFG,{commPerSide:DEFAULT_COMM}));
   const [apiKey,setApiKey]=useState(()=>localStorage.getItem(SK.KEY)||'');
   const [finnhubKey,setFinnhubKey]=useState(()=>localStorage.getItem(SK.FH_KEY)||'');
-  // 云端同步（已内置默认配置）
   const [cloudUrl,setCloudUrl]=useState(()=>localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL);
   const [cloudPwd,setCloudPwd]=useState(()=>localStorage.getItem('whl-cloud-pwd')||DEFAULT_CLOUD_PWD);
-  const [cloudStatus,setCloudStatus]=useState('idle'); // idle | syncing | ok | err
+  const [cloudStatus,setCloudStatus]=useState('idle'); 
   const [showCloudModal,setShowCloudModal]=useState(false);
 
   const [tab,setTab]=useState('active');
@@ -1933,13 +1806,11 @@ function App(){
 
   useEffect(()=>{document.documentElement.dataset.theme=theme;localStorage.setItem(SK.THEME,theme);},[theme]);
 
-  // 启动时从云端拉数据（有配置时）
   useEffect(()=>{
     if(!cloudUrl||!cloudPwd)return;
     setCloudStatus('syncing');
     cloudGet(cloudPwd).then(remote=>{
       if(remote===null){setCloudStatus('err');return;}
-      // 云端有数据才覆盖本地；云端是空对象{}说明是第一次，把本地数据推上去
       const hasRemoteData=remote.positions?.length||remote.closed?.length||remote.stocks?.length||remote.sgov?.marketValue;
       if(hasRemoteData){
         if(remote.positions)setPositions(remote.positions);
@@ -1949,7 +1820,6 @@ function App(){
         if(remote.cfg)setCfg(remote.cfg);
         setCloudStatus('ok');
       }else{
-        // 云端是空的，把本地数据推上去初始化
         const payload=buildPayload(
           ls(SK.POS,[]),ls(SK.CLOSED,[]),ls(SK.STOCKS,[]),ls(SK.SGOV,{}),ls(SK.CFG,{commPerSide:DEFAULT_COMM})
         );
@@ -1958,7 +1828,6 @@ function App(){
     });
   },[cloudUrl,cloudPwd]);
 
-  // 把所有业务数据打包推送云端
   const pushCloud=useCallback(async(data)=>{
     if(!cloudUrl||!cloudPwd)return;
     setCloudStatus('syncing');
@@ -1966,7 +1835,6 @@ function App(){
     setCloudStatus(ok?'ok':'err');
   },[cloudUrl,cloudPwd]);
 
-  // 带云端同步的 mutate
   const buildPayload=(pos,cl,st,sg,cf)=>({
     positions:pos,closed:cl,stocks:st,sgov:sg,cfg:cf,
     updatedAt:Date.now(),
@@ -1996,24 +1864,21 @@ function App(){
     pushCloud(buildPayload(positions,closed,stocks,sgov,next));
   };
 
-  const addPosition=(pos)=>{mutate([...positions,pos]);setShowForm(false);setExpanded(pos.id);showToast(`已添加 ${pos.ticker} ${pos.type==='P'?'Put':'Call'} $${pos.strike}`);};
-  const removePosition=(id)=>{mutate(positions.filter(p=>p.id!==id));setExpanded(null);showToast('已删除仓位',ACC.loss);};
+  const addPosition=(pos)=>{mutate([...positions,pos]);setShowForm(false);setExpanded(pos.id);showToast(`已开仓 ${pos.ticker} ${pos.type==='P'?'Put':'Call'}`);};
+  const removePosition=(id)=>{mutate(positions.filter(p=>p.id!==id));setExpanded(null);showToast('已放弃追溯该仓位',ACC.loss);};
   const updateOptionPrice=(id,price)=>mutate(positions.map(p=>p.id===id?{...p,optionPrice:price}:p));
   const toggleExpand=(id)=>setExpanded(prev=>prev===id?null:id);
   const saveApiKey=(key)=>{localStorage.setItem(SK.KEY,key);setApiKey(key);setShowApiModal(false);showToast('Anthropic Key 已保存');};
-  const saveFhKey=(key)=>{localStorage.setItem(SK.FH_KEY,key);setFinnhubKey(key);setShowFhModal(false);showToast('Finnhub Key 已保存 ✓',ACC.teal);};
-  const saveComm=(v)=>{mutateCfg({...cfg,commPerSide:v});setShowCommModal(false);showToast(`手续费已更新 $${v}/张`);};
+  const saveFhKey=(key)=>{localStorage.setItem(SK.FH_KEY,key);setFinnhubKey(key);setShowFhModal(false);showToast('Finnhub Key 已固化 ✓',ACC.teal);};
+  const saveComm=(v)=>{mutateCfg({...cfg,commPerSide:v});setShowCommModal(false);showToast(`默认单张规费已修正为 $${v}`);};
   const toggleTheme=()=>setTheme(t=>t==='dark'?'light':'dark');
 
-  // 刷新报价：股价走 Vercel 代理，期权走 CBOE
   const refreshPrices=async()=>{
     const allTickers=[...new Set([...positions.map(p=>p.ticker),...stocks.map(s=>s.ticker)])];
     if(!allTickers.length)return;
     setLoading('refresh');
     try{
-      // 股价：Vercel 代理 → Yahoo（服务端请求，无 CORS）
       const stockPrices=await fetchStockPrices(allTickers);
-      // 期权现价：CBOE（免 Key，真实数据）
       const optPrices=positions.length?await fetchAllOptionPrices(positions,null):{};
       const optOk=Object.keys(optPrices).length;
       if(positions.length)mutate(positions.map(p=>({
@@ -2024,27 +1889,11 @@ function App(){
       if(stocks.length)mutateStocks(stocks.map(s=>({...s,currentPrice:stockPrices[s.ticker]??s.currentPrice})));
       setLastRefresh(new Date().toLocaleTimeString('zh-CN'));
       const stockOk=Object.values(stockPrices).filter(v=>v!=null).length;
-      showToast(`股价 ${stockOk}/${allTickers.length} · 期权现价 ${optOk}/${positions.length}`);
-    }catch(e){showToast('刷新失败：'+e.message,ACC.loss);}
+      showToast(`同步完成: 标的正股股价[${stockOk}] · 原生期权快照对价[${optOk}]`);
+    }catch(e){showToast('网络交互层错位：'+e.message,ACC.loss);}
     setLoading(false);
   };
 
-  const refreshPricesAI=async()=>{
-    if(!positions.length&&!stocks.length)return;
-    if(!apiKey){setShowApiModal(true);return;}
-    setLoading('ai');
-    try{
-      const allTickers=[...new Set([...positions.map(p=>p.ticker),...stocks.map(s=>s.ticker)])];
-      const prices=await fetchAIPrices(allTickers,apiKey);
-      if(positions.length)mutate(positions.map(p=>({...p,currentPrice:prices[p.ticker]??p.currentPrice})));
-      if(stocks.length)mutateStocks(stocks.map(s=>({...s,currentPrice:prices[s.ticker]??s.currentPrice})));
-      setLastRefresh(new Date().toLocaleTimeString('zh-CN'));
-      showToast('AI 报价已更新 ↻');
-    }catch(e){showToast('AI 失败：'+e.message,ACC.loss);}
-    setLoading(false);
-  };
-
-  // 平仓 / 接货
   const confirmClose=(pos,data)=>{
     const {closePrice,closeDate,closeType,assignedShares,assignedCostPerShare,assignedMarketValue,assignedTicker}=data;
     const record={...pos,closePrice,closeDate,closeType,closedAt:Date.now(),...(closeType==='assigned'?{assignedShares,assignedCostPerShare,assignedMarketValue}:{})};
@@ -2052,7 +1901,6 @@ function App(){
     mutate(positions.filter(p=>p.id!==pos.id));
 
     if(closeType==='assigned'){
-      // 新建股票仓位
       const newStock={
         id:Date.now(),ticker:assignedTicker,shares:assignedShares,
         costPerShare:assignedCostPerShare,acquireDate:closeDate,
@@ -2060,26 +1908,25 @@ function App(){
         fromOptionId:pos.id,
       };
       mutateStocks([...stocks,newStock]);
-      // SGOV 市值自动扣减接货占用资金
       if(sgov?.marketValue){
         const newMV=Math.max(0,(sgov.marketValue||0)-assignedMarketValue);
         mutateSgov({...sgov,marketValue:newMV});
       }
-      showToast(`📦 ${assignedTicker} 接货 ${assignedShares}股，SGOV 已扣减 $${fmt(assignedMarketValue,0)}`,ACC.amber);
+      showToast(`📦 锁定接货！${assignedTicker} 已洗入持仓列表，自动扣除底仓现金`,ACC.amber);
     }else{
-      showToast(`${pos.ticker} 已平仓，收益 ${fmtM(calcClosed(record,commPerSide).profit)}`);
+      showToast(`${pos.ticker} 已归档，落袋净盈亏 ${fmtM(calcClosed(record,commPerSide).profit)}`);
     }
     setExpanded(null);setCloseTarget(null);
   };
-  const removeClosedRecord=(id)=>{mutateClosed(closed.filter(c=>c.id!==id));showToast('已删除记录',ACC.loss);};
+  const removeClosedRecord=(id)=>{mutateClosed(closed.filter(c=>c.id!==id));showToast('历史明细已抹除',ACC.loss);};
   const updateStockPrice=(id,price)=>mutateStocks(stocks.map(s=>s.id===id?{...s,currentPrice:price}:s));
-  const removeStock=(id)=>{mutateStocks(stocks.filter(s=>s.id!==id));showToast('已删除股票仓位',ACC.loss);};
+  const removeStock=(id)=>{mutateStocks(stocks.filter(s=>s.id!==id));showToast('股票持仓已清理',ACC.loss);};
 
   const totalMarginUsed=positions.reduce((s,p)=>s+(p.marginType==='cash'?p.strike*100:(p.customMargin||0))*(p.qty||1),0);
 
   return(
     <div style={{minHeight:'100vh',display:'flex',flexDirection:'column'}}>
-      {toast&&<div className="toast" style={{background:toast.color,color:'#0c1217'}}>{toast.msg}</div>}
+      {toast&&<div className="toast font-mono" style={{background:toast.color,color:'#090d11'}}>{toast.msg}</div>}
       {showApiModal&&<ApiKeyModal onSave={saveApiKey} onClose={()=>setShowApiModal(false)}/>}
       {showFhModal&&<FinnhubModal current={finnhubKey} onSave={saveFhKey} onClose={()=>setShowFhModal(false)}/>}
       {showCommModal&&<CommModal current={commPerSide} onSave={saveComm} onClose={()=>setShowCommModal(false)}/>}
@@ -2095,13 +1942,12 @@ function App(){
               if(remote.stocks)setStocks(remote.stocks);
               if(remote.sgov)setSgov(remote.sgov);
               if(remote.cfg)setCfg(remote.cfg);
-              setCloudStatus('ok');showToast('☁ 云端数据已加载',ACC.teal);
+              setCloudStatus('ok');showToast('☁ 云端网络多端数据同步成功',ACC.teal);
             }else{
-              // 云端空的，把本地数据推上去
               const payload=buildPayload(positions,closed,stocks,sgov,cfg);
               cloudPut(payload,p).then(ok=>{
                 setCloudStatus(ok?'ok':'err');
-                if(ok)showToast('☁ 本地数据已同步到云端',ACC.teal);
+                if(ok)showToast('☁ 本地核心存储已成功固化到云端',ACC.teal);
               });
             }
           });
@@ -2110,161 +1956,150 @@ function App(){
       {closeTarget&&<CloseModal pos={closeTarget} commPerSide={commPerSide}
         onConfirm={(data)=>confirmClose(closeTarget,data)} onClose={()=>setCloseTarget(null)}/>}
 
-      {/* ── Header ── */}
-      <div className="app-header" style={{borderBottom:`1px solid ${V('line')}`,background:V('surface'),backdropFilter:'blur(14px)',position:'sticky',top:0,zIndex:50,boxShadow:V('shadow'),height:56,display:'flex',alignItems:'center'}}>
-        <div style={{maxWidth:'100%',width:'100%',padding:'0 16px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,flexWrap:'wrap'}}>
-          <div style={{display:'flex',alignItems:'center',gap:10}}>
-            <div style={{width:8,height:8,borderRadius:'50%',background:ACC.amber,boxShadow:`0 0 12px ${ACC.amber}`}}/>
-            <span style={{fontWeight:700,fontSize:15,letterSpacing:'.04em'}}>Wheel Dashboard</span>
+      <div className="app-header border-b border-zinc-800/80 bg-zinc-900/60 backdrop-blur-md sticky top-0 z-50 h-12 flex items-center shadow-lg shadow-black/20">
+        <div className="w-full px-4 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-amber shadow-[0_0_10px_#f5b731]" />
+            <span className="font-bold text-sm tracking-wide text-zinc-100 font-mono">Wheel Dashboard</span>
           </div>
-          <div className="header-btns" style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
-            {lastRefresh&&<span className="header-time" style={{fontSize:11,color:V('faint'),fontFamily:'IBM Plex Mono,monospace'}}>更新 {lastRefresh}</span>}
-            {/* 云端同步状态 */}
-            <button onClick={()=>setShowCloudModal(true)} className="btn btn-ghost"
-              style={{fontSize:12,padding:'7px 12px',
+          <div className="header-btns flex gap-2 items-center">
+            {lastRefresh&&<span className="header-time text-[10.5px] text-zinc-500 font-mono">网关响应: {lastRefresh}</span>}
+            <button onClick={()=>setShowCloudModal(true)} className="btn btn-ghost text-[11.5px] px-2.5 py-1 rounded border transition-all"
+              style={{
                 color:cloudStatus==='ok'?ACC.teal:cloudStatus==='err'?ACC.loss:cloudStatus==='syncing'?ACC.amber:V('faint'),
-                borderColor:cloudStatus==='ok'?`${ACC.teal}44`:cloudStatus==='err'?`${ACC.loss}44`:cloudStatus==='syncing'?`${ACC.amber}44`:V('line')}}>
-              {cloudStatus==='ok'?'☁ 已同步':cloudStatus==='err'?'☁ 同步失败':cloudStatus==='syncing'?'☁ 同步中…':'☁ 未配置'}
+                borderColor:cloudStatus==='ok'?`${ACC.teal}22`:cloudStatus==='err'?`${ACC.loss}22`:cloudStatus==='syncing'?`${ACC.amber}22`:V('line')}}>
+              {cloudStatus==='ok'?'☁ 云端连接正常':cloudStatus==='err'?'☁ 同步失联':cloudStatus==='syncing'?'☁ 数据清洗中…':'☁ 单机运行'}
             </button>
-            <button onClick={()=>setShowCommModal(true)} className="btn btn-ghost btn-comm" style={{fontSize:12,fontFamily:'IBM Plex Mono,monospace',padding:'7px 12px'}}>¢ ${commPerSide}/张</button>
-            <button onClick={refreshPrices} disabled={!!loading} className="btn"
-              style={{background:loading==='refresh'?V('line'):ACC.blueBg,color:loading==='refresh'?V('faint'):ACC.blue,
-                border:`1.5px solid ${loading==='refresh'?V('line'):`${ACC.blue}44`}`,fontWeight:500}}>
-              {loading==='refresh'?'拉取中…':'↻ CBOE 刷新'}
+            <button onClick={()=>setShowCommModal(true)} className="btn btn-ghost btn-comm text-[11.5px] font-mono px-2.5 py-1 rounded">¢ ${commPerSide}/合约</button>
+            <button onClick={refreshPrices} disabled={!!loading} className="btn bg-blue/10 text-blue border border-blue/20 hover:bg-blue/15 font-medium py-1 text-xs">
+              {loading==='refresh'?'同步管道中…':'↻ CBOE 行情刷新'}
             </button>
-            {tab==='active'&&<button onClick={()=>setShowForm(s=>!s)} className="btn"
-              style={{background:ACC.amberSoft,color:ACC.amber,border:`1.5px solid ${ACC.amber}44`,fontWeight:600}}>
-              {showForm?'✕ 取消':'＋ 添加'}
+            {tab==='active'&&<button onClick={()=>setShowForm(s=>!s)} className="btn bg-amber/10 text-amber border border-amber/20 font-bold py-1 text-xs">
+              {showForm?'✕ 收起':'＋ 记账开仓'}
             </button>}
-            <button className="theme-btn" onClick={toggleTheme} title={theme==='dark'?'切换浅色':'切换深色'}>{theme==='dark'?'☀':'🌙'}</button>
+            <button className="theme-btn" onClick={toggleTheme}>{theme==='dark'?'☀':'🌙'}</button>
           </div>
         </div>
       </div>
 
-      {/* ── 主体布局 ── */}
       <div className="layout" style={{flex:1}}>
-        {/* 左侧 Tab 导航 */}
-        <div className="sidebar">
-          <div className="sidebar-section">仓位</div>
+        <div className="sidebar font-medium text-xs">
+          <div className="sidebar-section">账本核心</div>
           <button className={`tab-btn${tab==='active'?' active':''}`} onClick={()=>setTab('active')}>
-            <span className="tab-dot" style={{background:ACC.profit}}/>
-            活跃期权
+            <span className="tab-dot" style={{background:ACC.profit}}/>活跃车轮期权
             <span className="tab-count">{positions.length}</span>
           </button>
           <button className={`tab-btn${tab==='stocks'?' active':''}`} onClick={()=>setTab('stocks')}>
-            <span className="tab-dot" style={{background:ACC.blue}}/>
-            股票持仓
+            <span className="tab-dot" style={{background:ACC.blue}}/>被动接货正股
             <span className="tab-count">{stocks.length}</span>
           </button>
           <button className={`tab-btn${tab==='closed'?' active':''}`} onClick={()=>setTab('closed')}>
-            <span className="tab-dot" style={{background:V('faint')}}/>
-            已平仓
+            <span className="tab-dot" style={{background:V('faint')}}/>已完结历史单
             <span className="tab-count">{closed.length}</span>
           </button>
           <div className="sidebar-sep"/>
-          <div className="sidebar-section">底仓</div>
+          <div className="sidebar-section">收益底仓</div>
           <button className={`tab-btn${tab==='sgov'?' active':''}`} onClick={()=>setTab('sgov')}>
-            <span className="tab-dot" style={{background:ACC.teal}}/>
-            SGOV
+            <span className="tab-dot" style={{background:ACC.teal}}/>SGOV 现金增强
           </button>
           <div className="sidebar-sep"/>
-          <div className="sidebar-section">工具</div>
+          <div className="sidebar-section">量化雷达</div>
           <button className={`tab-btn${tab==='watchlist'?' active':''}`} onClick={()=>setTab('watchlist')}>
-            <span className="tab-dot" style={{background:ACC.blue}}/>
-            观察列表
+            <span className="tab-dot" style={{background:ACC.blue}}/>富途自选标的
           </button>
           <button className={`tab-btn${tab==='scan'?' active':''}`} onClick={()=>setTab('scan')}>
-            <span className="tab-dot" style={{background:ACC.amber}}/>
-            期权筛选
+            <span className="tab-dot" style={{background:ACC.amber}}/>高IV Put 筛选
           </button>
         </div>
 
-        {/* 右侧内容 */}
         <div className="main-area">
-          {/* 活跃仓位 Tab */}
           {tab==='active'&&(
             <>
               {showForm&&<AddForm onAdd={addPosition} onCancel={()=>setShowForm(false)} commPerSide={commPerSide}/>}
               {positions.length>0&&<SummaryBar positions={positions} commPerSide={commPerSide} sgov={sgov}/>}
               {positions.length===0&&!showForm&&(
-                <div style={{textAlign:'center',padding:'70px 20px',color:V('faint'),border:`1.5px dashed ${V('line')}`,borderRadius:16}}>
-                  <div style={{fontSize:38,marginBottom:12,opacity:.3}}>◎</div>
-                  <div style={{fontSize:15,marginBottom:6,color:V('dim')}}>还没有活跃仓位</div>
-                  <div style={{fontSize:13}}>点击右上角「＋ 添加」录入</div>
+                <div className="text-center py-16 text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/5">
+                  <div className="text-3xl opacity-30 mb-2">◎</div>
+                  <div className="text-sm font-medium text-zinc-400">当前没有处于存续状态的活跃仓位</div>
+                  <div className="text-xs mt-1">点击右上角「＋ 记账开仓」进行追溯录入</div>
                 </div>
               )}
               {positions.length>0&&(
-                <div className="pos-list">
+                <div className="pos-list border border-zinc-800/80 rounded-xl bg-zinc-900/5 overflow-hidden">
                   <ActiveTableHeader/>
-                  {positions.map(p=>(
-                    <PositionRow key={p.id} p={p} commPerSide={commPerSide}
-                      expanded={expanded===p.id}
-                      onToggle={()=>toggleExpand(p.id)}
-                      onUpdateOptionPrice={updateOptionPrice}
-                      onClose={()=>{setCloseTarget(p);setExpanded(null);}}
-                      onDelete={()=>removePosition(p.id)}/>
-                  ))}
+                  <div className="divide-y divide-zinc-800/30">
+                    {positions.map(p=>(
+                      <PositionRow key={p.id} p={p} commPerSide={commPerSide}
+                        expanded={expanded===p.id}
+                        onToggle={()=>toggleExpand(p.id)}
+                        onUpdateOptionPrice={updateOptionPrice}
+                        onClose={()=>{setCloseTarget(p);setExpanded(null);}}
+                        onDelete={()=>removePosition(p.id)}/>
+                    ))}
+                  </div>
                 </div>
               )}
             </>
           )}
 
-          {/* 已平仓 Tab */}
           {tab==='closed'&&(
             <>
               <ClosedSummary closed={closed} commPerSide={commPerSide}/>
               {closed.length===0?(
-                <div style={{textAlign:'center',padding:'70px 20px',color:V('faint'),border:`1.5px dashed ${V('line')}`,borderRadius:16}}>
-                  <div style={{fontSize:38,marginBottom:12,opacity:.3}}>📋</div>
-                  <div style={{fontSize:15,marginBottom:6,color:V('dim')}}>暂无平仓记录</div>
-                  <div style={{fontSize:13}}>在「活跃期权」展开一笔，点击「↩ 平仓」</div>
+                <div className="text-center py-16 text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/5">
+                  <div className="text-3xl opacity-30 mb-2">📋</div>
+                  <div className="text-sm font-medium text-zinc-400">目前历史清算池为空</div>
+                  <div className="text-xs mt-1">在「活跃期权」列表项展开，并点击「平仓结算」后，账目会自动转移至此</div>
                 </div>
-              ):(<>
-                <ClosedTableHeader/>
-                {closed.map(c=><ClosedRow key={c.id} c={c} commPerSide={commPerSide} onDelete={()=>removeClosedRecord(c.id)}/>)}
-              </>)}
+              ):(
+                <div className="overflow-x-auto border border-zinc-800 rounded-xl bg-zinc-900/5">
+                  <ClosedTableHeader/>
+                  <div className="divide-y divide-zinc-800/30">
+                    {closed.map(c=><ClosedRow key={c.id} c={c} commPerSide={commPerSide} onDelete={()=>removeClosedRecord(c.id)}/>)}
+                  </div>
+                </div>
+              )}
             </>
           )}
 
-          {/* 股票持仓 Tab */}
           {tab==='stocks'&&(
             <>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14,flexWrap:'wrap',gap:8}}>
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <div>
-                  <div style={{fontWeight:700,fontSize:15,marginBottom:2}}>股票持仓</div>
-                  <div style={{fontSize:12,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>接货自动录入 · 可手动添加 · 刷新股价同步更新</div>
+                  <h2 className="text-base font-bold text-zinc-100">底层正股池持仓</h2>
+                  <p className="text-xs text-zinc-500 mt-0.5 font-mono">Put 跌破被迫行权时自动建立 · 支持单独手动追加管理</p>
                 </div>
-                <button onClick={()=>setShowStockForm(s=>!s)} className="btn"
-                  style={{background:ACC.profit+'18',color:ACC.profit,border:`1.5px solid ${ACC.profit}44`,fontWeight:600}}>
-                  {showStockForm?'✕ 取消':'＋ 手动添加'}
+                <button onClick={()=>setShowStockForm(s=>!s)} className="btn bg-profit/10 text-profit border border-profit/20 font-semibold py-1 text-xs">
+                  {showStockForm?'✕ 取消录入':'＋ 追加手动建仓'}
                 </button>
               </div>
               {showStockForm&&<AddStockForm
-                onAdd={s=>{mutateStocks([...stocks,s]);setShowStockForm(false);showToast(`已添加 ${s.ticker} ${s.shares}股`);}}
+                onAdd={s=>{mutateStocks([...stocks,s]);setShowStockForm(false);showToast(`股票建仓完毕: ${s.ticker} [${s.shares}股]`);}}
                 onCancel={()=>setShowStockForm(false)}/>}
               <StocksSummary stocks={stocks}/>
               {stocks.length===0&&!showStockForm?(
-                <div style={{textAlign:'center',padding:'60px 20px',color:V('faint'),border:`1.5px dashed ${V('line')}`,borderRadius:16}}>
-                  <div style={{fontSize:38,marginBottom:12,opacity:.3}}>📊</div>
-                  <div style={{fontSize:15,marginBottom:6,color:V('dim')}}>暂无股票仓位</div>
-                  <div style={{fontSize:13}}>期权被行权「接货」时自动建仓 · 或点击「手动添加」</div>
+                <div className="text-center py-16 text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/5">
+                  <div className="text-3xl opacity-30 mb-2">📊</div>
+                  <div className="text-sm font-medium text-zinc-400">暂无股票正股池仓位</div>
+                  <div className="text-xs mt-1">将在车轮期权被行权接货时自动转换触发，或点击右侧追加录入</div>
                 </div>
-              ):(stocks.length>0&&<>
-                <StocksTableHeader/>
-                {stocks.map(s=><StockRow key={s.id} s={s} onUpdatePrice={updateStockPrice} onDelete={removeStock}/>)}
-              </>)}
+              ):(stocks.length>0&&
+                <div className="overflow-x-auto border border-zinc-800 rounded-xl bg-zinc-900/5">
+                  <StocksTableHeader/>
+                  <div className="divide-y divide-zinc-800/30">
+                    {stocks.map(s=><StockRow key={s.id} s={s} onUpdatePrice={updateStockPrice} onDelete={removeStock}/>)}
+                  </div>
+                </div>
+              )}
             </>
           )}
 
-          {/* SGOV Tab */}
           <div style={{display:tab==='sgov'?'block':'none'}}>
             <SgovPanel sgov={sgov} onUpdate={mutateSgov} totalMarginUsed={totalMarginUsed}/>
           </div>
 
-          {/* 观察列表 Tab */}
           <div style={{display:tab==='watchlist'?'block':'none'}}><WatchlistPanel/></div>
 
-          {/* 期权筛选 Tab */}
           <div style={{display:tab==='scan'?'block':'none'}}><ScanPanel/></div>
         </div>
       </div>
