@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Wheel Data · 期权年化追踪</title>
+<title>Wheel Dashboard · 期权年化追踪</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -923,7 +923,6 @@ function WatchlistPanel(){
 
   const refreshAll=async()=>{
     setLoading(true);
-    // 始终从富途 API 获取最新列表（不依赖异步 state）
     let currentList=[];
     try{
       const wlRes=await fetch(proxyBase+'/api/futu/watchlist',{signal:AbortSignal.timeout(8000)});
@@ -931,27 +930,36 @@ function WatchlistPanel(){
       currentList=wlData.data||[];
       setTickers(currentList);
     }catch{currentList=tickers;}
-    // 确保所有 code 带市场前缀
     currentList=currentList.map(c=>(c.startsWith('US.')||c.startsWith('HK.'))?c:'US.'+c);
     const results={};
     const today=new Date();
+
     for(const code of currentList){
+      const display=code.replace(/^US\./,'').replace(/^HK\./,'');
       try{
-        // 1. 股票摘要（IV/HV/IV Rank/股价）
-        const res=await fetch(proxyBase+'/api/futu/stock-option-summary?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(12000)});
-        const d=await res.json();
-        if(d.status==='success'&&d.data){
-          const s=d.data;
-          results[code]={
-            price:s.stock_price||s.last_price||null,
-            prevClose:s.prev_close||null,
-            iv:s.iv,hv:s.hv,
-            ivRank:s.iv_rank,ivPercentile:s.iv_percentile,
-            optionVolume:s.option_volume,pcRatio:s.volume_pc_ratio,
-            openInterest:s.open_interest,
-          };
-        }
-        // 2. 找最近月度到期日（25-50天）
+        // ── 1. 富途：股价 ──
+        const sumRes=await fetch(proxyBase+'/api/futu/stock-option-summary?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(10000)});
+        const sumData=await sumRes.json();
+        const price=(sumData.status==='success'&&sumData.data)?sumData.data.stock_price||sumData.data.last_price:null;
+        results[code]={price:price};
+
+        // ── 2. CBOE：IV30 / IV Rank ──
+        try{
+          const cboeRes=await fetch(proxyBase+'/api/cboe/'+display,{signal:AbortSignal.timeout(10000)});
+          if(cboeRes.ok){
+            const cboe=await cboeRes.json();
+            const dd=cboe&&cboe.data;
+            if(dd){
+              const iv30=dd.iv30?Number(dd.iv30):null;
+              const hi=dd.iv30_one_year_high?Number(dd.iv30_one_year_high):null;
+              const lo=dd.iv30_one_year_low?Number(dd.iv30_one_year_low):null;
+              const ivRank=(iv30!=null&&hi!=null&&lo!=null&&hi>lo)?Math.round((iv30-lo)/(hi-lo)*100):null;
+              Object.assign(results[code],{iv30:iv30,ivRank:ivRank});
+            }
+          }
+        }catch{}
+
+        // ── 3. 富途：最优 Put 合约（25-50 DTE）──
         const daysRes=await fetch(proxyBase+'/api/futu/option-days?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(8000)});
         const daysData=await daysRes.json();
         if(daysData.status==='success'&&Array.isArray(daysData.data)){
@@ -961,29 +969,45 @@ function WatchlistPanel(){
             const dte=Math.round((exp-today)/86400000);
             if(dte>=25&&dte<=50&&dte<bestDte){bestDte=dte;bestDate=dd.strike_time.split(' ')[0];}
           }
-          // 3. 拉这个到期日的 Put 链，找最优合约（delta 0.06-0.18 里年化最高）
           if(bestDate){
+            results[code].bestExpiry=bestDate;
+            results[code].bestDte=bestDte;
             const chainRes=await fetch(proxyBase+'/api/futu/option-chain?code='+encodeURIComponent(code)+'&date='+bestDate+'&option_type=PUT',{signal:AbortSignal.timeout(12000)});
             const chainData=await chainRes.json();
-            if(chainData.status==='success'&&Array.isArray(chainData.data)){
+            if(chainData.status==='success'&&Array.isArray(chainData.data)&&chainData.data.length){
+              // 有 delta 时用 delta 筛，没有时用行权价距离
               let bestOpt=null;
-              for(const opt of chainData.data){
-                const d2=Math.abs(opt.delta||0);
-                if(d2<0.06||d2>0.18)continue;
-                if(!opt.mid_price||opt.mid_price<=0)continue;
-                if(!bestOpt||opt.seller_annual_return>bestOpt.seller_annual_return)bestOpt=opt;
+              const hasDelta=chainData.data.some(o=>o.delta!=null&&Math.abs(o.delta)>0.01);
+              if(hasDelta){
+                for(const opt of chainData.data){
+                  const d2=Math.abs(opt.delta||0);
+                  if(d2<0.06||d2>0.18||!opt.mid_price||opt.mid_price<=0)continue;
+                  if(!bestOpt||(opt.seller_annual_return||0)>(bestOpt.seller_annual_return||0))bestOpt=opt;
+                }
+              }
+              if(!bestOpt&&price){
+                let bestAR=0;
+                for(const opt of chainData.data){
+                  if(!opt.mid_price||opt.mid_price<=0)continue;
+                  const strike=opt.strike_price||0;
+                  const otm=(price-strike)/price;
+                  if(otm<0.05||otm>0.25)continue;
+                  if((opt.seller_annual_return||0)>bestAR){bestAR=opt.seller_annual_return;bestOpt=opt;}
+                }
+              }
+              if(!bestOpt){
+                let bestAR=0;
+                for(const opt of chainData.data){
+                  if(!opt.mid_price||opt.mid_price<=0)continue;
+                  if((opt.seller_annual_return||0)>bestAR){bestAR=opt.seller_annual_return;bestOpt=opt;}
+                }
               }
               if(bestOpt){
-                Object.assign(results[code]||{},{
-                  bestStrike:bestOpt.strike_price,
-                  bestMid:bestOpt.mid_price,
-                  bestDelta:bestOpt.delta,
-                  bestAnnual:bestOpt.seller_annual_return,
-                  bestIV:bestOpt.implied_volatility,
-                  bestTheta:bestOpt.theta,
-                  bestExpiry:bestDate,
-                  bestDte:bestDte,
-                  bestProb:bestOpt.profit_probability,
+                Object.assign(results[code],{
+                  bestStrike:bestOpt.strike_price,bestMid:bestOpt.mid_price,
+                  bestBid:bestOpt.bid_price,bestAsk:bestOpt.ask_price,
+                  bestDelta:bestOpt.delta,bestAnnual:bestOpt.seller_annual_return,
+                  bestIV:bestOpt.implied_volatility,bestProb:bestOpt.profit_probability,
                 });
               }
             }
@@ -1024,8 +1048,8 @@ function WatchlistPanel(){
 
       {tickers.length>0&&(
         <div style={{overflowX:'auto'}}>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 0.7fr 0.8fr 0.7fr 0.6fr 0.7fr 0.6fr 0.6fr 0.7fr 0.6fr 0.3fr',gap:0,padding:'0 0 8px',marginBottom:4}}>
-            {['标的','股价','IV/HV','IV Rank','最优Put','行权价','中间价','Delta','年化','胜率',''].map(h=>(
+          <div style={{display:'grid',gridTemplateColumns:'1.1fr 0.8fr 0.7fr 0.6fr 0.9fr 0.7fr 0.9fr 0.7fr 0.7fr 0.3fr',gap:0,padding:'0 0 8px',marginBottom:4}}>
+            {['标的','股价','IV30','IVR','到期/DTE','行权价','Bid/Ask','中间价','年化',''].map(h=>(
               <div key={h} style={{fontSize:10,color:V('faint'),letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',padding:'0 10px'}}>{h}</div>
             ))}
           </div>
@@ -1033,10 +1057,10 @@ function WatchlistPanel(){
           {tickers.map(t=>{
             const d=stockData[t]||{};
             const display=t.replace(/^US\./,'').replace(/^HK\./,'');
-            const rankVal=d.ivRank;
+            const rankVal=d.ivRank!=null?d.ivRank:null;
             const rankColor=rankVal==null?V('faint'):(rankVal>=70?ACC.profit:(rankVal>=40?ACC.amber:V('dim')));
             return(
-              <div key={t} className="card" style={{display:'grid',gridTemplateColumns:'1fr 0.7fr 0.8fr 0.7fr 0.6fr 0.7fr 0.6fr 0.6fr 0.7fr 0.6fr 0.3fr',gap:0,marginBottom:6,borderLeft:'3px solid '+rankColor}}>
+              <div key={t} className="card" style={{display:'grid',gridTemplateColumns:'1.1fr 0.8fr 0.7fr 0.6fr 0.9fr 0.7fr 0.9fr 0.7fr 0.7fr 0.3fr',gap:0,marginBottom:6,borderLeft:'3px solid '+rankColor}}>
                 <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',gap:10})}>
                   <span style={{fontWeight:700,fontSize:15,color:V('ink')}}>{display}</span>
                 </div>
@@ -1044,36 +1068,34 @@ function WatchlistPanel(){
                   <span style={{color:d.price?V('ink'):V('faint'),fontWeight:600}}>{d.price?('$'+fmt2(d.price)):'--'}</span>
                 </div>
                 <div style={cellStyle}>
-                  <div><span style={{color:V('dim'),fontSize:12}}>{'IV '}</span><span style={{color:V('ink')}}>{d.iv!=null?(d.iv.toFixed(1)+'%'):'--'}</span></div>
-                  <div><span style={{color:V('dim'),fontSize:12}}>{'HV '}</span><span style={{color:V('faint')}}>{d.hv!=null?(d.hv.toFixed(1)+'%'):'--'}</span></div>
+                  <span style={{color:V('dim')}}>{d.iv30!=null?(d.iv30.toFixed(1)+'%'):'--'}</span>
                 </div>
-                <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',gap:6})}>
-                  <span style={{color:rankColor,fontWeight:600}}>{rankVal!=null?rankVal:'--'}</span>
+                <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',gap:5})}>
+                  <span style={{color:rankColor,fontWeight:600,fontSize:13}}>{rankVal!=null?rankVal:'--'}</span>
                   {rankVal!=null&&(
-                    <div style={{height:4,borderRadius:2,background:V('line'),width:24,flexShrink:0}}>
+                    <div style={{height:4,borderRadius:2,background:V('line'),width:22,flexShrink:0}}>
                       <div style={{height:4,borderRadius:2,width:(Math.min(rankVal,100)+'%'),background:rankColor}}/>
                     </div>
                   )}
                 </div>
                 <div style={cellStyle}>
-                  {d.bestExpiry?<span style={{color:V('dim'),fontSize:11}}>{d.bestExpiry+' ('+d.bestDte+'天)'}</span>:<span style={{color:V('faint')}}>{'--'}</span>}
+                  {d.bestExpiry?<span style={{color:V('dim'),fontSize:11}}>{d.bestExpiry.slice(5)+' ('+d.bestDte+'天)'}</span>:<span style={{color:V('faint')}}>{'--'}</span>}
                 </div>
                 <div style={cellStyle}>
                   <span style={{color:d.bestStrike?ACC.amber:V('faint'),fontWeight:600}}>{d.bestStrike?('$'+fmt2(d.bestStrike,0)):'--'}</span>
                 </div>
                 <div style={cellStyle}>
-                  <span style={{color:d.bestMid?V('ink'):V('faint'),fontWeight:600}}>{d.bestMid?('$'+fmt2(d.bestMid,2)):'--'}</span>
+                  {d.bestBid!=null?(
+                    <span style={{color:V('dim'),fontSize:12}}>{fmt2(d.bestBid)+' / '+fmt2(d.bestAsk)}</span>
+                  ):<span style={{color:V('faint')}}>{'--'}</span>}
                 </div>
                 <div style={cellStyle}>
-                  <span style={{color:V('dim')}}>{d.bestDelta!=null?fmt2(d.bestDelta,3):'--'}</span>
+                  <span style={{color:d.bestMid?V('ink'):V('faint'),fontWeight:600}}>{d.bestMid?('$'+fmt2(d.bestMid,2)):'--'}</span>
                 </div>
                 <div style={cellStyle}>
                   {d.bestAnnual!=null?(
                     <span style={{color:d.bestAnnual>=15?ACC.profit:(d.bestAnnual>=8?ACC.amber:V('dim')),fontWeight:700}}>{'+'+fmt2(d.bestAnnual,1)+'%'}</span>
                   ):<span style={{color:V('faint')}}>{'--'}</span>}
-                </div>
-                <div style={cellStyle}>
-                  <span style={{color:d.bestProb!=null&&d.bestProb>=80?ACC.profit:V('dim')}}>{d.bestProb!=null?(d.bestProb.toFixed(0)+'%'):'--'}</span>
                 </div>
                 <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',justifyContent:'center'})}>
                   <button onClick={()=>removeTicker(t)} style={{background:'none',border:'none',color:ACC.loss,cursor:'pointer',fontSize:11,padding:'2px 6px',opacity:.6}}>{'\u2715'}</button>
@@ -1606,7 +1628,7 @@ function PositionRow({p,commPerSide,expanded,onToggle,onUpdateOptionPrice,onClos
   return(
     <div style={{borderRadius:14,overflow:'hidden',border:`1px solid ${expanded?V('line-br'):V('line')}`,marginBottom:8,transition:'border-color .2s,box-shadow .2s',boxShadow:expanded?'0 4px 20px rgba(0,0,0,.15)':'none'}}>
       <div className="row-click pos-row-inner" onClick={onToggle}
-        style={{display:'grid',gridTemplateColumns:'4px 110px 86px 96px 1fr 116px 116px 116px 36px',
+        style={{display:'grid',gridTemplateColumns:'4px 110px 86px 96px 1fr 90px 116px 116px 116px 36px',
           alignItems:'center',background:expanded?V('card-hover'):V('card'),minHeight:60}}>
         <div className="pos-row-col-streak" style={{background:typeColor,height:'100%',minHeight:60}}/>
         <div className="pos-row-col-main" style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:3}}>
@@ -1629,6 +1651,10 @@ function PositionRow({p,commPerSide,expanded,onToggle,onUpdateOptionPrice,onClos
         <div className="pos-row-col-theta" style={{padding:'0 16px',display:'flex',flexDirection:'column',gap:5}}>
           <ThetaBar pct={r.thetaPct} small/>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>Θ {r.thetaPct.toFixed(0)}%</span>
+        </div>
+        <div className="pos-row-col-prem" style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-end',paddingRight:8}}>
+          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.profit,fontWeight:600}}>{'$'+fmt(r.openPrem,0)}</span>
+          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{'$'+fmt(p.premium)+'/股'}</span>
         </div>
         <div className="pos-row-col-price" style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-end',paddingRight:8}}>
           {p.currentPrice?(<>
@@ -1660,8 +1686,8 @@ function PositionRow({p,commPerSide,expanded,onToggle,onUpdateOptionPrice,onClos
 function ActiveTableHeader(){
   const H=({t,right})=><div style={{fontSize:10,color:V('faint'),letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',textAlign:right?'right':'left',padding:'0 4px'}}>{t}</div>;
   return(
-    <div className="pos-table-header" style={{display:'grid',gridTemplateColumns:'4px 110px 86px 96px 1fr 116px 116px 116px 36px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
-      <div/><H t="标的"/><H t="行权价"/><H t="到期"/><H t="Θ 衰减"/><H t="股价" right/><H t="现在卖出" right/><H t="持到到期" right/><div/>
+    <div className="pos-table-header" style={{display:'grid',gridTemplateColumns:'4px 110px 86px 96px 1fr 90px 116px 116px 116px 36px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
+      <div/><H t="标的"/><H t="行权价"/><H t="到期"/><H t="Θ 衰减"/><H t="权利金" right/><H t="股价" right/><H t="现在卖出" right/><H t="持到到期" right/><div/>
     </div>
   );
 }
