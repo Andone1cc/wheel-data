@@ -90,6 +90,27 @@ select{-webkit-appearance:none;appearance:none}
 
 /* 卡片 */
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;transition:background .2s,border-color .2s}
+/* 毛玻璃微卡片 */
+.glass-card{background:rgba(19,29,38,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(28,44,58,.4);border-radius:16px;transition:background .2s,border-color .2s}
+[data-theme="light"] .glass-card{background:rgba(255,255,255,.65);border-color:rgba(221,227,234,.5)}
+/* 紧凑表格行 */
+.pos-clean-row{border-bottom:1px solid rgba(28,44,58,.35);transition:background .18s,box-shadow .18s;cursor:pointer}
+.pos-clean-row:hover{background:rgba(28,44,58,.25);box-shadow:inset 3px 0 0 var(--row-accent,#3dd68c)}
+.pos-clean-row:last-child{border-bottom:none}
+[data-theme="light"] .pos-clean-row{border-bottom-color:rgba(221,227,234,.6)}
+[data-theme="light"] .pos-clean-row:hover{background:rgba(245,248,252,.8)}
+/* 风险警示 */
+.risk-safe{}
+.risk-warn{background:rgba(245,183,49,.04)!important}
+.risk-warn .pos-strike{color:#f5b731!important}
+.risk-itm{background:rgba(244,106,90,.06)!important}
+.risk-itm .pos-strike{color:#f46a5a!important}
+/* ITM badge */
+.badge-itm{display:inline-flex;align-items:center;gap:3px;background:rgba(244,106,90,.12);color:#f46a5a;border:1px solid rgba(244,106,90,.3);border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;font-family:'IBM Plex Mono',monospace;letter-spacing:.08em;animation:pulse-red 2s ease infinite}
+@keyframes pulse-red{0%,100%{opacity:1}50%{opacity:.6}}
+/* 悬停微光标的名 */
+.ticker-glow{transition:text-shadow .2s,font-weight .15s}
+.pos-clean-row:hover .ticker-glow{text-shadow:0 0 10px rgba(245,183,49,.35)}
 
 /* 按钮 */
 .btn{border:none;border-radius:10px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s,transform .1s,background .2s,color .2s,border-color .2s}
@@ -111,8 +132,8 @@ select{-webkit-appearance:none;appearance:none}
 
 /* Stat */
 .stat{display:flex;flex-direction:column;gap:3px}
-.stat-label{font-size:10px;color:var(--faint);letter-spacing:.12em;text-transform:uppercase;font-family:'IBM Plex Mono',monospace}
-.stat-val{font-family:'IBM Plex Mono',monospace;font-weight:600;line-height:1.1}
+.stat-label{font-size:10px;color:var(--faint);letter-spacing:.14em;text-transform:uppercase;font-family:'IBM Plex Mono',monospace;opacity:.7}
+.stat-val{font-family:'IBM Plex Mono',monospace;font-weight:700;line-height:1.1;letter-spacing:-.01em}
 .stat-sub{font-size:11px;color:var(--dim);font-family:'IBM Plex Mono',monospace}
 
 /* Modal */
@@ -125,9 +146,26 @@ select{-webkit-appearance:none;appearance:none}
 /* Section label */
 .section-label{font-size:10px;color:var(--faint);letter-spacing:.14em;text-transform:uppercase;font-family:'IBM Plex Mono',monospace}
 
-/* 行 hover */
-.row-click{cursor:pointer;transition:background .14s}
-.row-click:hover{background:var(--card-hover)!important}
+/* 毛玻璃微卡片 */
+.glass{background:rgba(15,24,32,.45);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.04);border-radius:16px}
+[data-theme="light"] .glass{background:rgba(255,255,255,.55);border-color:rgba(0,0,0,.06)}
+
+/* 行 hover（干净表格风格）*/
+.row-click{cursor:pointer;transition:background .18s,box-shadow .18s}
+.row-click:hover{background:rgba(79,163,224,.04)!important;box-shadow:inset 3px 0 0 var(--line-br)}
+.row-click:hover .pos-ticker{color:#fff!important;text-shadow:0 0 8px rgba(79,163,224,.3)}
+[data-theme="light"] .row-click:hover{background:rgba(79,163,224,.06)!important}
+[data-theme="light"] .row-click:hover .pos-ticker{color:#1a2733!important;text-shadow:none}
+
+/* ITM 呼吸红 */
+@keyframes breatheRed{0%,100%{background:rgba(244,106,90,.06)}50%{background:rgba(244,106,90,.14)}}
+.itm-row{animation:breatheRed 2.5s ease-in-out infinite}
+
+/* 风险 Badge */
+.risk-badge{display:inline-flex;align-items:center;padding:1px 7px;border-radius:5px;font-size:10px;font-weight:700;font-family:'IBM Plex Mono',monospace;letter-spacing:.06em}
+.risk-safe{color:#3dd68c;background:rgba(61,214,140,.08)}
+.risk-warn{color:#f5b731;background:rgba(245,183,49,.10)}
+.risk-itm{color:#f46a5a;background:rgba(244,106,90,.12);border:1px solid rgba(244,106,90,.25)}
 
 /* ── 仓位列表区域移动端可横滑 ── */
 .pos-list{overflow-x:auto;-webkit-overflow-scrolling:touch}
@@ -588,11 +626,16 @@ function calcSgov(s){
 
 /* ══ 通用组件 ══════════════════════════════════════ */
 function ThetaBar({pct,small}){
+  const h=small?3:4;
+  const grad=pct>80
+    ?'linear-gradient(90deg,#06b6d4,#6366f1,#f46a5a)'
+    :pct>50?'linear-gradient(90deg,#06b6d4,#3b82f6,#6366f1)'
+    :'linear-gradient(90deg,#06b6d4,#3b82f6)';
+  const glow=pct>80?'#f46a5a':pct>50?'#6366f1':'#3b82f6';
   return(
-    <div style={{background:V('line'),borderRadius:3,height:small?3:5,overflow:'hidden',width:'100%'}}>
-      <div style={{width:`${pct}%`,height:'100%',borderRadius:3,
-        background:pct>75?`linear-gradient(90deg,${ACC.profit},${ACC.loss})`:`linear-gradient(90deg,${ACC.profit},${ACC.amber})`,
-        boxShadow:`0 0 6px ${pct>75?ACC.loss:ACC.amber}66`,transition:'width .5s ease'}}/>
+    <div style={{background:'rgba(28,44,58,.5)',borderRadius:2,height:h,overflow:'hidden',width:'100%'}}>
+      <div style={{width:pct+'%',height:'100%',borderRadius:2,background:grad,
+        boxShadow:'0 0 8px '+glow+'44',transition:'width .6s cubic-bezier(.4,0,.2,1)'}}/>
     </div>
   );
 }
@@ -1391,7 +1434,7 @@ function SgovPanel({sgov,onUpdate,totalMarginUsed}){
   const si=calcSgov(s);
   const sgovVsMargin=(si?.total&&totalMarginUsed>0)?calcAnnual(si.total,totalMarginUsed,si.days):null;
   return(
-    <div className="card anim-in" style={{borderColor:`rgba(45,212,191,.25)`,padding:'16px 20px',marginBottom:16}}>
+    <div className="glass-card anim-in" style={{borderColor:`rgba(45,212,191,.25)`,padding:'16px 20px',marginBottom:16}}>
       <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
         <div style={{width:3,height:16,borderRadius:2,background:ACC.teal,flexShrink:0}}/>
         <span style={{fontWeight:700,fontSize:14,color:ACC.teal}}>SGOV 保证金底仓</span>
@@ -1460,25 +1503,25 @@ function SummaryBar({positions,commPerSide,sgov}){
     const wDays=rs.reduce((s,r)=>s+r.daysTotal*(r.capital||0),0)/Math.max(1,totalMargin);
     return calcAnnual(totalNet,sgovMV,wDays);
   })():null;
-  const Box=({label,value,color,sub,hl,sz=20})=>(
-    <div style={{display:'flex',flexDirection:'column',gap:4,...(hl?{borderLeft:`2px solid ${hl}`,paddingLeft:10}:{})}}>
-      <span className="section-label">{label}</span>
-      <span style={{fontSize:sz,fontWeight:700,color:color||V('ink'),fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{value}</span>
-      {sub&&<span style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>{sub}</span>}
+  const Box=({label,value,color,sub,hl,sz=22})=>(
+    <div style={{display:'flex',flexDirection:'column',gap:5,padding:'10px 14px',borderRadius:12,background:'rgba(28,44,58,.2)',...(hl?{borderLeft:'2px solid '+hl,paddingLeft:12}:{})}}>
+      <span style={{fontSize:11,color:V('faint'),letterSpacing:'.14em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace'}}>{label}</span>
+      <span className="summary-box-val" style={{fontSize:sz,fontWeight:700,color:color||V('ink'),fontFamily:'IBM Plex Mono,monospace',lineHeight:1,letterSpacing:'-.02em'}}>{value}</span>
+      {sub&&<span className="summary-box-sub" style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>{sub}</span>}
     </div>
   );
   const BigA=({label,main,mainColor,vs,sub})=>(
     <div style={{display:'flex',flexDirection:'column',gap:6}}>
       <span className="section-label">{label}</span>
       <div style={{display:'flex',alignItems:'baseline',gap:8,flexWrap:'wrap'}}>
-        <span style={{fontSize:24,fontWeight:700,color:mainColor,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{main}</span>
+        <span style={{fontSize:28,fontWeight:700,letterSpacing:'-.03em',color:mainColor,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{main}</span>
         {vs!=null&&<span className="badge" style={{color:ACC.purple,background:ACC.purpleBg,borderColor:`${ACC.purple}44`,fontSize:13}}>{fmtA(vs)} /SGOV</span>}
       </div>
       {sub&&<span style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>{sub}</span>}
     </div>
   );
   return(
-    <div className="card anim-in" style={{padding:'16px 20px',marginBottom:16}}>
+    <div className="glass-card anim-in" style={{padding:'18px 22px',marginBottom:16}}>
       <div className="summary-grid" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:14,marginBottom:14,paddingBottom:14,borderBottom:`1px solid ${V('line')}`}}>
         <Box label="期权总保证金" value={`$${fmt(totalMargin,0)}`} color={V('dim')} sub={`${positions.length} 个仓位`}/>
         <Box label="收入权利金" value={`$${fmt(totalGross)}`} color={ACC.amber} sub="开仓时收取的总权利金"/>
@@ -1494,7 +1537,7 @@ function SummaryBar({positions,commPerSide,sgov}){
           <div style={{display:'flex',flexDirection:'column',gap:6}}>
             <span className="section-label">SGOV 利息</span>
             <div style={{display:'flex',alignItems:'baseline',gap:8}}>
-              <span style={{fontSize:24,fontWeight:700,color:ACC.teal,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtA(si.rate)}</span>
+              <span style={{fontSize:28,fontWeight:700,letterSpacing:'-.03em',color:ACC.teal,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtA(si.rate)}</span>
               <span style={{fontSize:13,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>年化</span>
             </div>
             <span style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>累计 {fmtM(si.total)} · {si.days} 天</span>
@@ -1625,15 +1668,22 @@ function PositionRow({p,commPerSide,expanded,onToggle,onUpdateOptionPrice,onClos
   const isCall=p.type==='C';
   const typeColor=isCall?ACC.loss:ACC.profit;
   const urgency=r.daysLeft<=7?ACC.loss:r.daysLeft<=21?ACC.amber:V('dim');
+  // 风险等级计算
+  const dist=r.buffer;
+  const riskClass=dist==null?'risk-safe':(dist<=0?'risk-itm':(dist<=3?'risk-warn':'risk-safe'));
+  const isITM=dist!=null&&dist<=0;
   return(
-    <div style={{borderRadius:14,overflow:'hidden',border:`1px solid ${expanded?V('line-br'):V('line')}`,marginBottom:8,transition:'border-color .2s,box-shadow .2s',boxShadow:expanded?'0 4px 20px rgba(0,0,0,.15)':'none'}}>
-      <div className="row-click pos-row-inner" onClick={onToggle}
-        style={{display:'grid',gridTemplateColumns:'4px 110px 86px 96px 1fr 90px 116px 116px 116px 36px',
-          alignItems:'center',background:expanded?V('card-hover'):V('card'),minHeight:60}}>
-        <div className="pos-row-col-streak" style={{background:typeColor,height:'100%',minHeight:60}}/>
+    <div style={{overflow:'hidden',marginBottom:expanded?8:0,transition:'box-shadow .2s',boxShadow:expanded?'0 4px 24px rgba(0,0,0,.2)':'none',...(expanded?{borderRadius:14,border:'1px solid '+V('line-br')}:{})}}>
+      <div className={`pos-clean-row pos-row-inner ${riskClass}`} onClick={onToggle}
+        style={{'--row-accent':typeColor,display:'grid',gridTemplateColumns:'4px 110px 86px 96px 1fr 90px 116px 116px 116px 36px',
+          alignItems:'center',minHeight:56,padding:'2px 0',...(expanded?{background:V('card-hover')}:{})}}>
+        <div className="pos-row-col-streak" style={{background:typeColor,height:'100%',minHeight:56,width:3,borderRadius:2}}/>
         <div className="pos-row-col-main" style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:3}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:15,color:V('ink')}}>{p.ticker}</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:typeColor,letterSpacing:'.06em'}}>卖出 {isCall?'Call':'Put'}</span>
+          <span className="ticker-glow" style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:15,color:V('ink')}}>{p.ticker}</span>
+          <div style={{display:'flex',alignItems:'center',gap:5}}>
+            <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:typeColor,letterSpacing:'.06em'}}>{'卖 '+(isCall?'Call':'Put')}</span>
+            {isITM&&<span className="badge-itm">{'ITM'}</span>}
+          </div>
           {/* 移动端额外信息 */}
           <div className="pos-row-mobile-extra" style={{display:'none',gap:8,marginTop:2,flexWrap:'wrap'}}>
             <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:ACC.amber,fontWeight:600}}>${fmt(p.strike,0)}</span>
@@ -1641,26 +1691,28 @@ function PositionRow({p,commPerSide,expanded,onToggle,onUpdateOptionPrice,onClos
           </div>
         </div>
         <div className="pos-row-col-strike" style={{display:'flex',flexDirection:'column',gap:3}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,color:ACC.amber,fontWeight:600}}>${fmt(p.strike,0)}</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>×{p.qty}手</span>
+          <span className="pos-strike" style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,color:ACC.amber,fontWeight:600}}>{'$'+fmt(p.strike,0)}</span>
+          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{'×'+p.qty+'手'}</span>
         </div>
-        <div className="pos-row-col-expiry" style={{display:'flex',flexDirection:'column',gap:4}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:12,color:urgency,fontWeight:r.daysLeft<=21?600:400}}>{r.daysLeft}天后</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{p.expDate}</span>
+        <div className="pos-row-col-expiry" style={{display:'flex',flexDirection:'column',gap:2}}>
+          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:urgency,fontWeight:r.daysLeft<=14?700:500}}>{r.daysLeft+'天'}</span>
+          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{p.expDate.slice(5)}</span>
         </div>
-        <div className="pos-row-col-theta" style={{padding:'0 16px',display:'flex',flexDirection:'column',gap:5}}>
+        <div className="pos-row-col-theta" style={{padding:'0 12px',display:'flex',flexDirection:'column',gap:4}}>
+          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint'),letterSpacing:'.04em'}}>{'Θ '+r.thetaPct.toFixed(0)+'%'}</span>
           <ThetaBar pct={r.thetaPct} small/>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>Θ {r.thetaPct.toFixed(0)}%</span>
         </div>
         <div className="pos-row-col-prem" style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-end',paddingRight:8}}>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.profit,fontWeight:600}}>{'$'+fmt(r.openPrem,0)}</span>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{'$'+fmt(p.premium)+'/股'}</span>
+          {p.optionDelta!=null&&<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:9,color:V('faint'),marginTop:1}}>{'Δ '+p.optionDelta.toFixed(2)}</span>}
         </div>
-        <div className="pos-row-col-price" style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-end',paddingRight:8}}>
+        <div className="pos-row-col-price" style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-end',paddingRight:8}}>
           {p.currentPrice?(<>
-            <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('ink'),fontWeight:600}}>${fmt(p.currentPrice)}</span>
-            {r.buffer!=null&&<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:r.buffer>0?ACC.profit:ACC.loss,fontWeight:600}}>{r.buffer>0?'↑':'↓'}{Math.abs(r.buffer).toFixed(1)}%</span>}
-          </>):<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('faint')}}>—</span>}
+            <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('ink'),fontWeight:600}}>{'$'+fmt(p.currentPrice)}</span>
+            {r.buffer!=null&&<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:r.buffer>0?ACC.profit:ACC.loss,fontWeight:600}}>{(r.buffer>0?'↑':'↓')+Math.abs(r.buffer).toFixed(1)+'%'}</span>}
+            {p.optionPrice!=null&&<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:9,color:V('faint'),letterSpacing:'.03em'}}>{'Δ '+(p.delta!=null?p.delta.toFixed(2):'—')}</span>}
+          </>):<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('faint')}}>{'—'}</span>}
           {/* 移动端在价格下面补充年化 */}
           <div className="pos-row-mobile-extra" style={{display:'none',flexDirection:'column',gap:1,alignItems:'flex-end',marginTop:2}}>
             <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:ACC.amber,fontWeight:600}}>{fmtA(r.annualExp)}</span>
@@ -1684,9 +1736,9 @@ function PositionRow({p,commPerSide,expanded,onToggle,onUpdateOptionPrice,onClos
 }
 
 function ActiveTableHeader(){
-  const H=({t,right})=><div style={{fontSize:10,color:V('faint'),letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',textAlign:right?'right':'left',padding:'0 4px'}}>{t}</div>;
+  const H=({t,right})=><div style={{fontSize:10,color:V('faint'),letterSpacing:'.14em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',textAlign:right?'right':'left',padding:'0 4px'}}>{t}</div>;
   return(
-    <div className="pos-table-header" style={{display:'grid',gridTemplateColumns:'4px 110px 86px 96px 1fr 90px 116px 116px 116px 36px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
+    <div className="pos-table-header" style={{display:'grid',gridTemplateColumns:'4px 110px 86px 96px 1fr 90px 116px 116px 116px 36px',alignItems:'center',padding:'4px 0 10px',marginBottom:0,borderBottom:'1px solid rgba(28,44,58,.4)'}}>
       <div/><H t="标的"/><H t="行权价"/><H t="到期"/><H t="Θ 衰减"/><H t="权利金" right/><H t="股价" right/><H t="现在卖出" right/><H t="持到到期" right/><div/>
     </div>
   );
@@ -1705,9 +1757,9 @@ function ClosedRow({c,commPerSide,onDelete}){
       ?{color:ACC.teal,background:ACC.tealBg,borderColor:`${ACC.teal}44`}
       :{color:ACC.blue,background:ACC.blueBg,borderColor:`${ACC.blue}44`};
   return(
-    <div className="card" style={{marginBottom:8,padding:'0',overflow:'hidden'}}>
-      <div style={{display:'grid',gridTemplateColumns:'4px 110px 86px 96px 110px 1fr 120px 120px 36px',alignItems:'center',minHeight:56}}>
-        <div style={{background:typeColor,height:'100%',minHeight:56,opacity:.5}}/>
+    <div className="row-click" style={{borderBottom:'1px solid '+V('line'),overflow:'hidden'}}>
+      <div style={{display:'grid',gridTemplateColumns:'3px 110px 86px 96px 110px 1fr 120px 120px 36px',alignItems:'center',minHeight:52,padding:'4px 0'}}>
+        <div style={{background:r.profit>=0?ACC.profit:ACC.loss,height:'100%',minHeight:46,borderRadius:2,opacity:.6}}/>
         <div style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:2}}>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:14,color:V('dim')}}>{c.ticker}</span>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:typeColor,opacity:.7,letterSpacing:'.06em'}}>卖 {isCall?'Call':'Put'}</span>
@@ -1726,11 +1778,17 @@ function ClosedRow({c,commPerSide,onDelete}){
           </span>
           {isAssigned&&<div style={{fontSize:10,color:V('faint'),fontFamily:'IBM Plex Mono,monospace',marginTop:3}}>{c.assignedShares}股 @ ${fmt(c.assignedCostPerShare)}</div>}
         </div>
-        <div style={{padding:'0 10px',display:'flex',gap:16,flexWrap:'wrap'}}>
-          <Stat label="开仓收入" value={`$${fmt(r.openPrem)}`} color={ACC.amber}/>
-          {!isExpired&&!isAssigned&&<Stat label="买回成本" value={`-$${fmt(r.closePrem)}`} color={ACC.loss}/>}
-          {isAssigned&&<Stat label="接货市值" value={`-$${fmt(c.assignedMarketValue,0)}`} color={ACC.loss}/>}
-          <Stat label="手续费" value={`-$${fmt(r.commUsed)}`} color={ACC.loss}/>
+        <div style={{padding:'0 10px',display:'flex',flexDirection:'column',gap:3}}>
+          <div style={{display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'}}>
+            <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.amber,fontWeight:600}}>{'$'+fmt(r.openPrem)}</span>
+            {!isExpired&&!isAssigned&&<><span style={{color:V('faint'),fontSize:11}}>{'−'}</span><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.loss}}>{'$'+fmt(r.closePrem)}</span></>}
+            {isAssigned&&<><span style={{color:V('faint'),fontSize:11}}>{'−'}</span><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.loss}}>{'$'+fmt(c.assignedMarketValue,0)}</span></>}
+            <span style={{color:V('faint'),fontSize:11}}>{'−'}</span>
+            <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.loss}}>{'$'+fmt(r.commUsed)}</span>
+          </div>
+          <div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint'),letterSpacing:'.04em'}}>
+            {isExpired?'权利金 − 手续费':(isAssigned?'权利金 − 接货 − 费用':'权利金 − 买回 − 费用')}
+          </div>
         </div>
         <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-end',paddingRight:8}}>
           <span className="section-label">期权收益</span>
@@ -1757,48 +1815,39 @@ function StockRow({s,onUpdatePrice,onDelete}){
   const unrealizedPct=unrealized!=null?(unrealized/costBasis)*100:null;
   const daysHeld=s.acquireDate?Math.max(1,daysBetween(s.acquireDate,today())):null;
   return(
-    <div className="card" style={{marginBottom:8,overflow:'hidden',padding:0}}>
-      <div style={{display:'grid',gridTemplateColumns:'4px 130px 120px 120px 1fr 130px 130px 36px',alignItems:'center',minHeight:60}}>
-        <div style={{background:ACC.profit,height:'100%',minHeight:60,opacity:.6}}/>
-        {/* 标的 */}
-        <div style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:3}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:15,color:V('ink')}}>{s.ticker}</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>
-            {s.source==='assigned'?'📦 接货':s.source==='manual'?'手动录入':''}
+    <div className="row-click" style={{borderBottom:'1px solid '+V('line'),overflow:'hidden'}}>
+      <div style={{display:'grid',gridTemplateColumns:'3px 130px 120px 120px 1fr 130px 130px 36px',alignItems:'center',minHeight:54,padding:'4px 0'}}>
+        <div style={{background:unrealized==null?V('line'):(unrealized>=0?ACC.profit:ACC.loss),height:'100%',minHeight:48,borderRadius:2,opacity:.7}}/>
+        <div style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:2}}>
+          <span className="pos-ticker" style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:15,color:V('ink'),transition:'color .18s'}}>{s.ticker}</span>
+          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint'),letterSpacing:'.04em'}}>
+            {s.source==='assigned'?'📦 接货':'手动录入'}
           </span>
         </div>
-        {/* 持股信息 */}
-        <div style={{display:'flex',flexDirection:'column',gap:3}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,color:V('ink'),fontWeight:600}}>{s.shares} 股</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>成本 ${fmt(s.costPerShare)} / 股</span>
+        <div style={{display:'flex',flexDirection:'column',gap:2}}>
+          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,color:V('ink'),fontWeight:600}}>{s.shares+' 股'}</span>
+          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{'成本 $'+fmt(s.costPerShare)+'/股'}</span>
         </div>
-        {/* 成本 */}
-        <div style={{display:'flex',flexDirection:'column',gap:3}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.amber,fontWeight:600}}>${fmt(costBasis,0)}</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>总成本基础</span>
+        <div>
+          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,color:ACC.amber,fontWeight:600}}>{'$'+fmt(costBasis,0)}</span>
         </div>
-        {/* 现价（可点击编辑） */}
-        <div style={{padding:'0 12px',display:'flex',flexDirection:'column',gap:3}}>
-          <span className="section-label">当前价格</span>
+        <div style={{padding:'0 12px',display:'flex',flexDirection:'column',gap:2}}>
+          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint'),letterSpacing:'.08em'}}>{'当前价格'}</span>
           <InlineEdit value={s.currentPrice} onSave={v=>onUpdatePrice(s.id,v)}/>
         </div>
-        {/* 当前市值 */}
         <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-end',paddingRight:8}}>
-          <span className="section-label">当前市值</span>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:15,fontWeight:600,color:V('ink')}}>
-            {currentValue!=null?`$${fmt(currentValue,0)}`:'—'}
+            {currentValue!=null?('$'+fmt(currentValue,0)):'—'}
           </span>
         </div>
-        {/* 浮盈 */}
         <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-end',paddingRight:8}}>
-          <span className="section-label">浮动盈亏</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:15,fontWeight:700,color:unrealized==null?V('faint'):unrealized>=0?ACC.profit:ACC.loss}}>
-            {unrealized!=null?fmtM(unrealized):'录入现价'}
+          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:16,fontWeight:700,color:unrealized==null?V('faint'):unrealized>=0?ACC.profit:ACC.loss}}>
+            {unrealized!=null?fmtM(unrealized):'—'}
           </span>
-          {unrealizedPct!=null&&<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:unrealizedPct>=0?ACC.profit:ACC.loss}}>{fmtA(unrealizedPct)}</span>}
+          {unrealizedPct!=null&&<span className={'risk-badge '+(unrealizedPct>=0?'risk-safe':'risk-itm')}>{fmtA(unrealizedPct)}</span>}
         </div>
         <div style={{display:'flex',justifyContent:'center'}}>
-          <button onClick={()=>onDelete(s.id)} style={{background:'none',border:'none',color:V('faint'),cursor:'pointer',fontSize:14,padding:4}}>×</button>
+          <button onClick={()=>onDelete(s.id)} style={{background:'none',border:'none',color:V('faint'),cursor:'pointer',fontSize:13,padding:4,opacity:.5}}>{'×'}</button>
         </div>
       </div>
     </div>
@@ -1820,23 +1869,25 @@ function StocksSummary({stocks}){
   const totalValue=stocks.filter(st=>st.currentPrice).reduce((s,st)=>s+st.currentPrice*st.shares,0);
   const totalUnreal=stocks.filter(st=>st.currentPrice).length?totalValue-stocks.filter(st=>st.currentPrice).reduce((s,st)=>s+st.costPerShare*st.shares,0):null;
   return(
-    <div className="card anim-in" style={{padding:'14px 20px',marginBottom:14,display:'flex',gap:24,flexWrap:'wrap',alignItems:'center'}}>
-      <div style={{display:'flex',flexDirection:'column',gap:3}}>
-        <span className="section-label">总成本基础</span>
-        <span style={{fontSize:20,fontWeight:700,color:ACC.amber,fontFamily:'IBM Plex Mono,monospace'}}>${fmt(totalCost,0)}</span>
-      </div>
-      {totalValue>0&&<div style={{display:'flex',flexDirection:'column',gap:3}}>
-        <span className="section-label">当前总市值</span>
-        <span style={{fontSize:20,fontWeight:700,color:V('ink'),fontFamily:'IBM Plex Mono,monospace'}}>${fmt(totalValue,0)}</span>
-      </div>}
-      {totalUnreal!=null&&<div style={{display:'flex',flexDirection:'column',gap:3}}>
-        <span className="section-label">总浮动盈亏</span>
-        <span style={{fontSize:20,fontWeight:700,color:totalUnreal>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace'}}>{fmtM(totalUnreal)}</span>
-        <span style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>{fmtA(totalCost>0?(totalUnreal/totalCost)*100:null)}</span>
-      </div>}
-      <div style={{display:'flex',flexDirection:'column',gap:3}}>
-        <span className="section-label">持股标的</span>
-        <span style={{fontSize:20,fontWeight:700,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>{stocks.length}</span>
+    <div className="glass-card anim-in" style={{padding:'20px 24px',marginBottom:16}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))',gap:20,alignItems:'end'}}>
+        <div style={{display:'flex',flexDirection:'column',gap:4}}>
+          <span className="section-label">总成本基础</span>
+          <span style={{fontSize:26,fontWeight:700,color:ACC.amber,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>${fmt(totalCost,0)}</span>
+        </div>
+        {totalValue>0&&<div style={{display:'flex',flexDirection:'column',gap:4}}>
+          <span className="section-label">当前总市值</span>
+          <span style={{fontSize:26,fontWeight:700,color:V('ink'),fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>${fmt(totalValue,0)}</span>
+        </div>}
+        {totalUnreal!=null&&<div style={{display:'flex',flexDirection:'column',gap:4}}>
+          <span className="section-label">总浮动盈亏</span>
+          <span style={{fontSize:28,fontWeight:700,color:totalUnreal>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(totalUnreal)}</span>
+          <span className={'risk-badge '+(totalUnreal>=0?'risk-safe':'risk-itm')} style={{alignSelf:'flex-start',marginTop:2}}>{fmtA(totalCost>0?(totalUnreal/totalCost)*100:null)}</span>
+        </div>}
+        <div style={{display:'flex',flexDirection:'column',gap:4}}>
+          <span className="section-label">持股标的</span>
+          <span style={{fontSize:26,fontWeight:700,color:V('dim'),fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{stocks.length}</span>
+        </div>
       </div>
     </div>
   );
@@ -1881,23 +1932,27 @@ function ClosedSummary({closed,commPerSide}){
   const avgAnnual=rs.reduce((s,r)=>s+(r.annual||0),0)/rs.length;
   const wins=rs.filter(r=>r.profit>0).length;
   return(
-    <div className="card anim-in" style={{padding:'14px 20px',marginBottom:16,display:'flex',gap:24,flexWrap:'wrap',alignItems:'center'}}>
-      <div style={{display:'flex',flexDirection:'column',gap:3}}>
-        <span className="section-label">累计已实现利润</span>
-        <span style={{fontSize:22,fontWeight:700,color:totalProfit>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace'}}>{fmtM(totalProfit)}</span>
-      </div>
-      <div style={{display:'flex',flexDirection:'column',gap:3}}>
-        <span className="section-label">平均实现年化</span>
-        <span style={{fontSize:22,fontWeight:700,color:avgAnnual>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace'}}>{fmtA(avgAnnual)}</span>
-      </div>
-      <div style={{display:'flex',flexDirection:'column',gap:3}}>
-        <span className="section-label">胜率</span>
-        <span style={{fontSize:22,fontWeight:700,color:ACC.blue,fontFamily:'IBM Plex Mono,monospace'}}>{((wins/closed.length)*100).toFixed(0)}%</span>
-        <span style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>{wins}/{closed.length} 盈利</span>
-      </div>
-      <div style={{display:'flex',flexDirection:'column',gap:3}}>
-        <span className="section-label">总笔数</span>
-        <span style={{fontSize:22,fontWeight:700,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>{closed.length}</span>
+    <div className="glass-card anim-in" style={{padding:'20px 24px',marginBottom:16}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))',gap:20,alignItems:'end'}}>
+        <div style={{display:'flex',flexDirection:'column',gap:4}}>
+          <span className="section-label">累计已实现利润</span>
+          <span style={{fontSize:28,fontWeight:700,color:totalProfit>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(totalProfit)}</span>
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:4}}>
+          <span className="section-label">平均实现年化</span>
+          <span style={{fontSize:28,fontWeight:700,color:avgAnnual>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtA(avgAnnual)}</span>
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:4}}>
+          <span className="section-label">胜率</span>
+          <div style={{display:'flex',alignItems:'baseline',gap:8}}>
+            <span style={{fontSize:28,fontWeight:700,color:ACC.blue,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{((wins/closed.length)*100).toFixed(0)}%</span>
+            <span className="risk-badge risk-safe" style={{fontSize:10}}>{wins+'/'+closed.length+' 盈利'}</span>
+          </div>
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:4}}>
+          <span className="section-label">总笔数</span>
+          <span style={{fontSize:28,fontWeight:700,color:V('dim'),fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{closed.length}</span>
+        </div>
       </div>
     </div>
   );
@@ -2019,7 +2074,7 @@ function App(){
       if(positions.length)mutate(positions.map(p=>({
         ...p,
         currentPrice:stockPrices[p.ticker]??p.currentPrice,
-        ...(optPrices[p.id]?{optionPrice:optPrices[p.id].price}:{}),
+        ...(optPrices[p.id]?{optionPrice:optPrices[p.id].price,optionDelta:optPrices[p.id].delta||null}:{}),
       })));
       if(stocks.length)mutateStocks(stocks.map(s=>({...s,currentPrice:stockPrices[s.ticker]??s.currentPrice})));
       setLastRefresh(new Date().toLocaleTimeString('zh-CN'));
