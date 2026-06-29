@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Wheel Data · 期权年化追踪</title>
+<title>Optimus Terminal · 期权年化追踪</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -23,6 +23,9 @@ tailwind.config = {
   }
 }
 </script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -278,6 +281,87 @@ select{-webkit-appearance:none;appearance:none}
     text-align:center !important;font-size:12px !important;
   }
 }
+
+/* ── 期权学习面板 ── */
+.lp{max-width:100%;font-size:15px;line-height:1.75;color:var(--ink)}
+.lp h2{font-weight:700;font-size:22px;margin:2rem 0 .4rem;color:var(--ink)}
+.lp h2:first-child{margin-top:0}
+.lp .eyebrow{display:inline-flex;align-items:center;gap:8px;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#f5b731;margin-bottom:.8rem}
+.lp .eyebrow::before{content:'';width:24px;height:1px;background:#f5b731}
+.lp .sec-sub{color:var(--dim);font-size:14px;margin-bottom:1rem}
+.lp .def{background:var(--surface);border:1px solid var(--line);border-left:3px solid #f5b731;border-radius:0 12px 12px 0;padding:16px 18px;margin-bottom:10px}
+.lp .def h4{font-size:15px;font-weight:700;margin-bottom:4px}
+.lp .def p{color:var(--dim);font-size:14px;margin:0}
+.lp .def .sub{margin-top:8px;padding-left:12px;border-left:1px solid var(--line-br)}
+.lp .def .sub p{margin-top:5px}
+.lp .gk-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:1.2rem 0}
+@media(max-width:768px){.lp .gk-grid,.lp .weap-grid,.lp .triple .kills{grid-template-columns:1fr!important}}
+.lp .gk{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;position:relative;overflow:hidden;transition:.25s}
+.lp .gk:hover{border-color:var(--line-br);transform:translateY(-2px)}
+.lp .gk .big{position:absolute;right:-.3rem;top:-1rem;font-weight:700;font-size:6rem;line-height:1;color:#fff;opacity:.04;pointer-events:none}
+.lp .gk .sym{font-size:1.5rem;color:#f5b731;font-weight:700;margin-right:6px}
+.lp .gk .role{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.12em;color:var(--faint);text-transform:uppercase;margin:2px 0 8px}
+.lp .gk .calc{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--dim);margin-bottom:10px;overflow-x:auto}
+.lp .gk p{font-size:13px;color:var(--dim);margin-bottom:6px}
+.lp .chips{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.lp .chip{font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 10px;border-radius:20px;border:1px solid}
+.lp .chip.pos{color:#3dd68c;background:rgba(61,214,140,.08);border-color:rgba(61,214,140,.3)}
+.lp .chip.neg{color:#f46a5a;background:rgba(244,106,90,.08);border-color:rgba(244,106,90,.3)}
+.lp .callout{margin:14px 0;border-radius:12px;padding:14px 16px;font-size:13px;display:flex;gap:10px;align-items:flex-start;line-height:1.7}
+.lp .callout .ic{flex:none;font-weight:700;font-size:16px;line-height:1.5}
+.lp .callout.note{background:rgba(245,183,49,.07);border:1px solid rgba(245,183,49,.2);color:#f6dca0}
+.lp .callout.note .ic{color:#f5b731}
+.lp .callout.note b{color:#fbe9c2}
+.lp .callout.danger{background:rgba(244,106,90,.07);border:1px solid rgba(244,106,90,.2);color:#f6b8b1}
+.lp .callout.danger .ic{color:#f46a5a}
+.lp .callout.danger b{color:#ffd2cc}
+.lp .weap-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:1.2rem 0}
+.lp .weap{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+.lp .weap .tg{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.1em;color:var(--faint);margin-bottom:4px}
+.lp .weap h4{font-size:14px;font-weight:700;margin-bottom:10px}
+.lp .weap h4 .lt{color:#f5b731;font-weight:700;margin-right:4px}
+.lp .kv{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:13px}
+.lp .kv:last-child{border-bottom:none}
+.lp .kv .k{color:var(--dim)}.lp .kv .v{font-family:'IBM Plex Mono',monospace;text-align:right}
+.lp .kv .v.hot{color:#f5b731}
+.lp .scen{margin:12px 0;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.lp .scen .sh{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap;gap:6px}
+.lp .scen .sh .nm{font-weight:700;font-size:14px}
+.lp .scen .mv{font-family:'IBM Plex Mono',monospace;font-size:12px;padding:3px 10px;border-radius:6px}
+.lp .mv.up{color:#3dd68c;background:rgba(61,214,140,.1)}.lp .mv.flat{color:var(--dim);background:rgba(127,147,163,.1)}.lp .mv.down{color:#f46a5a;background:rgba(244,106,90,.1)}
+.lp .scen .row{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:6px;padding:10px 16px;align-items:center;border-bottom:1px solid var(--line)}
+.lp .scen .row:last-child{border-bottom:none}
+.lp .scen .wlab{font-size:13px;color:var(--dim)}.lp .scen .wlab b{color:var(--ink)}
+.lp .metric{text-align:right}.lp .metric .ml{display:block;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.08em;color:var(--faint);text-transform:uppercase}
+.lp .metric .mn{font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600}
+.lp .pos{color:#3dd68c}.lp .neg{color:#f46a5a}.lp .zero{color:var(--dim)}
+.lp .scen .take{padding:10px 16px;font-size:12px;color:var(--dim);background:var(--bg);font-style:italic}
+.lp .scen .take b{color:#f5b731;font-style:normal}
+.lp .eq{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:12px 0;overflow-x:auto}
+.lp .eq .lab{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin-bottom:8px}
+.lp .flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:14px}
+.lp .flow .t{padding:4px 10px;border-radius:7px;background:var(--surface);border:1px solid var(--line)}
+.lp .flow .op{color:var(--faint)}.lp .flow .res{padding:4px 12px;border-radius:7px;background:rgba(245,183,49,.1);border:1px solid rgba(245,183,49,.3);color:#f5b731;font-weight:600}
+.lp .step{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:10px}
+.lp .step .stt{display:flex;align-items:center;gap:8px;font-weight:700;margin-bottom:8px;font-size:14px}
+.lp .step .stt .n{color:#f5b731;font-weight:700}
+.lp .step p{font-size:13px;color:var(--dim);margin:0 0 4px}
+.lp .step .impact{font-size:12px;font-style:italic;color:var(--faint)}
+.lp .triple{margin:16px 0;border:1px solid rgba(244,106,90,.25);border-radius:16px;overflow:hidden;background:linear-gradient(180deg,rgba(26,20,22,1),var(--surface))}
+.lp .triple .th{padding:14px 18px;border-bottom:1px solid rgba(244,106,90,.15);display:flex;align-items:center;gap:10px}
+.lp .triple .th .x{color:#f46a5a;font-size:1.3rem;font-weight:700}
+.lp .triple .th h4{font-size:15px;font-weight:700}
+.lp .triple .kills{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line)}
+.lp .triple .kill{background:var(--surface);padding:14px 16px}
+.lp .triple .kill .g{font-size:1.5rem;color:#f46a5a;font-weight:700}
+.lp .triple .kill .t{font-weight:700;font-size:13px;margin:3px 0 5px}
+.lp .triple .kill p{font-size:12px;color:var(--dim);margin:0}
+.lp .triple .foot{padding:14px 18px;font-size:13px;color:var(--dim);border-top:1px solid rgba(244,106,90,.15)}
+.lp .triple .foot b{color:#ffd2cc}
+.lp .nav-pills{display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap;position:sticky;top:56px;z-index:10;background:var(--bg);padding:12px 0}
+.lp .nav-pill{padding:7px 16px;border-radius:20px;font-size:12px;cursor:pointer;background:var(--surface);color:var(--dim);border:1px solid var(--line);transition:.2s;font-family:'IBM Plex Mono',monospace;white-space:nowrap}
+.lp .nav-pill:hover{border-color:var(--line-br);color:var(--ink)}
+.lp .nav-pill.active{background:rgba(245,183,49,.1);color:#f5b731;border-color:rgba(245,183,49,.3)}
 </style>
 </head>
 <body>
@@ -1428,6 +1512,97 @@ function ScanPanel(){
   );
 }
 
+
+/* ══ 期权学习 ══════════════════════════════════════ */
+function LearnPanel(){
+  const [section,setSection]=useState('concepts');
+  const ref=React.useRef(null);
+
+  // KaTeX 渲染
+  useEffect(()=>{
+    if(ref.current&&window.renderMathInElement){
+      window.renderMathInElement(ref.current,{
+        delimiters:[
+          {left:'\\[',right:'\\]',display:true},
+          {left:'\\(',right:'\\)',display:false},
+        ],
+        throwOnError:false
+      });
+    }
+  },[section]);
+
+  const sections={
+    concepts:{label:'核心概念',icon:'📖'},
+    greeks:{label:'希腊字母',icon:'Δ'},
+    case1:{label:'案例·牛熊震荡',icon:'🚀'},
+    case2:{label:'案例·黑天鹅',icon:'🌋'},
+  };
+
+  const conceptsHTML=`
+<div class="eyebrow">第一部分 / 核心概念</div>
+<h2>核心名词与「等效思维」</h2>
+<p class="sec-sub">在期权世界里，先把一切头寸动态拆解为「它等效于多少股股票」——这是一切推导的地基。</p>
+<div class="def"><h4>权利金 Premium</h4><p>期权的价格。由<b style="color:var(--ink)">内在价值</b>（当前行权能赚到的真金白银）和<b style="color:var(--ink)">时间价值</b>（市场为未来波动支付的溢价）组成。</p></div>
+<div class="def"><h4>保证金 · 卖方占用资金</h4><p>卖方为防止爆仓被券商冻结的资金。务必区分两个概念：</p><div class="sub"><p><b>初始 / 开仓保证金</b>：开仓瞬间被冻结的钱。</p><p style="margin-top:5px"><b>维持保证金 Maintenance Margin</b>：触发追加保证金的<b>下限阈值</b>，账户权益跌破它才被追保乃至强平。</p><p style="margin-top:5px;color:var(--faint)">两者都会随市场恐慌度、股价逼近行权价而<b style="color:#f5b731">动态飙升</b>。</p></div></div>
+<div class="def"><h4>现金担保 Cash-Secured</h4><p>卖出 Put 时，准备好 100% 现金以应对被动接盘。公式为 <span style="font-family:IBM Plex Mono,monospace">行权价 × 100 × 手数</span>。</p></div>
+`;
+
+  const greeksHTML=`
+<div class="eyebrow">第一部分 / 希腊字母</div>
+<h2>四大希腊字母的物理意义</h2>
+<p class="sec-sub">每一个都是一阶或二阶导数。记住卖方天生的符号组合，就掌握了卖方的生意本质。</p>
+<div class="gk-grid">
+  <div class="gk"><span class="big">Δ</span><div><span class="sym">Δ</span><span style="font-weight:700">Delta</span></div><div class="role">速度 · 仓位 · 概率的集合</div><div class="calc">\\(\\Delta = \\dfrac{\\partial V}{\\partial S}\\) — 标的变动 $1，期权价格变动多少</div><p><b style="color:var(--ink)">① 变化速度：</b>正股涨 $1，Call 涨 \\(\\Delta\\)，Put 跌 \\(|\\Delta|\\)。</p><p><b style="color:var(--ink)">② 动态敞口（最核心）：</b>1 手期权 \\(= 100 \\times \\Delta\\) 股正股的风险。</p><p><b style="color:var(--ink)">③ 行权概率（近似）：</b>\\(|\\Delta|\\) 近似等于到期处于实值的概率。</p><div class="chips"><span class="chip pos">买 Call +Δ 做多</span><span class="chip pos">卖 Put +Δ 做多</span></div></div>
+  <div class="gk"><span class="big">Γ</span><div><span class="sym">Γ</span><span style="font-weight:700">Gamma</span></div><div class="role">加速度 · 黑天鹅放大器</div><div class="calc">\\(\\Gamma = \\dfrac{\\partial^2 V}{\\partial S^2}\\) — 标的变动 $1，Delta 变动多少</div><p><b style="color:var(--ink)">买方 +Γ：</b>有利方向走 Delta 变大（赚钱加速），不利方向走 Delta 变小。</p><p><b style="color:var(--ink)">卖方 −Γ：</b>暴跌时 Delta 绝对值被动放大，亏损呈<b>指数级非线性加速</b>。</p><div class="chips"><span class="chip pos">买方 +Γ 友好</span><span class="chip neg">卖方 −Γ 致命</span></div></div>
+  <div class="gk"><span class="big">ν</span><div><span class="sym">ν</span><span style="font-weight:700">Vega</span></div><div class="role">恐慌度对冲器</div><div class="calc">\\(\\nu = \\dfrac{\\partial V}{\\partial \\mathrm{IV}}\\) — IV 每变动 1%，期权价格变动多少</div><p><b style="color:var(--ink)">买方 +ν：</b>高 IV 对买方有利。<b style="color:var(--ink)">卖方 −ν：</b>IV 暴跌时卖方躺赚 Vega 奖励。</p><p style="color:var(--faint);font-size:12px">⚠️ Vega 自身随 IV 变化（二阶量 Vomma），用恒定 Vega 乘以很大的 IV 跳动是线性近似。</p><div class="chips"><span class="chip pos">买方 +ν</span><span class="chip neg">卖方 −ν</span></div></div>
+  <div class="gk"><span class="big">Θ</span><div><span class="sym">Θ</span><span style="font-weight:700">Theta</span></div><div class="role">时间这台永动印钞机</div><div class="calc">\\(\\Theta = \\dfrac{\\partial V}{\\partial t}\\) — 时间每过一天，期权价格衰减多少</div><p><b style="color:var(--ink)">买方 −Θ：</b>每天醒来先亏一截时间价值。<b style="color:var(--ink)">卖方 +Θ：</b>躺着收时间，是卖方横盘盈利的<b>根本引擎</b>。</p><p><b style="color:var(--ink)">关键非线性：</b>临近到期平值期权时间价值<b>加速衰减</b>——卖方偏好 30-45 天、末两周了结。</p><div class="chips"><span class="chip neg">买方 −Θ</span><span class="chip pos">卖方 +Θ</span></div></div>
+</div>
+<div class="callout note"><span class="ic">∑</span><span><b>卖方视角小结 —</b> 卖方天生是 +Θ（赚时间）、−Γ（怕急变）、−ν（怕波动率上涨）。卖方的全部生意，本质是<b>用 Gamma 与 Vega 的风险，去置换 Theta 的稳定收益</b>。</span></div>
+`;
+
+  const case1HTML=`
+<div class="eyebrow">第二部分 / 案例一</div>
+<h2>🚀 大牛市 vs 震荡市 vs 小熊市</h2>
+<p class="sec-sub">买 ITM Call（买方思维 · 替代正股） vs 卖 OTM Put（卖方思维 · 现金担保）。正股现价 $100，账户 $10,000 现金。</p>
+<div class="weap-grid"><div class="weap"><div class="tg">武器 A · 买方思维</div><h4><span class="lt">A</span> 买入 ITM Call · 行权价 $90</h4><div class="kv"><span class="k">参数</span><span class="v">Δ = 0.90 · 30 天到期</span></div><div class="kv"><span class="k">权利金</span><span class="v">$11（内在 $10 + 时间 $1）</span></div><div class="kv"><span class="k">资金占用</span><span class="v hot">$1,100</span></div><div class="kv"><span class="k">初始等效敞口</span><span class="v">+90 股正股</span></div></div><div class="weap"><div class="tg">武器 B · 卖方思维</div><h4><span class="lt">B</span> 卖出 OTM Put · 行权价 $95</h4><div class="kv"><span class="k">参数</span><span class="v">Δ = −0.30 · 30 天到期</span></div><div class="kv"><span class="k">权利金</span><span class="v">收 $2</span></div><div class="kv"><span class="k">资金占用</span><span class="v hot">$9,500（现金担保）</span></div><div class="kv"><span class="k">初始等效敞口</span><span class="v">+30 股正股</span></div><div class="kv"><span class="k">真实盈亏平衡</span><span class="v">$93（95 − 2）</span></div></div></div>
+<div class="callout note"><span class="ic">≠</span><span><b>两个武器并不对等 —</b> A 等效 90 股、占用 $1,100；B 等效 30 股、占用 $9,500。<b>敞口差 3 倍、资金差约 8.6 倍</b>。它们是两种风险预算下的不同工具。</span></div>
+<div class="scen"><div class="sh"><span class="nm">场景 1 · 大牛市</span><span class="mv up">正股 +20% → $120</span></div><div class="row"><div class="wlab"><b>武器 A</b> 买 ITM Call</div><div class="metric"><span class="ml">净利润</span><span class="mn pos">+$1,900</span></div><div class="metric"><span class="ml">资金收益率</span><span class="mn pos">+172%</span></div></div><div class="row"><div class="wlab"><b>武器 B</b> 卖 OTM Put</div><div class="metric"><span class="ml">净利润</span><span class="mn pos">+$200</span></div><div class="metric"><span class="ml">资金收益率</span><span class="mn pos">+2.1%</span></div></div><div class="take">大涨行情下，买 ITM Call 展现恐怖的非线性高杠杆爆发力，<b>完胜</b>。</div></div>
+<div class="scen"><div class="sh"><span class="nm">场景 2 · 震荡市</span><span class="mv flat">正股 +1% → $101</span></div><div class="row"><div class="wlab"><b>武器 A</b> 买 ITM Call</div><div class="metric"><span class="ml">净利润</span><span class="mn zero">$0</span></div><div class="metric"><span class="ml">资金收益率</span><span class="mn zero">0%</span></div></div><div class="row"><div class="wlab"><b>武器 B</b> 卖 OTM Put</div><div class="metric"><span class="ml">净利润</span><span class="mn pos">+$200</span></div><div class="metric"><span class="ml">资金收益率</span><span class="mn pos">+2.1%</span></div></div><div class="take">正股微涨，买方因 $1 时间价值磨损（Theta 衰减）打平；卖方通过 +Θ <b>完胜</b>。</div></div>
+<div class="scen"><div class="sh"><span class="nm">场景 3 · 小熊市</span><span class="mv down">正股 −6% → $94</span></div><div class="row"><div class="wlab"><b>武器 A</b> 买 ITM Call</div><div class="metric"><span class="ml">净利润</span><span class="mn neg">−$700</span></div><div class="metric"><span class="ml">资金收益率</span><span class="mn neg">−63.6%</span></div></div><div class="row"><div class="wlab"><b>武器 B</b> 卖 OTM Put</div><div class="metric"><span class="ml">净利润</span><span class="mn pos">+$100</span></div><div class="metric"><span class="ml">资金收益率</span><span class="mn pos">+1.05%</span></div></div><div class="take">股价跌但未破 $93 真实平衡点，卖方凭权利金安全垫<b>逆势盈利</b>。</div></div>
+`;
+
+  const case2HTML=`
+<div class="eyebrow">第二部分 / 案例二</div>
+<h2>🌋 复合黑天鹅压力测试</h2>
+<p class="sec-sub">Delta / Gamma 惩罚 vs Vega 奖励。在 IV 飙至 80% 历史高位时，卖出 1 手 $95 OTM Put，斩获权利金 $6.0（$600）。初始 Δ = −0.30 · Γ = 0.04 · ν = 0.15</p>
+<p style="margin-top:1.2rem;color:var(--ink);font-weight:700;font-size:14px">第二天突发：股价下跌 $2 + 恐慌消散（IV 暴跌 30 点）</p>
+<div class="step"><div class="stt"><span class="n">01</span> Delta + Gamma 的惩罚 <span class="chip neg" style="margin-left:auto">账面 −</span></div><p>用二阶泰勒展开，价格下跌对期权价的影响：</p><div class="eq"><div class="lab">二阶泰勒展开</div>\\[ \\Delta\\cdot\\Delta S + \\tfrac{1}{2}\\Gamma\\cdot(\\Delta S)^2 = (-0.30)(-2) + \\tfrac{1}{2}(0.04)(2^2) = 0.60 + 0.08 = +0.68 \\]</div><p class="impact">作为卖方，此项让期权变贵，账面亏损约 $68。</p><div class="callout danger"><span class="ic">Γ</span><span><b>Gamma 的隐形伤害 —</b> 新 \\(\\Delta \\approx -0.30 + 0.04\\times(-2) = -0.38\\)。等效做多敞口从 <b>+30 股被动放大到 +38 股</b>——下跌中越套越多。</span></div></div>
+<div class="step"><div class="stt"><span class="n">02</span> Vega 的降维打击 <span class="chip pos" style="margin-left:auto">账面 +</span></div><p>恐慌消散，IV 暴跌 30 点至 50%：</p><div class="eq"><div class="lab">Vega 贡献（线性估算）</div>\\[ \\Delta\\mathrm{IV}\\times\\mathrm{Vega} = (-30)\\times 0.15 = -4.50 \\]</div><p class="impact">作为卖方，期权费暴跌是利好，账面盈利 $450。</p></div>
+<div class="eq"><div class="lab">最终结算 · 期权市场价</div><div class="flow"><span class="t">初始 $6.0</span><span class="op">+</span><span class="t" style="color:#f46a5a">Delta/Gamma +$0.68</span><span class="op">+</span><span class="t" style="color:#3dd68c">Vega −$4.50</span><span class="op">=</span><span class="res">≈ $2.18</span></div><div class="flow" style="margin-top:10px"><span class="t">最终净利润</span><span class="op">=</span><span class="t">$6.0 − $2.18</span><span class="op">=</span><span class="res" style="background:rgba(61,214,140,.1);border-color:rgba(61,214,140,.3);color:#3dd68c">+$3.82 / 手</span></div></div>
+<div class="callout note"><span class="ic">!</span><span><b>核心顿悟 —</b> 在高 IV 开仓时，<b>Vega 的盈利空间以压倒性姿态，盖过了 Delta/Gamma 下跌带来的惩罚</b>。即使方向猜错，卖方依然能赢。</span></div>
+<div class="triple"><div class="th"><span class="x">✕</span><h4>但这个顿悟必须加上边界 — 卖方真正的死法</h4></div><p style="padding:12px 18px 0;color:var(--dim);font-size:13px">上述结论成立，<b style="color:var(--ink)">仅仅因为本场景是「价格小跌 + 恐慌消散」的良性场景</b>。真正让卖方爆仓的是：股指急跌时 IV 通常<b style="color:#f46a5a">飙升</b>而非消散。届时三记重击同时落下：</p><div class="kills"><div class="kill"><div class="g">Δ</div><div class="t">Delta 亏</div><p>价格向不利方向走，方向直接亏损。</p></div><div class="kill"><div class="g">Γ</div><div class="t">Gamma 加速</div><p>等效敞口被动放大，越跌套得越多。</p></div><div class="kill"><div class="g">ν</div><div class="t">Vega 亏</div><p>IV 暴涨让期权更贵，回购成本飙升。</p></div></div><div class="foot"><b style="color:#ffd2cc">三杀叠加，才是卖方真正的死法。</b> 高 IV 开仓做卖方，赢的是 Vega 顺风——只在波动率回落时存在。遇到价跌+波动率飙升的真崩盘，Δ、Γ、ν 会一起反咬。</div></div>
+`;
+
+  const htmlMap={concepts:conceptsHTML,greeks:greeksHTML,case1:case1HTML,case2:case2HTML};
+
+  return(
+    <div className="lp" ref={ref}>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:20,fontWeight:700,color:V('ink'),marginBottom:4}}>{'期权拆弹手册'}</div>
+        <div style={{fontSize:12,color:V('faint'),fontFamily:'IBM Plex Mono,monospace',letterSpacing:'.08em'}}>{'Δ Γ ν Θ · 底层量化推导与实战复盘'}</div>
+      </div>
+      <div className="nav-pills">
+        {Object.entries(sections).map(([k,v])=>(
+          <button key={k} className={'nav-pill'+(section===k?' active':'')} onClick={()=>setSection(k)}>
+            {v.icon+' '+v.label}
+          </button>
+        ))}
+      </div>
+      <div dangerouslySetInnerHTML={{__html:htmlMap[section]||''}}/>
+    </div>
+  );
+}
+
 /* ══ SGOV 面板 ══════════════════════════════════════ */
 function SgovPanel({sgov,onUpdate,totalMarginUsed}){
   const s=sgov||{};
@@ -2170,7 +2345,7 @@ function App(){
         <div style={{maxWidth:'100%',width:'100%',padding:'0 16px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,flexWrap:'wrap'}}>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
             <div style={{width:8,height:8,borderRadius:'50%',background:ACC.amber,boxShadow:`0 0 12px ${ACC.amber}`}}/>
-            <span style={{fontWeight:700,fontSize:15,letterSpacing:'.04em'}}>Wheel Dashboard</span>
+            <span style={{fontWeight:700,fontSize:15,letterSpacing:'.04em'}}>Optimus Terminal</span>
           </div>
           <div className="header-btns" style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
             {lastRefresh&&<span className="header-time" style={{fontSize:11,color:V('faint'),fontFamily:'IBM Plex Mono,monospace'}}>更新 {lastRefresh}</span>}
@@ -2231,6 +2406,10 @@ function App(){
           <button className={`tab-btn${tab==='scan'?' active':''}`} onClick={()=>setTab('scan')}>
             <span className="tab-dot" style={{background:ACC.amber}}/>
             期权筛选
+          </button>
+          <button className={`tab-btn${tab==='learn'?' active':''}`} onClick={()=>setTab('learn')}>
+            <span className="tab-dot" style={{background:ACC.purple}}/>
+            期权学习
           </button>
         </div>
 
@@ -2321,6 +2500,9 @@ function App(){
 
           {/* 期权筛选 Tab */}
           <div style={{display:tab==='scan'?'block':'none'}}><ScanPanel/></div>
+
+          {/* 期权学习 Tab */}
+          <div style={{display:tab==='learn'?'block':'none'}}><LearnPanel/></div>
         </div>
       </div>
     </div>
