@@ -885,6 +885,76 @@ function FinnhubModal({current,onSave,onClose}){
   );
 }
 
+/* ══ Roll 滚仓弹层 ══════════════════════════════════════ */
+function RollModal({pos,commPerSide,onConfirm,onClose}){
+  const [buybackPrice,setBuybackPrice]=useState(pos.optionPrice!=null?String(pos.optionPrice):'');
+  const [newExpiry,setNewExpiry]=useState('');
+  const [newStrike,setNewStrike]=useState(String(pos.strike));
+  const [newPremium,setNewPremium]=useState('');
+  const [rollDate,setRollDate]=useState(today());
+  const qty=pos.qty||1;
+
+  // 计算
+  const bbPrice=parseFloat(buybackPrice)||0;
+  const bbCost=bbPrice*100*qty;
+  const newPrem=parseFloat(newPremium)||0;
+  const newIncome=newPrem*100*qty;
+  const rollComm=commPerSide*qty*2*2; // 两次交易各双边
+  const netCredit=newIncome-bbCost-rollComm;
+  const valid=buybackPrice&&newExpiry&&newStrike&&newPremium;
+
+  return(
+    <Modal title="↻ Roll 滚仓" onClose={onClose} maxW={600}>
+      <div style={{background:V('surface'),borderRadius:10,padding:'10px 14px',marginBottom:16,display:'flex',gap:16,flexWrap:'wrap',alignItems:'center'}}>
+        <span style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:15,color:V('ink')}}>{pos.ticker}</span>
+        <span style={{fontFamily:'IBM Plex Mono,monospace',color:ACC.amber}}>{'卖 '+(pos.type==='P'?'Put':'Call')+' $'+fmt(pos.strike,0)}</span>
+        <span style={{fontFamily:'IBM Plex Mono,monospace',color:V('dim')}}>{qty+'手 · 到期 '+pos.expDate}</span>
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
+        <div style={{background:V('surface'),border:'1px solid '+V('line'),borderRadius:12,padding:16}}>
+          <div style={{fontSize:10,color:ACC.loss,letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',marginBottom:12}}>{'① 买回当前合约'}</div>
+          <NumField label="买回价格" prefix="$" suffix="/股" value={buybackPrice} onChange={setBuybackPrice} placeholder="4.66"/>
+          <div style={{marginTop:10,fontFamily:'IBM Plex Mono,monospace',fontSize:12,color:V('dim')}}>
+            {'买回成本: '}<span style={{color:ACC.loss}}>{'$'+fmt(bbCost)}</span>
+          </div>
+        </div>
+        <div style={{background:V('surface'),border:'1px solid '+V('line'),borderRadius:12,padding:16}}>
+          <div style={{fontSize:10,color:ACC.profit,letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',marginBottom:12}}>{'② 卖出新合约'}</div>
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            <DateField label="新到期日" value={newExpiry} onChange={setNewExpiry}/>
+            <NumField label="新行权价" prefix="$" value={newStrike} onChange={setNewStrike} placeholder={String(pos.strike)}/>
+            <NumField label="新权利金" prefix="$" suffix="/股" value={newPremium} onChange={setNewPremium} placeholder="1.50"/>
+          </div>
+          <div style={{marginTop:10,fontFamily:'IBM Plex Mono,monospace',fontSize:12,color:V('dim')}}>
+            {'新收入: '}<span style={{color:ACC.profit}}>{'$'+fmt(newIncome)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{background:netCredit>=0?ACC.profitBg:ACC.lossBg,border:'1px solid '+(netCredit>=0?ACC.profit:ACC.loss)+'33',borderRadius:12,padding:'16px 20px',marginBottom:16}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16}}>
+          <Stat label="Roll 净收入" value={fmtM(netCredit)} color={netCredit>=0?ACC.profit:ACC.loss} sz={22}/>
+          <Stat label="手续费 (两次)" value={'-$'+fmt(rollComm)} color={ACC.loss}/>
+          <Stat label="Roll 日期" value={rollDate} color={V('dim')}/>
+        </div>
+        <div style={{marginTop:10,fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('dim')}}>
+          {'新收入 $'+fmt(newIncome)+' − 买回 $'+fmt(bbCost)+' − 手续费 $'+fmt(rollComm)+' = '+fmtM(netCredit)}
+        </div>
+      </div>
+
+      <div style={{display:'flex',gap:8}}>
+        <button disabled={!valid} onClick={()=>onConfirm({
+          buybackPrice:bbPrice,rollDate,
+          newExpiry,newStrike:parseFloat(newStrike),newPremium:newPrem,
+          netCredit,rollComm,
+        })} className="btn btn-primary" style={{minWidth:120}}>{'确认 Roll'}</button>
+        <button onClick={onClose} className="btn btn-ghost">{'取消'}</button>
+      </div>
+    </Modal>
+  );
+}
+
 /* ══ 平仓弹层 ══════════════════════════════════════ */
 function CloseModal({pos,commPerSide,onConfirm,onClose}){
   const [closePrice,setClosePrice]=useState('');
@@ -1772,7 +1842,7 @@ function AddForm({onAdd,onCancel,commPerSide}){
 }
 
 /* ══ 详情抽屉 ══════════════════════════════════════ */
-function DetailDrawer({p,r,commPerSide,onUpdateOptionPrice,onClose,onDelete}){
+function DetailDrawer({p,r,commPerSide,onUpdateOptionPrice,onClose,onDelete,onRoll}){
   return(
     <div className="anim-fade" style={{borderTop:`1px solid ${V('line')}`,background:V('surface'),borderRadius:'0 0 14px 14px',padding:'18px 20px'}}>
       <div style={{marginBottom:16}}>
@@ -1830,15 +1900,16 @@ function DetailDrawer({p,r,commPerSide,onUpdateOptionPrice,onClose,onDelete}){
         </div>
       </div>
       <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
-        <button onClick={onClose} className="btn btn-primary" style={{background:ACC.blue,color:'#fff'}}>↩ 平仓</button>
-        <button onClick={onDelete} className="btn btn-danger">删除</button>
+        <button onClick={onRoll} className="btn" style={{background:ACC.amberSoft,color:ACC.amber,border:'1.5px solid '+ACC.amber+'44'}}>{'↻ Roll 滚仓'}</button>
+        <button onClick={onClose} className="btn btn-primary" style={{background:ACC.blue,color:'#fff'}}>{'↩ 平仓'}</button>
+        <button onClick={onDelete} className="btn btn-danger">{'删除'}</button>
       </div>
     </div>
   );
 }
 
 /* ══ 活跃仓位行 ══════════════════════════════════════ */
-function PositionRow({p,commPerSide,expanded,onToggle,onUpdateOptionPrice,onClose,onDelete}){
+function PositionRow({p,commPerSide,expanded,onToggle,onUpdateOptionPrice,onClose,onDelete,onRoll}){
   const r=calc(p,commPerSide);
   const isCall=p.type==='C';
   const typeColor=isCall?ACC.loss:ACC.profit;
@@ -1905,7 +1976,7 @@ function PositionRow({p,commPerSide,expanded,onToggle,onUpdateOptionPrice,onClos
       </div>
       {expanded&&<DetailDrawer p={p} r={r} commPerSide={commPerSide}
         onUpdateOptionPrice={v=>onUpdateOptionPrice(p.id,v)}
-        onClose={onClose} onDelete={onDelete}/>}
+        onClose={onClose} onDelete={onDelete} onRoll={onRoll}/>}
     </div>
   );
 }
@@ -2157,6 +2228,7 @@ function App(){
   const [showFhModal,setShowFhModal]=useState(false);
   const [showCommModal,setShowCommModal]=useState(false);
   const [closeTarget,setCloseTarget]=useState(null);
+  const [rollTarget,setRollTarget]=useState(null);
   const [loading,setLoading]=useState(false);
   const [lastRefresh,setLastRefresh]=useState(null);
   const [toast,setToast]=useState(null);
@@ -2301,6 +2373,24 @@ function App(){
     }
     setExpanded(null);setCloseTarget(null);
   };
+  const confirmRoll=(pos,data)=>{
+    const {buybackPrice,rollDate,newExpiry,newStrike,newPremium,netCredit,rollComm}=data;
+    // 1. 关闭旧仓位（记录为 roll）
+    const closedRecord={...pos,closePrice:buybackPrice,closeDate:rollDate,closeType:'roll',closedAt:Date.now(),rollNetCredit:netCredit};
+    mutateClosed([closedRecord,...closed]);
+    // 2. 创建新仓位
+    const newPos={
+      id:Date.now(),ticker:pos.ticker,type:pos.type,strike:newStrike,qty:pos.qty||1,
+      openDate:rollDate,expDate:newExpiry,premium:newPremium,
+      marginType:pos.marginType,customMargin:pos.customMargin||0,
+      currentPrice:pos.currentPrice,optionPrice:null,
+      rolledFrom:pos.id,
+    };
+    mutate([...positions.filter(p=>p.id!==pos.id),newPos]);
+    setRollTarget(null);setExpanded(newPos.id);
+    showToast('↻ Roll 完成 · 净'+fmtM(netCredit),netCredit>=0?ACC.profit:ACC.amber);
+  };
+
   const removeClosedRecord=(id)=>{mutateClosed(closed.filter(c=>c.id!==id));showToast('已删除记录',ACC.loss);};
   const updateStockPrice=(id,price)=>mutateStocks(stocks.map(s=>s.id===id?{...s,currentPrice:price}:s));
   const removeStock=(id)=>{mutateStocks(stocks.filter(s=>s.id!==id));showToast('已删除股票仓位',ACC.loss);};
@@ -2337,6 +2427,8 @@ function App(){
           });
         }}
         onClose={()=>setShowCloudModal(false)}/>}
+      {rollTarget&&<RollModal pos={rollTarget} commPerSide={commPerSide}
+        onConfirm={(data)=>confirmRoll(rollTarget,data)} onClose={()=>setRollTarget(null)}/>}
       {closeTarget&&<CloseModal pos={closeTarget} commPerSide={commPerSide}
         onConfirm={(data)=>confirmClose(closeTarget,data)} onClose={()=>setCloseTarget(null)}/>}
 
@@ -2407,6 +2499,10 @@ function App(){
             <span className="tab-dot" style={{background:ACC.amber}}/>
             期权筛选
           </button>
+          <button className={`tab-btn${tab==='finews'?' active':''}`} onClick={()=>setTab('finews')}>
+            <span className="tab-dot" style={{background:ACC.teal}}/>
+            美股日报
+          </button>
           <button className={`tab-btn${tab==='learn'?' active':''}`} onClick={()=>setTab('learn')}>
             <span className="tab-dot" style={{background:ACC.purple}}/>
             期权学习
@@ -2436,7 +2532,8 @@ function App(){
                       onToggle={()=>toggleExpand(p.id)}
                       onUpdateOptionPrice={updateOptionPrice}
                       onClose={()=>{setCloseTarget(p);setExpanded(null);}}
-                      onDelete={()=>removePosition(p.id)}/>
+                      onDelete={()=>removePosition(p.id)}
+                      onRoll={()=>{setRollTarget(p);setExpanded(null);}}/>
                   ))}
                 </div>
               )}
@@ -2500,6 +2597,11 @@ function App(){
 
           {/* 期权筛选 Tab */}
           <div style={{display:tab==='scan'?'block':'none'}}><ScanPanel/></div>
+
+          {/* 美股日报 Tab */}
+          <div style={{display:tab==='finews'?'block':'none',height:'calc(100vh - 80px)',margin:'0 -24px -22px'}}>
+            <iframe src="https://finews.elsetech.app/" style={{width:'100%',height:'100%',border:'none',borderRadius:0}} title="FiNews 美股日报"/>
+          </div>
 
           {/* 期权学习 Tab */}
           <div style={{display:tab==='learn'?'block':'none'}}><LearnPanel/></div>
