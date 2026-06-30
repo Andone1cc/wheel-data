@@ -362,6 +362,31 @@ select{-webkit-appearance:none;appearance:none}
 .lp .nav-pill{padding:7px 16px;border-radius:20px;font-size:12px;cursor:pointer;background:var(--surface);color:var(--dim);border:1px solid var(--line);transition:.2s;font-family:'IBM Plex Mono',monospace;white-space:nowrap}
 .lp .nav-pill:hover{border-color:var(--line-br);color:var(--ink)}
 .lp .nav-pill.active{background:rgba(245,183,49,.1);color:#f5b731;border-color:rgba(245,183,49,.3)}
+
+/* ── 登录页 ──
+
+@keyframes jumpIn{0%{opacity:0;transform:translateY(16px)}60%{opacity:1;transform:translateY(-4px)}100%{transform:translateY(0)}}
+.jump-letter{display:inline-block;animation:jumpIn .5s ease both}
+ */
+@keyframes gridPulse{0%,100%{opacity:.03}50%{opacity:.08}}
+@keyframes scanLine{0%{top:-2px}100%{top:100%}}
+@keyframes logoGlow{0%,100%{filter:drop-shadow(0 0 8px rgba(245,183,49,.2))}50%{filter:drop-shadow(0 0 20px rgba(245,183,49,.5))}}
+@keyframes typeIn{from{width:0}to{width:100%}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
+@keyframes termBlink{0%,100%{opacity:1}50%{opacity:0}}
+.login-bg{position:fixed;inset:0;background:#080c10;display:flex;align-items:center;justify-content:center;z-index:9999;overflow:hidden}
+.login-bg::before{content:'';position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 49px,rgba(245,183,49,.03) 49px,rgba(245,183,49,.03) 50px),repeating-linear-gradient(90deg,transparent,transparent 49px,rgba(245,183,49,.03) 49px,rgba(245,183,49,.03) 50px);animation:gridPulse 4s ease-in-out infinite}
+
+.login-box{position:relative;z-index:1;width:380px;max-width:90vw;display:flex;flex-direction:column;align-items:center;animation:fadeUp .6s ease}
+.login-logo{animation:logoGlow 3s ease-in-out infinite}
+.login-input{width:100%;padding:14px 18px;background:rgba(15,24,32,.8);border:1.5px solid rgba(245,183,49,.15);border-radius:12px;color:#dde8ef;font-family:'IBM Plex Mono',monospace;font-size:15px;outline:none;letter-spacing:.1em;transition:border-color .25s,box-shadow .25s;text-align:center}
+.login-input:focus{border-color:rgba(245,183,49,.5);box-shadow:0 0 0 4px rgba(245,183,49,.08)}
+.login-input::placeholder{color:rgba(63,85,104,.6);letter-spacing:.05em}
+.login-btn{width:100%;padding:14px;border:none;border-radius:12px;background:linear-gradient(135deg,#f5b731,#e6a100);color:#0c1217;font-weight:700;font-size:15px;cursor:pointer;transition:transform .1s,box-shadow .2s;letter-spacing:.06em;font-family:'IBM Plex Sans','Noto Sans SC',sans-serif}
+.login-btn:hover{box-shadow:0 4px 24px rgba(245,183,49,.35)}
+.login-btn:active{transform:scale(.97)}
+.login-error{color:#f46a5a;font-size:12px;font-family:'IBM Plex Mono',monospace;margin-top:8px;height:16px}
+.login-cursor{display:inline-block;width:2px;height:14px;background:#f5b731;margin-left:2px;animation:termBlink 1s step-end infinite;vertical-align:text-bottom}
 </style>
 </head>
 <body>
@@ -2205,6 +2230,65 @@ function ClosedSummary({closed,commPerSide}){
 }
 
 /* ══ 主应用 ══════════════════════════════════════ */
+
+/* ══ 登录页 ══════════════════════════════════════ */
+const LOGIN_KEY='opt-session';
+const ACCESS_PWD=localStorage.getItem('whl-cloud-pwd')||'123456';
+
+function LoginScreen({onLogin}){
+  const [pwd,setPwd]=useState('');
+  const [error,setError]=useState('');
+  const [loading,setLoading]=useState(false);
+
+  const handleLogin=()=>{
+    if(!pwd.trim()){setError('请输入密码');return;}
+    setLoading(true);setError('');
+    // 模拟终端连接动画
+    setTimeout(()=>{
+      if(pwd.trim()===ACCESS_PWD){
+        sessionStorage.setItem(LOGIN_KEY,'1');
+        onLogin();
+      }else{
+        setError('ACCESS DENIED · 密码错误');
+        setLoading(false);
+      }
+    },800);
+  };
+
+  return(
+    <div className="login-bg">
+      <div className="login-box">
+        <div className="login-logo" style={{marginBottom:32}}>
+          <svg width="72" height="72" viewBox="0 0 28 28" fill="none">
+            <rect x="2" y="2" width="24" height="24" rx="7" fill="none" stroke="#f5b731" strokeWidth="1.2" opacity=".4"/>
+            <rect x="5" y="5" width="18" height="18" rx="4" fill="rgba(245,183,49,.06)"/>
+            <path d="M8 17 L11 12 L14 14.5 L17 9 L20 13" stroke="#f5b731" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+            <circle cx="20" cy="13" r="2" fill="#3dd68c"/>
+            <path d="M8 20h12" stroke="rgba(245,183,49,.15)" strokeWidth="1"/>
+          </svg>
+        </div>
+        <div style={{fontWeight:700,fontSize:24,color:'#dde8ef',letterSpacing:'.06em',marginBottom:4}}>
+          {'Optimus Terminal'.split('').map((ch,i)=>(
+            <span key={i} className="jump-letter" style={{animationDelay:(i*0.04)+'s'}}>{ch===' '?'\u00A0':ch}</span>
+          ))}
+        </div>
+        <div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:'rgba(122,150,170,.6)',letterSpacing:'.2em',marginBottom:40}}>{'WHEEL STRATEGY ENGINE'}</div>
+        <input className="login-input" type="password" value={pwd} onChange={e=>{setPwd(e.target.value);setError('');}}
+          onKeyDown={e=>{if(e.key==='Enter')handleLogin();}}
+          placeholder="ACCESS CODE" autoFocus/>
+        <div className="login-error">{error}</div>
+        <button className="login-btn" onClick={handleLogin} disabled={loading} style={{marginTop:12,opacity:loading?.7:1}}>
+          {loading?'CONNECTING...':'进入终端'}
+        </button>
+        <div style={{marginTop:32,fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:'rgba(63,85,104,.4)',letterSpacing:'.08em'}}>
+          {'v2.0 · ENCRYPTED SESSION'}
+          
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App(){
   const [theme,setTheme]=useState(()=>localStorage.getItem(SK.THEME)||'dark');
   const [positions,setPositions]=useState(()=>ls(SK.POS,[]));
@@ -2628,7 +2712,12 @@ function App(){
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+function Root(){
+  const [auth,setAuth]=useState(()=>sessionStorage.getItem(LOGIN_KEY)==='1');
+  if(!auth)return <LoginScreen onLogin={()=>setAuth(true)}/>;
+  return <App/>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Root/>);
 </script>
 </body>
 </html>
