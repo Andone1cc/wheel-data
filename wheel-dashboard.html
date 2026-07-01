@@ -2301,7 +2301,8 @@ function App(){
   // 云端同步（已内置默认配置）
   const [cloudUrl,setCloudUrl]=useState(()=>localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL);
   const [cloudPwd,setCloudPwd]=useState(()=>localStorage.getItem('whl-cloud-pwd')||DEFAULT_CLOUD_PWD);
-  const [cloudStatus,setCloudStatus]=useState('idle'); // idle | syncing | ok | err
+  const [cloudStatus,setCloudStatus]=useState('idle');
+  const cloudLoaded=React.useRef(false); // 防止初始化期间空数据覆盖云端 // idle | syncing | ok | err
   const [showCloudModal,setShowCloudModal]=useState(false);
 
   const [tab,setTab]=useState('active');
@@ -2334,12 +2335,15 @@ function App(){
         if(remote.sgov)setSgov(remote.sgov);
         if(remote.cfg)setCfg(remote.cfg);
         setCloudStatus('ok');
+        cloudLoaded.current=true;
       }else{
         // 云端是空的，把本地数据推上去初始化
         const payload=buildPayload(
           ls(SK.POS,[]),ls(SK.CLOSED,[]),ls(SK.STOCKS,[]),ls(SK.SGOV,{}),ls(SK.CFG,{commPerSide:DEFAULT_COMM})
         );
-        cloudPut(payload,cloudPwd).then(ok=>setCloudStatus(ok?'ok':'err'));
+cloudLoaded.current=true;
+                cloudPut(payload,cloudPwd).then(ok=>setCloudStatus(ok?'ok':'err'));
+
       }
     });
   },[cloudUrl,cloudPwd]);
@@ -2347,6 +2351,8 @@ function App(){
   // 把所有业务数据打包推送云端
   const pushCloud=useCallback(async(data)=>{
     if(!cloudUrl||!cloudPwd)return;
+    // 云端数据尚未加载完成前，不允许推送（防止空数据覆盖）
+    if(!cloudLoaded.current){console.warn('pushCloud blocked: cloud not loaded yet');return;}
     setCloudStatus('syncing');
     const ok=await cloudPut(data,cloudPwd);
     setCloudStatus(ok?'ok':'err');
@@ -2499,7 +2505,7 @@ function App(){
               if(remote.stocks)setStocks(remote.stocks);
               if(remote.sgov)setSgov(remote.sgov);
               if(remote.cfg)setCfg(remote.cfg);
-              setCloudStatus('ok');showToast('☁ 云端数据已加载',ACC.teal);
+              setCloudStatus('ok');cloudLoaded.current=true;showToast('☁ 云端数据已加载',ACC.teal);
             }else{
               // 云端空的，把本地数据推上去
               const payload=buildPayload(positions,closed,stocks,sgov,cfg);
@@ -2534,6 +2540,16 @@ function App(){
           </div>
           <div className="header-btns" style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
             {lastRefresh&&<span className="header-time" style={{fontSize:11,color:V('faint'),fontFamily:'IBM Plex Mono,monospace'}}>更新 {lastRefresh}</span>}
+            {/* 导出备份 */}
+            <button onClick={()=>{
+              const payload=buildPayload(positions,closed,stocks,sgov,cfg);
+              const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+              const url=URL.createObjectURL(blob);
+              const a=document.createElement('a');
+              a.href=url;a.download='optimus-backup-'+today()+'.json';a.click();
+              URL.revokeObjectURL(url);
+              showToast('备份已下载',ACC.teal);
+            }} className="btn btn-ghost" style={{fontSize:12,padding:'7px 12px'}}>{'💾'}</button>
             {/* 云端同步状态 */}
             <button onClick={()=>setShowCloudModal(true)} className="btn btn-ghost"
               style={{fontSize:12,padding:'7px 12px',
