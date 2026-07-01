@@ -420,15 +420,15 @@ const SK={POS:'whl-pos-v2',CLOSED:'whl-closed-v1',STOCKS:'whl-stocks-v1',SGOV:'w
 const ls=(k,fb=null)=>{try{const s=localStorage.getItem(k);return s?JSON.parse(s):fb}catch{return fb}};
 const lss=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}};
 
-/* ── 云端存储配置（已内置，任何设备打开自动同步）── */
+/* ── 云端存储配置 ──
+   URL 内置一个默认值方便开箱访问公开的行情代理（/api/quote /api/cboe，
+   这两个接口本身不需要密码）。但密码不再内置：云端同步和富途接口都需要
+   密码鉴权，必须由用户在"云端设置"里手动填入自己在 Vercel 环境变量里
+   设置的 ACCESS_PASSWORD，否则任何拿到这份公开源码的人都能读写你的数据。 */
 const DEFAULT_CLOUD_URL = 'https://wheel-data.vercel.app';
-const DEFAULT_CLOUD_PWD = '123456';
-// 首次打开时自动写入 localStorage
+// 首次打开时只写入 URL，不再自动写入任何密码
 if (!localStorage.getItem('whl-cloud-url')) {
   localStorage.setItem('whl-cloud-url', DEFAULT_CLOUD_URL);
-}
-if (!localStorage.getItem('whl-cloud-pwd')) {
-  localStorage.setItem('whl-cloud-pwd', DEFAULT_CLOUD_PWD);
 }
 const CLOUD_URL = localStorage.getItem('whl-cloud-url') || DEFAULT_CLOUD_URL;
 
@@ -451,6 +451,15 @@ async function cloudGet(password) {
     if (data && typeof data === 'object' && !data.error) return data;
     return null;
   } catch(e) { console.warn('cloudGet error:', e); return null; }
+}
+
+/* 所有 /api/futu/* 请求统一走这里，自动带上云端密码
+   （后端现在要求鉴权，不带密码会 401） */
+async function futuFetch(path, opts={}){
+  const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
+  const pwd=localStorage.getItem('whl-cloud-pwd')||'';
+  const headers={...(opts.headers||{}), Authorization:`Bearer ${pwd}`};
+  return fetch(proxyBase+path, {...opts, headers});
 }
 
 async function cloudPut(data, password) {
@@ -1110,7 +1119,7 @@ function WatchlistPanel(){
   // ── 富途 API 管理观察列表 ──
   const fetchWatchlist=async()=>{
     try{
-      const res=await fetch(proxyBase+'/api/futu/watchlist',{signal:AbortSignal.timeout(8000)});
+      const res=await futuFetch('/api/futu/watchlist',{signal:AbortSignal.timeout(8000)});
       const d=await res.json();
       if(d.status==='success'&&Array.isArray(d.data)){
         setTickers(d.data);
@@ -1124,7 +1133,7 @@ function WatchlistPanel(){
     if(!t.startsWith('US.')&&!t.startsWith('HK.'))t='US.'+t;
     if(tickers.includes(t))return;
     try{
-      await fetch(proxyBase+'/api/futu/watchlist/add',{
+      await futuFetch('/api/futu/watchlist/add',{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({code:t}),signal:AbortSignal.timeout(8000)
       });
@@ -1135,7 +1144,7 @@ function WatchlistPanel(){
 
   const removeTicker=async(t)=>{
     try{
-      await fetch(proxyBase+'/api/futu/watchlist/delete',{
+      await futuFetch('/api/futu/watchlist/delete',{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({code:t}),signal:AbortSignal.timeout(8000)
       });
@@ -1147,7 +1156,7 @@ function WatchlistPanel(){
     setLoading(true);
     let currentList=[];
     try{
-      const wlRes=await fetch(proxyBase+'/api/futu/watchlist',{signal:AbortSignal.timeout(8000)});
+      const wlRes=await futuFetch('/api/futu/watchlist',{signal:AbortSignal.timeout(8000)});
       const wlData=await wlRes.json();
       currentList=wlData.data||[];
       setTickers(currentList);
@@ -1160,7 +1169,7 @@ function WatchlistPanel(){
       const display=code.replace(/^US\./,'').replace(/^HK\./,'');
       try{
         // ── 1. 富途：股价 ──
-        const sumRes=await fetch(proxyBase+'/api/futu/stock-option-summary?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(10000)});
+        const sumRes=await futuFetch('/api/futu/stock-option-summary?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(10000)});
         const sumData=await sumRes.json();
         const price=(sumData.status==='success'&&sumData.data)?sumData.data.stock_price||sumData.data.last_price:null;
         results[code]={price:price};
@@ -1182,7 +1191,7 @@ function WatchlistPanel(){
         }catch{}
 
         // ── 3. 富途：最优 Put 合约（25-50 DTE）──
-        const daysRes=await fetch(proxyBase+'/api/futu/option-days?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(8000)});
+        const daysRes=await futuFetch('/api/futu/option-days?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(8000)});
         const daysData=await daysRes.json();
         if(daysData.status==='success'&&Array.isArray(daysData.data)){
           let bestDate=null;let bestDte=999;
@@ -1194,7 +1203,7 @@ function WatchlistPanel(){
           if(bestDate){
             results[code].bestExpiry=bestDate;
             results[code].bestDte=bestDte;
-            const chainRes=await fetch(proxyBase+'/api/futu/option-chain?code='+encodeURIComponent(code)+'&date='+bestDate+'&option_type=PUT',{signal:AbortSignal.timeout(12000)});
+            const chainRes=await futuFetch('/api/futu/option-chain?code='+encodeURIComponent(code)+'&date='+bestDate+'&option_type=PUT',{signal:AbortSignal.timeout(12000)});
             const chainData=await chainRes.json();
             if(chainData.status==='success'&&Array.isArray(chainData.data)&&chainData.data.length){
               // 有 delta 时用 delta 筛，没有时用行权价距离
@@ -1378,7 +1387,7 @@ function ScanPanel(){
     // 从富途获取观察列表
     let watchlist=[];
     try{
-      const wlRes=await fetch(proxyBase+'/api/futu/watchlist',{signal:AbortSignal.timeout(8000)});
+      const wlRes=await futuFetch('/api/futu/watchlist',{signal:AbortSignal.timeout(8000)});
       const wlData=await wlRes.json();
       watchlist=wlData.data||[];
     }catch{watchlist=getWatchlist();}
@@ -1391,7 +1400,7 @@ function ScanPanel(){
       setProgress('扫描 '+display+'…');
       try{
         // 1. 获取到期日列表
-        const daysRes=await fetch(proxyBase+'/api/futu/option-days?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(10000)});
+        const daysRes=await futuFetch('/api/futu/option-days?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(10000)});
         const daysData=await daysRes.json();
         if(daysData.status!=='success'||!Array.isArray(daysData.data))continue;
 
@@ -1407,7 +1416,7 @@ function ScanPanel(){
         // 3. 获取正股摘要（IV/HV/IV Rank）
         let stockSummary={};
         try{
-          const sumRes=await fetch(proxyBase+'/api/futu/stock-option-summary?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(10000)});
+          const sumRes=await futuFetch('/api/futu/stock-option-summary?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(10000)});
           const sumData=await sumRes.json();
           if(sumData.status==='success')stockSummary=sumData.data||{};
         }catch{}
@@ -1416,7 +1425,7 @@ function ScanPanel(){
         // 4. 对每个到期日拉 Put 期权链
         for(const dateObj of validDates){
           const dateStr=dateObj.strike_time.split(' ')[0];
-          const chainRes=await fetch(proxyBase+'/api/futu/option-chain?code='+encodeURIComponent(code)+'&date='+dateStr+'&option_type=PUT',{signal:AbortSignal.timeout(12000)});
+          const chainRes=await futuFetch('/api/futu/option-chain?code='+encodeURIComponent(code)+'&date='+dateStr+'&option_type=PUT',{signal:AbortSignal.timeout(12000)});
           const chainData=await chainRes.json();
           if(chainData.status!=='success'||!Array.isArray(chainData.data))continue;
 
@@ -2233,26 +2242,36 @@ function ClosedSummary({closed,commPerSide}){
 
 /* ══ 登录页 ══════════════════════════════════════ */
 const LOGIN_KEY='opt-session';
-const ACCESS_PWD=localStorage.getItem('whl-cloud-pwd')||'123456';
+// 不再在前端保存/比较密码明文——登录时直接拿输入的密码去问后端
+// （/api/health 会做真正的密码校验），验证通过才放行，并复用为云端同步密码。
 
 function LoginScreen({onLogin}){
   const [pwd,setPwd]=useState('');
   const [error,setError]=useState('');
   const [loading,setLoading]=useState(false);
 
-  const handleLogin=()=>{
-    if(!pwd.trim()){setError('请输入密码');return;}
+  const handleLogin=async()=>{
+    const p=pwd.trim();
+    if(!p){setError('请输入密码');return;}
     setLoading(true);setError('');
-    // 模拟终端连接动画
-    setTimeout(()=>{
-      if(pwd.trim()===ACCESS_PWD){
+    try{
+      const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
+      const res=await fetch(`${proxyBase}/api/health`,{
+        headers:{Authorization:`Bearer ${p}`},
+        signal:AbortSignal.timeout(10000),
+      });
+      if(res.ok){
+        localStorage.setItem('whl-cloud-pwd',p);
         sessionStorage.setItem(LOGIN_KEY,'1');
         onLogin();
       }else{
         setError('ACCESS DENIED · 密码错误');
-        setLoading(false);
       }
-    },800);
+    }catch(e){
+      setError('无法连接服务器，请检查网络后重试');
+    }finally{
+      setLoading(false);
+    }
   };
 
   return(
@@ -2300,7 +2319,7 @@ function App(){
   const [finnhubKey,setFinnhubKey]=useState(()=>localStorage.getItem(SK.FH_KEY)||'');
   // 云端同步（已内置默认配置）
   const [cloudUrl,setCloudUrl]=useState(()=>localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL);
-  const [cloudPwd,setCloudPwd]=useState(()=>localStorage.getItem('whl-cloud-pwd')||DEFAULT_CLOUD_PWD);
+  const [cloudPwd,setCloudPwd]=useState(()=>localStorage.getItem('whl-cloud-pwd')||'');
   const [cloudStatus,setCloudStatus]=useState('idle');
   const cloudLoaded=React.useRef(false); // 防止初始化期间空数据覆盖云端 // idle | syncing | ok | err
   const [showCloudModal,setShowCloudModal]=useState(false);
