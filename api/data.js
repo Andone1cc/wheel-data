@@ -21,18 +21,38 @@ async function redisSet(url, token, key, valueStr) {
   return res.ok;
 }
 
+// 常数时间字符串比较，防止密码校验被时序攻击猜出内容
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return require('crypto').timingSafeEqual(bufA, bufB);
+}
+
 module.exports = async function handler(req, res) {
   Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v));
   if (req.method === 'OPTIONS') return res.status(204).end();
 
   const reqUrl = req.url || '';
+  // 统一在最上面解析一次密码，后面所有需要鉴权的分支都用它
+  const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
+  const passwordOk = !!process.env.ACCESS_PASSWORD && safeEqual(token, process.env.ACCESS_PASSWORD);
 
   // ══════════════════════════════════════════════════
-  // 富途 OpenD API 代理（隐藏服务器 IP）
+  // 富途 OpenD API 代理（需密码 —— 这条链路能直接访问你的
+  // 真实交易网关，不鉴权=任何人都能读写你的行情/仓位接口）
   // /api/futu/* → 转发到富途服务器
   // ══════════════════════════════════════════════════
   if (reqUrl.startsWith('/api/futu/')) {
-    const FUTU_BASE = process.env.FUTU_API_URL || 'http://43.153.137.19:8000';
+    if (!passwordOk) {
+      return res.status(401).json({ error: '密码错误' });
+    }
+    const FUTU_BASE = process.env.FUTU_API_URL;
+    if (!FUTU_BASE) {
+      // 不再内置任何默认地址，必须在 Vercel 环境变量里配置真实网关地址
+      return res.status(500).json({ error: 'FUTU_API_URL 未配置' });
+    }
     // /api/futu/watchlist → /api/watchlist
     // /api/futu/option-chain?code=US.IBIT&... → /api/option-chain?code=US.IBIT&...
     const futuPath = reqUrl.replace('/api/futu', '/api');
@@ -97,8 +117,7 @@ module.exports = async function handler(req, res) {
   // ══════════════════════════════════════════════════
   // 云端数据同步（需密码）
   // ══════════════════════════════════════════════════
-  const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
-  if (token !== process.env.ACCESS_PASSWORD) {
+  if (!passwordOk) {
     return res.status(401).json({ error: '密码错误' });
   }
 
