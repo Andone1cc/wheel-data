@@ -1,9 +1,12 @@
 {
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
   "rewrites": [
     { "source": "/api/health",          "destination": "/api/data" },
     { "source": "/api/cboe/:ticker",    "destination": "/api/data" },
     { "source": "/api/quote/:ticker",   "destination": "/api/data" },
-    { "source": "/api/futu/:path*",     "destination": "/api/data" }
+    { "source": "/api/futu/:path*",     "destination": "/api/data" },
+    { "source": "/(.*)",                "destination": "/index.html" }
   ],
   "headers": [
     {
@@ -11,7 +14,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.tailwindcss.com https://fonts.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https: http:; img-src 'self' data: https:;"
+          "value": "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https: http:; img-src 'self' data: https:;"
         }
       ]
     }
