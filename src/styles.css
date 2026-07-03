@@ -146,7 +146,7 @@ select{-webkit-appearance:none;appearance:none}
 /* ── 仓位列表区域移动端可横滑 ── */
 .pos-list{overflow-x:auto;-webkit-overflow-scrolling:touch}
 @media(max-width:768px){
-  .pos-list{margin:0 -12px;padding:0 12px}
+  .pos-list{margin:0 -10px;padding:0 10px;overflow-x:visible}
 }
 .layout{display:flex;min-height:100vh}
 .sidebar{
@@ -175,6 +175,7 @@ select{-webkit-appearance:none;appearance:none}
 /* ── 移动端响应式 ── */
 @media(max-width:768px){
   :root{--sidebar-w:0px}
+  html,body{overflow-x:hidden}
 
   /* ─ 底部 Tab 导航 ─ */
   .sidebar{
@@ -259,6 +260,122 @@ select{-webkit-appearance:none;appearance:none}
   .summary-main{font-size:25px !important;line-height:.95 !important}
   .summary-badge{font-size:10px !important;padding:2px 7px !important}
   .summary-metric-sub{font-size:10px !important;line-height:1.35 !important}
+
+  /* ─ 通用移动端表单/卡片 ─ */
+  .mobile-form-card{padding:14px !important;margin-bottom:10px !important;border-radius:12px !important}
+  .mobile-form-grid,
+  .sgov-form-grid,
+  .scan-controls{
+    grid-template-columns:1fr 1fr !important;
+    gap:9px !important;
+  }
+  .mobile-form-grid > *,
+  .sgov-form-grid > *,
+  .scan-controls > *{min-width:0}
+  .mobile-form-card .btn{flex:1;justify-content:center}
+  .sgov-panel{padding:14px !important;border-radius:12px !important}
+  .sgov-panel > div:first-child{flex-wrap:wrap;gap:7px !important;margin-bottom:10px !important}
+  .sgov-stat-grid{grid-template-columns:1fr 1fr !important;gap:9px !important}
+
+  /* ─ 观察列表：表格改卡片，不横滑 ─ */
+  .watch-table,
+  .scan-table{overflow-x:visible !important}
+  .watch-header,
+  .scan-header,
+  .stock-table-header,
+  .closed-table-header{display:none !important}
+  .watch-row{
+    display:grid !important;
+    grid-template-columns:1.05fr .95fr !important;
+    gap:4px 8px !important;
+    padding:9px 10px !important;
+    margin-bottom:8px !important;
+    border-radius:11px !important;
+    position:relative;
+  }
+  .watch-row > div{padding:1px 2px !important;min-width:0}
+  .watch-row > div:nth-child(1){grid-column:1;grid-row:1}
+  .watch-row > div:nth-child(2){grid-column:2;grid-row:1;justify-content:flex-end;text-align:right}
+  .watch-row > div:nth-child(3),
+  .watch-row > div:nth-child(7){display:none !important}
+  .watch-row > div:nth-child(4){grid-column:1;grid-row:2}
+  .watch-row > div:nth-child(5){grid-column:2;grid-row:2;text-align:right}
+  .watch-row > div:nth-child(6){grid-column:1;grid-row:3}
+  .watch-row > div:nth-child(8){grid-column:2;grid-row:3;text-align:right}
+  .watch-row > div:nth-child(9){grid-column:1 / span 2;grid-row:4;padding-top:3px !important}
+  .watch-row > div:nth-child(10){position:absolute;right:6px;top:5px;padding:0 !important}
+
+  /* ─ 筛选结果：宽表格改双列卡片 ─ */
+  .scan-row{
+    display:grid !important;
+    grid-template-columns:1fr 1fr !important;
+    gap:5px 8px !important;
+    min-width:0 !important;
+    padding:10px !important;
+    margin-bottom:8px !important;
+    border-radius:11px !important;
+  }
+  .scan-row > div{padding:1px 2px !important;min-width:0}
+  .scan-row > div:nth-child(1){grid-column:1;grid-row:1}
+  .scan-row > div:nth-child(2){grid-column:2;grid-row:1;text-align:right;align-items:flex-end}
+  .scan-row > div:nth-child(3){grid-column:1;grid-row:2}
+  .scan-row > div:nth-child(4){grid-column:2;grid-row:2;justify-content:flex-end}
+  .scan-row > div:nth-child(5),
+  .scan-row > div:nth-child(6),
+  .scan-row > div:nth-child(8){display:none !important}
+  .scan-row > div:nth-child(7){grid-column:1;grid-row:3}
+  .scan-row > div:nth-child(9){grid-column:2;grid-row:3;justify-content:flex-end}
+  .scan-row > div:nth-child(10){grid-column:1 / span 2;grid-row:4}
+
+  /* ─ 股票/已平仓：历史表格改卡片 ─ */
+  .stock-row-inner,
+  .closed-row-inner{
+    display:grid !important;
+    grid-template-columns:3px 1fr auto !important;
+    gap:0 8px !important;
+    min-height:0 !important;
+    padding:9px 4px !important;
+  }
+  .stock-row-inner > div,
+  .closed-row-inner > div{min-width:0}
+  .stock-row-inner > div:first-child,
+  .closed-row-inner > div:first-child{grid-row:1 / span 4;height:100% !important}
+  .stock-row-inner > div:nth-child(2),
+  .closed-row-inner > div:nth-child(2){grid-column:2;grid-row:1;padding:0 8px !important}
+  .stock-row-inner > div:nth-child(3),
+  .closed-row-inner > div:nth-child(3){grid-column:2;grid-row:2;padding:0 8px !important}
+  .stock-row-inner > div:nth-child(4),
+  .closed-row-inner > div:nth-child(4){display:none !important}
+  .stock-row-inner > div:nth-child(5){grid-column:2;grid-row:3;padding:3px 8px 0 !important}
+  .stock-row-inner > div:nth-child(6),
+  .closed-row-inner > div:nth-child(7){grid-column:3;grid-row:1;align-items:flex-end !important;padding:0 8px 0 0 !important}
+  .stock-row-inner > div:nth-child(7),
+  .closed-row-inner > div:nth-child(8){grid-column:3;grid-row:2;align-items:flex-end !important;padding:0 8px 0 0 !important}
+  .stock-row-inner > div:nth-child(8),
+  .closed-row-inner > div:nth-child(9){grid-column:3;grid-row:3;justify-content:flex-end !important}
+  .closed-row-inner > div:nth-child(5){grid-column:2;grid-row:3;padding:3px 8px 0 !important}
+  .closed-row-inner > div:nth-child(6){grid-column:2 / span 2;grid-row:4;padding:5px 8px 0 !important}
+
+  /* ─ 详情抽屉和学习页：避免内部横向滚动 ─ */
+  .detail-drawer{padding:14px !important}
+  .detail-stat-grid{grid-template-columns:1fr 1fr !important;gap:9px !important}
+  .detail-scenario-grid{grid-template-columns:1fr !important;gap:9px !important}
+  .lp{font-size:14px}
+  .lp .nav-pills{overflow-x:visible;flex-wrap:wrap}
+  .lp .nav-pill{flex:1 1 calc(50% - 6px);justify-content:center;text-align:center}
+  .lp .gk .calc,
+  .lp .eq{overflow-x:visible;padding:12px !important}
+  .lp .eq .flow{flex-wrap:wrap}
+  .lp .scen .row{grid-template-columns:1fr !important}
+
+  @media(max-width:380px){
+    .mobile-form-grid,
+    .sgov-form-grid,
+    .scan-controls,
+    .sgov-stat-grid,
+    .detail-stat-grid{grid-template-columns:1fr !important}
+    .summary-grid{grid-template-columns:1fr !important}
+  }
 
   /* ─ 仓位行：移动端卡片布局 ─ */
   .pos-table-header{display:none !important}
