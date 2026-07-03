@@ -1392,24 +1392,24 @@ function SummaryBar({positions,commPerSide,sgov}){
     return calcAnnual(totalNet,sgovMV,wDays);
   })():null;
   const Box=({label,value,color,sub,hl,sz=22})=>(
-    <div style={{display:'flex',flexDirection:'column',gap:5,padding:'10px 14px',borderRadius:12,background:'rgba(28,44,58,.2)',...(hl?{borderLeft:'2px solid '+hl,paddingLeft:12}:{})}}>
+    <div className="summary-box" style={{display:'flex',flexDirection:'column',gap:5,padding:'10px 14px',borderRadius:12,background:'rgba(28,44,58,.2)',...(hl?{borderLeft:'2px solid '+hl,paddingLeft:12}:{})}}>
       <span style={{fontSize:11,color:V('faint'),letterSpacing:'.14em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace'}}>{label}</span>
       <span className="summary-box-val" style={{fontSize:sz,fontWeight:700,color:color||V('ink'),fontFamily:'IBM Plex Mono,monospace',lineHeight:1,letterSpacing:'-.02em'}}>{value}</span>
       {sub&&<span className="summary-box-sub" style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>{sub}</span>}
     </div>
   );
   const BigA=({label,main,mainColor,vs,sub})=>(
-    <div style={{display:'flex',flexDirection:'column',gap:6}}>
+    <div className="summary-metric" style={{display:'flex',flexDirection:'column',gap:6}}>
       <span className="section-label">{label}</span>
       <div style={{display:'flex',alignItems:'baseline',gap:8,flexWrap:'wrap'}}>
-        <span style={{fontSize:28,fontWeight:700,letterSpacing:'-.03em',color:mainColor,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{main}</span>
-        {vs!=null&&<span className="badge" style={{color:ACC.purple,background:ACC.purpleBg,borderColor:`${ACC.purple}44`,fontSize:13}}>{fmtA(vs)} /SGOV</span>}
+        <span className="summary-main" style={{fontSize:28,fontWeight:700,letterSpacing:'-.03em',color:mainColor,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{main}</span>
+        {vs!=null&&<span className="badge summary-badge" style={{color:ACC.purple,background:ACC.purpleBg,borderColor:`${ACC.purple}44`,fontSize:13}}>{fmtA(vs)} /SGOV</span>}
       </div>
-      {sub&&<span style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>{sub}</span>}
+      {sub&&<span className="summary-metric-sub" style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>{sub}</span>}
     </div>
   );
   return(
-    <div className="glass-card anim-in" style={{padding:'18px 22px',marginBottom:16}}>
+    <div className="glass-card summary-card anim-in" style={{padding:'18px 22px',marginBottom:16}}>
       <div className="summary-grid" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:14,marginBottom:14,paddingBottom:14,borderBottom:`1px solid ${V('line')}`}}>
         <Box label="期权总保证金" value={`$${fmt(totalMargin,0)}`} color={V('dim')} sub={`${positions.length} 个仓位`}/>
         <Box label="收入权利金" value={`$${fmt(totalGross)}`} color={ACC.amber} sub="开仓时收取的总权利金"/>
@@ -1422,13 +1422,13 @@ function SummaryBar({positions,commPerSide,sgov}){
         {avgNow!=null&&<BigA label="现在卖出年化" main={fmtA(avgNow)} mainColor={ACC.blue} vs={nowVsSgov} sub={nowVsSgov?`对保证金 ${fmtA(avgNow)} · 对SGOV ${fmtA(nowVsSgov)}`:'录入期权现价后计算'}/>}
         {avgExp!=null&&<BigA label="持到到期年化" main={fmtA(avgExp)} mainColor={ACC.amber} vs={expVsSgov} sub={expVsSgov?`对保证金 ${fmtA(avgExp)} · 对SGOV ${fmtA(expVsSgov)}`:'录入SGOV市值后计算'}/>}
         {si&&sgovMV&&(
-          <div style={{display:'flex',flexDirection:'column',gap:6}}>
+          <div className="summary-metric" style={{display:'flex',flexDirection:'column',gap:6}}>
             <span className="section-label">SGOV 利息</span>
             <div style={{display:'flex',alignItems:'baseline',gap:8}}>
-              <span style={{fontSize:28,fontWeight:700,letterSpacing:'-.03em',color:ACC.teal,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtA(si.rate)}</span>
+              <span className="summary-main" style={{fontSize:28,fontWeight:700,letterSpacing:'-.03em',color:ACC.teal,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtA(si.rate)}</span>
               <span style={{fontSize:13,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>年化</span>
             </div>
-            <span style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>累计 {fmtM(si.total)} · {si.days} 天</span>
+            <span className="summary-metric-sub" style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>累计 {fmtM(si.total)} · {si.days} 天</span>
           </div>
         )}
       </div>
@@ -2152,8 +2152,8 @@ cloudLoaded.current=true;
 
       {/* ── Header ── */}
       <div className="app-header" style={{borderBottom:`1px solid ${V('line')}`,background:V('surface'),backdropFilter:'blur(14px)',position:'sticky',top:0,zIndex:50,boxShadow:V('shadow'),height:56,display:'flex',alignItems:'center'}}>
-        <div style={{maxWidth:'100%',width:'100%',padding:'0 16px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,flexWrap:'wrap'}}>
-          <div style={{display:'flex',alignItems:'center',gap:10}}>
+        <div className="app-header-inner" style={{maxWidth:'100%',width:'100%',padding:'0 16px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,flexWrap:'wrap'}}>
+          <div className="app-brand" style={{display:'flex',alignItems:'center',gap:10}}>
             <svg width="28" height="28" viewBox="0 0 28 28" fill="none" style={{flexShrink:0}}>
               <rect x="2" y="2" width="24" height="24" rx="7" fill="none" stroke="#f5b731" strokeWidth="1.5" opacity=".3"/>
               <rect x="5" y="5" width="18" height="18" rx="4" fill="rgba(245,183,49,.08)"/>
@@ -2207,42 +2207,42 @@ cloudLoaded.current=true;
           <div className="sidebar-section">仓位</div>
           <button className={`tab-btn${tab==='active'?' active':''}`} onClick={()=>setTab('active')}>
             <span className="tab-dot" style={{background:ACC.profit}}/>
-            活跃期权
+            <span className="tab-label tab-label-full">活跃期权</span><span className="tab-label tab-label-short">活跃</span>
             <span className="tab-count">{positions.length}</span>
           </button>
           <button className={`tab-btn${tab==='stocks'?' active':''}`} onClick={()=>setTab('stocks')}>
             <span className="tab-dot" style={{background:ACC.blue}}/>
-            股票持仓
+            <span className="tab-label tab-label-full">股票持仓</span><span className="tab-label tab-label-short">股票</span>
             <span className="tab-count">{stocks.length}</span>
           </button>
           <button className={`tab-btn${tab==='closed'?' active':''}`} onClick={()=>setTab('closed')}>
             <span className="tab-dot" style={{background:V('faint')}}/>
-            已平仓
+            <span className="tab-label tab-label-full">已平仓</span><span className="tab-label tab-label-short">平仓</span>
             <span className="tab-count">{closed.length}</span>
           </button>
           <div className="sidebar-sep"/>
           <div className="sidebar-section">底仓</div>
           <button className={`tab-btn${tab==='sgov'?' active':''}`} onClick={()=>setTab('sgov')}>
             <span className="tab-dot" style={{background:ACC.teal}}/>
-            SGOV
+            <span className="tab-label">SGOV</span>
           </button>
           <div className="sidebar-sep"/>
           <div className="sidebar-section">工具</div>
           <button className={`tab-btn${tab==='watchlist'?' active':''}`} onClick={()=>setTab('watchlist')}>
             <span className="tab-dot" style={{background:ACC.blue}}/>
-            观察列表
+            <span className="tab-label tab-label-full">观察列表</span><span className="tab-label tab-label-short">观察</span>
           </button>
           <button className={`tab-btn${tab==='scan'?' active':''}`} onClick={()=>setTab('scan')}>
             <span className="tab-dot" style={{background:ACC.amber}}/>
-            期权筛选
+            <span className="tab-label tab-label-full">期权筛选</span><span className="tab-label tab-label-short">筛选</span>
           </button>
           <button className={`tab-btn${tab==='finews'?' active':''}`} onClick={()=>setTab('finews')}>
             <span className="tab-dot" style={{background:ACC.teal}}/>
-            美股日报
+            <span className="tab-label tab-label-full">美股日报</span><span className="tab-label tab-label-short">日报</span>
           </button>
           <button className={`tab-btn${tab==='learn'?' active':''}`} onClick={()=>setTab('learn')}>
             <span className="tab-dot" style={{background:ACC.purple}}/>
-            期权学习
+            <span className="tab-label tab-label-full">期权学习</span><span className="tab-label tab-label-short">学习</span>
           </button>
         </div>
 
