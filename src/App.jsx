@@ -887,8 +887,8 @@ function WatchlistPanel(){
       </div>
 
       {tickers.length>0&&(
-        <div style={{overflowX:'auto'}}>
-          <div style={{display:'grid',gridTemplateColumns:'1.1fr 0.8fr 0.7fr 0.6fr 0.9fr 0.7fr 0.9fr 0.7fr 0.7fr 0.3fr',gap:0,padding:'0 0 8px',marginBottom:4}}>
+        <div className="watch-table" style={{overflowX:'auto'}}>
+          <div className="watch-header" style={{display:'grid',gridTemplateColumns:'1.1fr 0.8fr 0.7fr 0.6fr 0.9fr 0.7fr 0.9fr 0.7fr 0.7fr 0.3fr',gap:0,padding:'0 0 8px',marginBottom:4}}>
             {['标的','股价','IV30','IVR','到期/DTE','行权价','Bid/Ask','中间价','年化',''].map(h=>(
               <div key={h} style={{fontSize:10,color:V('faint'),letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',padding:'0 10px'}}>{h}</div>
             ))}
@@ -900,7 +900,7 @@ function WatchlistPanel(){
             const rankVal=d.ivRank!=null?d.ivRank:null;
             const rankColor=rankVal==null?V('faint'):(rankVal>=70?ACC.profit:(rankVal>=40?ACC.amber:V('dim')));
             return(
-              <div key={t} className="card" style={{display:'grid',gridTemplateColumns:'1.1fr 0.8fr 0.7fr 0.6fr 0.9fr 0.7fr 0.9fr 0.7fr 0.7fr 0.3fr',gap:0,marginBottom:6,borderLeft:'3px solid '+rankColor}}>
+              <div key={t} className="card watch-row" style={{display:'grid',gridTemplateColumns:'1.1fr 0.8fr 0.7fr 0.6fr 0.9fr 0.7fr 0.9fr 0.7fr 0.7fr 0.3fr',gap:0,marginBottom:6,borderLeft:'3px solid '+rankColor}}>
                 <div style={Object.assign({},cellStyle,{display:'flex',alignItems:'center',gap:10})}>
                   <span style={{fontWeight:700,fontSize:15,color:V('ink')}}>{display}</span>
                 </div>
@@ -1112,7 +1112,7 @@ function ScanPanel(){
         </button>
       </div>
 
-      <div className="card" style={{padding:'14px 18px',marginBottom:14,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:12}}>
+      <div className="card scan-controls" style={{padding:'14px 18px',marginBottom:14,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:12}}>
         <div>
           <div style={labelStyle}>{'到期天数'}</div>
           <div style={{display:'flex',gap:6,alignItems:'center'}}>
@@ -1163,8 +1163,8 @@ function ScanPanel(){
       )}
 
       {filtered.length>0&&(
-        <div style={{overflowX:'auto'}}>
-          <div style={{display:'grid',gridTemplateColumns:'1.2fr 1fr 0.7fr 0.7fr 0.7fr 0.7fr 0.8fr 0.7fr 0.8fr 0.7fr',gap:0,padding:'0 0 8px',marginBottom:4,minWidth:680}}>
+        <div className="scan-table" style={{overflowX:'auto'}}>
+          <div className="scan-header" style={{display:'grid',gridTemplateColumns:'1.2fr 1fr 0.7fr 0.7fr 0.7fr 0.7fr 0.8fr 0.7fr 0.8fr 0.7fr',gap:0,padding:'0 0 8px',marginBottom:4,minWidth:680}}>
             {['标的','行权价','DTE','Delta','Bid','Ask','中间价','IV','年化','胜率'].map(h=>(
               <div key={h} style={{fontSize:10,color:V('faint'),letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',padding:'0 6px'}}>{h}</div>
             ))}
@@ -1177,7 +1177,7 @@ function ScanPanel(){
             const rowStyle={display:'grid',gridTemplateColumns:'1.2fr 1fr 0.7fr 0.7fr 0.7fr 0.7fr 0.8fr 0.7fr 0.8fr 0.7fr',gap:0,padding:'10px 0',marginBottom:6,borderLeft:'3px solid '+rowBorderColor};
             const cc={padding:'0 6px',display:'flex',alignItems:'center'};
             return(
-              <div key={i} className="card" style={rowStyle}>
+              <div key={i} className="card scan-row" style={rowStyle}>
                 <div style={{padding:'0 6px'}}>
                   <div style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:14,color:V('ink')}}>{r.ticker}</div>
                   {r.stockIV!=null&&<div style={{fontSize:10,color:V('faint'),marginTop:1}}>{'IV '+r.stockIV.toFixed(1)+'%'}</div>}
@@ -1322,20 +1322,20 @@ function SgovPanel({sgov,onUpdate,totalMarginUsed}){
   const si=calcSgov(s);
   const sgovVsMargin=(si?.total&&totalMarginUsed>0)?calcAnnual(si.total,totalMarginUsed,si.days):null;
   return(
-    <div className="glass-card anim-in" style={{borderColor:`rgba(45,212,191,.25)`,padding:'16px 20px',marginBottom:16}}>
+    <div className="glass-card sgov-panel anim-in" style={{borderColor:`rgba(45,212,191,.25)`,padding:'16px 20px',marginBottom:16}}>
       <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
         <div style={{width:3,height:16,borderRadius:2,background:ACC.teal,flexShrink:0}}/>
         <span style={{fontWeight:700,fontSize:14,color:ACC.teal}}>SGOV 保证金底仓</span>
         <span style={{fontSize:11,color:V('faint'),fontFamily:'IBM Plex Mono,monospace'}}>嘉信杠杆 · 利息来源</span>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'1.6fr 1fr .9fr 1.1fr',gap:12,marginBottom:si?14:0}}>
+      <div className="sgov-form-grid" style={{display:'grid',gridTemplateColumns:'1.6fr 1fr .9fr 1.1fr',gap:12,marginBottom:si?14:0}}>
         <NumField label="当前市值" prefix="$" value={s.marketValue??''} placeholder="100000" onChange={v=>onUpdate({...s,marketValue:parseFloat(v)||null})}/>
         <DateField label="计息起始日" value={s.startDate??''} onChange={v=>onUpdate({...s,startDate:v})}/>
         <NumField label="年化利率" hint="默认4%" suffix="%" value={s.annualRate??''} placeholder="4.0" onChange={v=>onUpdate({...s,annualRate:parseFloat(v)||null})}/>
         <NumField label="手动修正" hint="可±" prefix="$" value={s.manualAdj??''} placeholder="0" onChange={v=>onUpdate({...s,manualAdj:parseFloat(v)||null})}/>
       </div>
       {si&&(
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))',gap:14,paddingTop:12,borderTop:`1px solid ${V('line')}`}}>
+        <div className="sgov-stat-grid" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))',gap:14,paddingTop:12,borderTop:`1px solid ${V('line')}`}}>
           <Stat label="SGOV 市值" value={`$${fmt(s.marketValue,0)}`} color={ACC.teal}/>
           <Stat label={`累计利息·${si.days}天`} value={fmtM(si.total)} color={ACC.profit} sub={`自动 $${fmt(si.autoInt)}${s.manualAdj?` + 修正 $${fmt(s.manualAdj)}`:''}`}/>
           <Stat label="SGOV 年化" value={fmtA(si.rate)} color={ACC.teal}/>
@@ -1452,20 +1452,20 @@ function AddForm({onAdd,onCancel,commPerSide}){
       customMargin:parseFloat(f.customMargin)||0,currentPrice:null,optionPrice:null});
   };
   return(
-    <div className="card anim-in" style={{padding:22,marginBottom:16,borderColor:`${ACC.amber}33`}}>
+    <div className="card mobile-form-card anim-in" style={{padding:22,marginBottom:16,borderColor:`${ACC.amber}33`}}>
       <div style={{fontSize:13,fontWeight:700,color:ACC.amber,marginBottom:18}}>＋ 添加期权仓位</div>
-      <div style={{display:'grid',gridTemplateColumns:'2fr 110px 1fr 80px',gap:12,marginBottom:12}}>
+      <div className="mobile-form-grid" style={{display:'grid',gridTemplateColumns:'2fr 110px 1fr 80px',gap:12,marginBottom:12}}>
         <Field label="标的代码" value={f.ticker} onChange={v=>set('ticker',v.toUpperCase())} placeholder="MRVL"/>
         <SelectField label="方向" value={f.type} onChange={v=>set('type',v)} options={[{value:'P',label:'卖 Put'},{value:'C',label:'卖 Call'}]}/>
         <NumField label="行权价" prefix="$" value={f.strike} onChange={v=>set('strike',v)} placeholder="190"/>
         <NumField label="手数" value={f.qty} onChange={v=>set('qty',v)} placeholder="1" suffix="手"/>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12}}>
+      <div className="mobile-form-grid" style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12}}>
         <DateField label="开仓日期" value={f.openDate} onChange={v=>set('openDate',v)}/>
         <DateField label="到期日期" value={f.expDate} onChange={v=>set('expDate',v)}/>
         <NumField label="开仓权利金" prefix="$" suffix="/股" value={f.premium} onChange={v=>set('premium',v)} placeholder="3.24"/>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
+      <div className="mobile-form-grid" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
         <SelectField label="保证金类型" value={f.marginType} onChange={v=>set('marginType',v)}
           options={[{value:'cash',label:'现金担保（行权价×100）'},{value:'custom',label:'自定义（券商实际占用）'}]}/>
         {f.marginType==='custom'
@@ -1487,7 +1487,7 @@ function AddForm({onAdd,onCancel,commPerSide}){
 /* ══ 详情抽屉 ══════════════════════════════════════ */
 function DetailDrawer({p,r,commPerSide,onUpdateOptionPrice,onClose,onDelete,onRoll}){
   return(
-    <div className="anim-fade" style={{borderTop:`1px solid ${V('line')}`,background:V('surface'),borderRadius:'0 0 14px 14px',padding:'18px 20px'}}>
+    <div className="detail-drawer anim-fade" style={{borderTop:`1px solid ${V('line')}`,background:V('surface'),borderRadius:'0 0 14px 14px',padding:'18px 20px'}}>
       <div style={{marginBottom:16}}>
         <div style={{display:'flex',justifyContent:'space-between',fontSize:10,color:V('dim'),marginBottom:5,fontFamily:'IBM Plex Mono,monospace'}}>
           <span>开仓 {p.openDate}</span>
@@ -1496,7 +1496,7 @@ function DetailDrawer({p,r,commPerSide,onUpdateOptionPrice,onClose,onDelete,onRo
         </div>
         <ThetaBar pct={r.thetaPct}/>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:12,marginBottom:16,paddingBottom:16,borderBottom:`1px solid ${V('line')}`}}>
+      <div className="detail-stat-grid" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:12,marginBottom:16,paddingBottom:16,borderBottom:`1px solid ${V('line')}`}}>
         <Stat label="开仓权利金" value={`$${fmt(r.openPrem)}`} sub={`$${fmt(p.premium)}/股×${r.qty}手`} color={ACC.amber}/>
         <Stat label="手续费双边" value={`-$${fmt(r.commTotal)}`} sub={`$${commPerSide}/张×${r.qty}×2`} color={ACC.loss}/>
         <Stat label="净权利金" value={`$${fmt(r.openPrem-r.commTotal)}`} color={ACC.profit}/>
@@ -1505,7 +1505,7 @@ function DetailDrawer({p,r,commPerSide,onUpdateOptionPrice,onClose,onDelete,onRo
         {r.capturedPct!=null&&<Stat label="权利金捕获" value={`${r.capturedPct.toFixed(1)}%`} color={r.capturedPct>=50?ACC.profit:ACC.amber}/>}
         {r.buffer!=null&&<Stat label={p.type==='P'?'价外缓冲':'价外距离'} value={`${r.buffer>0?'+':''}${r.buffer.toFixed(1)}%`} sub={`现价 $${fmt(p.currentPrice)}`} color={r.buffer>0?ACC.profit:ACC.loss}/>}
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
+      <div className="detail-scenario-grid" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
         <div className="card" style={{padding:14}}>
           <div style={{fontSize:10,color:ACC.blue,letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',marginBottom:10}}>场景 A · 现在卖出</div>
           {/* OCC 合约代码 + CBOE 查价链接 */}
@@ -1647,7 +1647,7 @@ function ClosedRow({c,commPerSide,onDelete}){
       :{color:ACC.blue,background:ACC.blueBg,borderColor:`${ACC.blue}44`};
   return(
     <div className="row-click" style={{borderBottom:'1px solid '+V('line'),overflow:'hidden'}}>
-      <div style={{display:'grid',gridTemplateColumns:'3px 110px 86px 96px 110px 1fr 120px 120px 36px',alignItems:'center',minHeight:52,padding:'4px 0'}}>
+      <div className="closed-row-inner" style={{display:'grid',gridTemplateColumns:'3px 110px 86px 96px 110px 1fr 120px 120px 36px',alignItems:'center',minHeight:52,padding:'4px 0'}}>
         <div style={{background:r.profit>=0?ACC.profit:ACC.loss,height:'100%',minHeight:46,borderRadius:2,opacity:.6}}/>
         <div style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:2}}>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:14,color:V('dim')}}>{c.ticker}</span>
@@ -1705,7 +1705,7 @@ function StockRow({s,onUpdatePrice,onDelete}){
   const daysHeld=s.acquireDate?Math.max(1,daysBetween(s.acquireDate,today())):null;
   return(
     <div className="row-click" style={{borderBottom:'1px solid '+V('line'),overflow:'hidden'}}>
-      <div style={{display:'grid',gridTemplateColumns:'3px 130px 120px 120px 1fr 130px 130px 36px',alignItems:'center',minHeight:54,padding:'4px 0'}}>
+      <div className="stock-row-inner" style={{display:'grid',gridTemplateColumns:'3px 130px 120px 120px 1fr 130px 130px 36px',alignItems:'center',minHeight:54,padding:'4px 0'}}>
         <div style={{background:unrealized==null?V('line'):(unrealized>=0?ACC.profit:ACC.loss),height:'100%',minHeight:48,borderRadius:2,opacity:.7}}/>
         <div style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:2}}>
           <span className="pos-ticker" style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:15,color:V('ink'),transition:'color .18s'}}>{s.ticker}</span>
@@ -1746,7 +1746,7 @@ function StockRow({s,onUpdatePrice,onDelete}){
 function StocksTableHeader(){
   const H=({t,right})=><div style={{fontSize:10,color:V('faint'),letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',textAlign:right?'right':'left',padding:'0 4px'}}>{t}</div>;
   return(
-    <div style={{display:'grid',gridTemplateColumns:'4px 130px 120px 120px 1fr 130px 130px 36px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
+    <div className="stock-table-header" style={{display:'grid',gridTemplateColumns:'4px 130px 120px 120px 1fr 130px 130px 36px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
       <div/><H t="标的"/><H t="持仓"/><H t="成本基础"/><H t="现价"/><H t="当前市值" right/><H t="浮动盈亏" right/><div/>
     </div>
   );
@@ -1788,9 +1788,9 @@ function AddStockForm({onAdd,onCancel}){
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
   const valid=f.ticker&&f.shares&&f.costPerShare;
   return(
-    <div className="card anim-in" style={{padding:20,marginBottom:14,borderColor:`${ACC.profit}33`}}>
+    <div className="card mobile-form-card anim-in" style={{padding:20,marginBottom:14,borderColor:`${ACC.profit}33`}}>
       <div style={{fontSize:13,fontWeight:700,color:ACC.profit,marginBottom:16}}>＋ 手动录入股票仓位</div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:12,marginBottom:14}}>
+      <div className="mobile-form-grid" style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:12,marginBottom:14}}>
         <Field label="标的代码" value={f.ticker} onChange={v=>set('ticker',v.toUpperCase())} placeholder="MRVL"/>
         <NumField label="持仓股数" value={f.shares} onChange={v=>set('shares',v)} placeholder="100" suffix="股"/>
         <NumField label="每股成本" prefix="$" value={f.costPerShare} onChange={v=>set('costPerShare',v)} placeholder="190.00"/>
@@ -1807,7 +1807,7 @@ function AddStockForm({onAdd,onCancel}){
 function ClosedTableHeader(){
   const H=({t,right})=><div style={{fontSize:10,color:V('faint'),letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',textAlign:right?'right':'left',padding:'0 4px'}}>{t}</div>;
   return(
-    <div style={{display:'grid',gridTemplateColumns:'4px 110px 86px 96px 100px 1fr 120px 120px 36px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
+    <div className="closed-table-header" style={{display:'grid',gridTemplateColumns:'4px 110px 86px 96px 100px 1fr 120px 120px 36px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
       <div/><H t="标的"/><H t="行权价"/><H t="开/平仓日"/><H t="方式"/><H t="收支明细"/><H t="净利润" right/><H t="实现年化" right/><div/>
     </div>
   );
