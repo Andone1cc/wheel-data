@@ -1752,6 +1752,9 @@ function ClosedRow({c,commPerSide,onDelete,positions=[],closed=[]}){
   const isExpired=c.closeType==='expired';
   const isAssigned=c.closeType==='assigned';
   const isRoll=c.closeType==='roll';
+  const isManual=!isRoll&&!isAssigned&&!isExpired;
+  const canEstimateHold=isManual&&c.expDate&&c.expDate>=today();
+  const [holdQuote,setHoldQuote]=useState({loading:false,data:null,error:false});
   const nextPos=positions.find(p=>p.rolledFrom===c.id);
   const nextClosed=closed.find(x=>x.rolledFrom===c.id);
   const rollTo={
@@ -1764,6 +1767,23 @@ function ClosedRow({c,commPerSide,onDelete,positions=[],closed=[]}){
     :nextPos
       ?calc(nextPos,commPerSide).profitNow??calc(nextPos,commPerSide).profitExp
       :null;
+  useEffect(()=>{
+    if(!canEstimateHold){
+      setHoldQuote({loading:false,data:null,error:false});
+      return;
+    }
+    let alive=true;
+    setHoldQuote({loading:true,data:null,error:false});
+    fetchOptionPriceCBOE(c.ticker,c.expDate,c.strike,c.type).then(data=>{
+      if(alive)setHoldQuote({loading:false,data,error:!data?.price});
+    }).catch(()=>{
+      if(alive)setHoldQuote({loading:false,data:null,error:true});
+    });
+    return()=>{alive=false;};
+  },[canEstimateHold,c.ticker,c.expDate,c.strike,c.type]);
+  const holdPrice=holdQuote.data?.price??null;
+  const holdBuyback=holdPrice!=null?holdPrice*100*r.qty:null;
+  const holdProfit=holdBuyback!=null?r.openPrem-holdBuyback-r.commUsed:null;
   const badgeStyle=isRoll
     ?{color:ACC.purple,background:ACC.purpleBg,borderColor:`${ACC.purple}44`}
     :isAssigned
@@ -1773,7 +1793,7 @@ function ClosedRow({c,commPerSide,onDelete,positions=[],closed=[]}){
       :{color:ACC.blue,background:ACC.blueBg,borderColor:`${ACC.blue}44`};
   return(
     <div className="row-click" style={{borderBottom:'1px solid '+V('line'),overflow:'hidden'}}>
-      <div className="closed-row-inner" style={{display:'grid',gridTemplateColumns:'3px 110px 86px 118px 132px 1fr 120px 120px 36px',alignItems:'center',minHeight:52,padding:'4px 0'}}>
+      <div className="closed-row-inner" style={{display:'grid',gridTemplateColumns:'3px 110px 86px 118px 132px 1fr 132px 120px 120px 36px',alignItems:'center',minHeight:52,padding:'4px 0'}}>
         <div style={{background:r.profit>=0?ACC.profit:ACC.loss,height:'100%',minHeight:46,borderRadius:2,opacity:.6}}/>
         <div style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:2}}>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:14,color:V('dim')}}>{c.ticker}</span>
@@ -1819,6 +1839,29 @@ function ClosedRow({c,commPerSide,onDelete,positions=[],closed=[]}){
             <div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:c.rollNetCredit>=0?ACC.profit:ACC.loss,letterSpacing:'.04em'}}>
               Roll 净收入 {fmtM(c.rollNetCredit)}
             </div>
+          )}
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-end',paddingRight:8}}>
+          {canEstimateHold?(
+            holdQuote.loading?(
+              <>
+                <span className="section-label">未平估算</span>
+                <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:12,color:V('faint')}}>拉取中...</span>
+              </>
+            ):holdProfit!=null?(
+              <>
+                <span className="section-label">未平估算</span>
+                <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('dim')}}>现权利金 ${fmt(holdPrice)}</span>
+                <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:15,fontWeight:700,color:holdProfit>=0?ACC.profit:ACC.loss}}>{fmtM(holdProfit)}</span>
+              </>
+            ):(
+              <>
+                <span className="section-label">未平估算</span>
+                <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:12,color:V('faint')}}>暂无报价</span>
+              </>
+            )
+          ):(
+            <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:12,color:V('faint')}}>—</span>
           )}
         </div>
         <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-end',paddingRight:8}}>
@@ -1949,8 +1992,8 @@ function AddStockForm({onAdd,onCancel}){
 function ClosedTableHeader(){
   const H=({t,right})=><div style={{fontSize:10,color:V('faint'),letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',textAlign:right?'right':'left',padding:'0 4px'}}>{t}</div>;
   return(
-    <div className="closed-table-header" style={{display:'grid',gridTemplateColumns:'4px 110px 86px 118px 132px 1fr 120px 120px 36px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
-      <div/><H t="标的"/><H t="行权价"/><H t="开/平仓日"/><H t="方式"/><H t="收支明细"/><H t="净利润" right/><H t="实现年化" right/><div/>
+    <div className="closed-table-header" style={{display:'grid',gridTemplateColumns:'4px 110px 86px 118px 132px 1fr 132px 120px 120px 36px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
+      <div/><H t="标的"/><H t="行权价"/><H t="开/平仓日"/><H t="方式"/><H t="收支明细"/><H t="未平估算" right/><H t="净利润" right/><H t="实现年化" right/><div/>
     </div>
   );
 }

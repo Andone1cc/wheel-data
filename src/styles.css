@@ -412,13 +412,14 @@ select{-webkit-appearance:none;appearance:none}
   .closed-row-inner > div:nth-child(4){display:none !important}
   .stock-row-inner > div:nth-child(5){grid-column:2;grid-row:3;padding:3px 8px 0 !important}
   .stock-row-inner > div:nth-child(6),
-  .closed-row-inner > div:nth-child(7){grid-column:3;grid-row:1;align-items:flex-end !important;padding:0 8px 0 0 !important}
+  .closed-row-inner > div:nth-child(8){grid-column:3;grid-row:1;align-items:flex-end !important;padding:0 8px 0 0 !important}
   .stock-row-inner > div:nth-child(7),
-  .closed-row-inner > div:nth-child(8){grid-column:3;grid-row:2;align-items:flex-end !important;padding:0 8px 0 0 !important}
+  .closed-row-inner > div:nth-child(9){grid-column:3;grid-row:2;align-items:flex-end !important;padding:0 8px 0 0 !important}
   .stock-row-inner > div:nth-child(8),
-  .closed-row-inner > div:nth-child(9){grid-column:3;grid-row:3;justify-content:flex-end !important}
+  .closed-row-inner > div:nth-child(10){grid-column:3;grid-row:3;justify-content:flex-end !important}
   .closed-row-inner > div:nth-child(5){grid-column:2;grid-row:3;padding:3px 8px 0 !important}
   .closed-row-inner > div:nth-child(6){grid-column:2 / span 2;grid-row:4;padding:5px 8px 0 !important}
+  .closed-row-inner > div:nth-child(7){grid-column:2 / span 2;grid-row:5;align-items:flex-start !important;padding:5px 8px 0 !important}
 
   /* ─ 详情抽屉和学习页：避免内部横向滚动 ─ */
   .detail-drawer{padding:14px !important}
