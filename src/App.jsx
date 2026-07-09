@@ -332,7 +332,7 @@ function calcClosed(c,comm=DEFAULT_COMM){
   const qty=c.qty||1;
   const openPrem=c.premium*100*qty;
   const capital=(c.marginType==='cash'?c.strike*100:(c.customMargin||0))*qty;
-  const closeType=c.closeType||'manual'; // 'manual'|'expired'
+  const closeType=c.closeType||'manual'; // manual | expired | assigned | roll
   const commUsed=closeType==='expired'?comm*qty:comm*qty*2;
   const closePrem=(c.closePrice||0)*100*qty;
   const profit=openPrem-closePrem-commUsed;
@@ -1745,20 +1745,35 @@ function ActiveTableHeader(){
 }
 
 /* ══ 已平仓历史行 ══════════════════════════════════════ */
-function ClosedRow({c,commPerSide,onDelete}){
+function ClosedRow({c,commPerSide,onDelete,positions=[],closed=[]}){
   const r=calcClosed(c,commPerSide);
   const isCall=c.type==='C';
   const typeColor=isCall?ACC.loss:ACC.profit;
   const isExpired=c.closeType==='expired';
   const isAssigned=c.closeType==='assigned';
-  const badgeStyle=isAssigned
+  const isRoll=c.closeType==='roll';
+  const nextPos=positions.find(p=>p.rolledFrom===c.id);
+  const nextClosed=closed.find(x=>x.rolledFrom===c.id);
+  const rollTo={
+    strike:c.rollToStrike??nextPos?.strike??nextClosed?.strike,
+    expiry:c.rollToExpiry??nextPos?.expDate??nextClosed?.expDate,
+    premium:c.rollToPremium??nextPos?.premium??nextClosed?.premium,
+  };
+  const nextProfit=nextClosed
+    ?calcClosed(nextClosed,commPerSide).profit
+    :nextPos
+      ?calc(nextPos,commPerSide).profitNow??calc(nextPos,commPerSide).profitExp
+      :null;
+  const badgeStyle=isRoll
+    ?{color:ACC.purple,background:ACC.purpleBg,borderColor:`${ACC.purple}44`}
+    :isAssigned
     ?{color:ACC.amber,background:ACC.amberSoft,borderColor:`${ACC.amber}44`}
     :isExpired
       ?{color:ACC.teal,background:ACC.tealBg,borderColor:`${ACC.teal}44`}
       :{color:ACC.blue,background:ACC.blueBg,borderColor:`${ACC.blue}44`};
   return(
     <div className="row-click" style={{borderBottom:'1px solid '+V('line'),overflow:'hidden'}}>
-      <div className="closed-row-inner" style={{display:'grid',gridTemplateColumns:'3px 110px 86px 96px 110px 1fr 120px 120px 36px',alignItems:'center',minHeight:52,padding:'4px 0'}}>
+      <div className="closed-row-inner" style={{display:'grid',gridTemplateColumns:'3px 110px 86px 118px 132px 1fr 120px 120px 36px',alignItems:'center',minHeight:52,padding:'4px 0'}}>
         <div style={{background:r.profit>=0?ACC.profit:ACC.loss,height:'100%',minHeight:46,borderRadius:2,opacity:.6}}/>
         <div style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:2}}>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:14,color:V('dim')}}>{c.ticker}</span>
@@ -1771,12 +1786,23 @@ function ClosedRow({c,commPerSide,onDelete}){
         <div>
           <div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('dim')}}>{c.openDate}</div>
           <div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('faint')}}>→ {c.closeDate}</div>
+          {c.expDate&&<div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint'),marginTop:2}}>原到期 {c.expDate}</div>}
         </div>
         <div style={{paddingRight:8}}>
           <span className="badge" style={badgeStyle}>
-            {isAssigned?'📦 接货':isExpired?'到期归零':'主动平仓'}
+            {isRoll?'↻ Roll':isAssigned?'📦 接货':isExpired?'到期归零':'主动平仓'}
           </span>
+          {!isRoll&&!isAssigned&&!isExpired&&c.expDate&&(
+            <div style={{fontSize:10,color:V('faint'),fontFamily:'IBM Plex Mono,monospace',marginTop:3}}>原到期 {c.expDate}</div>
+          )}
           {isAssigned&&<div style={{fontSize:10,color:V('faint'),fontFamily:'IBM Plex Mono,monospace',marginTop:3}}>{c.assignedShares}股 @ ${fmt(c.assignedCostPerShare)}</div>}
+          {isRoll&&(
+            <div style={{fontSize:10,color:V('faint'),fontFamily:'IBM Plex Mono,monospace',marginTop:3,lineHeight:1.45}}>
+              {rollTo.strike!=null&&<div>续仓 ${fmt(rollTo.strike,0)}{rollTo.expiry?` · ${rollTo.expiry}`:''}</div>}
+              {rollTo.premium!=null&&<div>新权利金 ${fmt(rollTo.premium)}</div>}
+              {nextProfit!=null&&<div style={{color:nextProfit>=0?ACC.profit:ACC.loss}}>后续利润 {fmtM(nextProfit)}</div>}
+            </div>
+          )}
         </div>
         <div style={{padding:'0 10px',display:'flex',flexDirection:'column',gap:3}}>
           <div style={{display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'}}>
@@ -1787,11 +1813,16 @@ function ClosedRow({c,commPerSide,onDelete}){
             <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.loss}}>{'$'+fmt(r.commUsed)}</span>
           </div>
           <div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint'),letterSpacing:'.04em'}}>
-            {isExpired?'权利金 − 手续费':(isAssigned?'权利金 − 接货 − 费用':'权利金 − 买回 − 费用')}
+            {isExpired?'权利金 − 手续费':(isAssigned?'权利金 − 接货 − 费用':(isRoll?'旧仓权利金 − 买回 − 费用':'权利金 − 买回 − 费用'))}
           </div>
+          {isRoll&&c.rollNetCredit!=null&&(
+            <div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:c.rollNetCredit>=0?ACC.profit:ACC.loss,letterSpacing:'.04em'}}>
+              Roll 净收入 {fmtM(c.rollNetCredit)}
+            </div>
+          )}
         </div>
         <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-end',paddingRight:8}}>
-          <span className="section-label">期权收益</span>
+          <span className="section-label">{isRoll?'旧仓收益':'期权收益'}</span>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:16,fontWeight:700,color:r.profit>=0?ACC.profit:ACC.loss}}>{fmtM(r.profit)}</span>
         </div>
         <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-end',paddingRight:8}}>
@@ -1918,7 +1949,7 @@ function AddStockForm({onAdd,onCancel}){
 function ClosedTableHeader(){
   const H=({t,right})=><div style={{fontSize:10,color:V('faint'),letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',textAlign:right?'right':'left',padding:'0 4px'}}>{t}</div>;
   return(
-    <div className="closed-table-header" style={{display:'grid',gridTemplateColumns:'4px 110px 86px 96px 100px 1fr 120px 120px 36px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
+    <div className="closed-table-header" style={{display:'grid',gridTemplateColumns:'4px 110px 86px 118px 132px 1fr 120px 120px 36px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
       <div/><H t="标的"/><H t="行权价"/><H t="开/平仓日"/><H t="方式"/><H t="收支明细"/><H t="净利润" right/><H t="实现年化" right/><div/>
     </div>
   );
@@ -2204,12 +2235,18 @@ cloudLoaded.current=true;
   };
   const confirmRoll=(pos,data)=>{
     const {buybackPrice,rollDate,newExpiry,newStrike,newPremium,netCredit,rollComm}=data;
+    const newId=Date.now();
     // 1. 关闭旧仓位（记录为 roll）
-    const closedRecord={...pos,closePrice:buybackPrice,closeDate:rollDate,closeType:'roll',closedAt:Date.now(),rollNetCredit:netCredit};
+    const closedRecord={
+      ...pos,
+      closePrice:buybackPrice,closeDate:rollDate,closeType:'roll',closedAt:Date.now(),
+      rollNetCredit:netCredit,rollComm,
+      rollToPositionId:newId,rollToExpiry:newExpiry,rollToStrike:newStrike,rollToPremium:newPremium,
+    };
     mutateClosed([closedRecord,...closed]);
     // 2. 创建新仓位
     const newPos={
-      id:Date.now(),ticker:pos.ticker,type:pos.type,strike:newStrike,qty:pos.qty||1,
+      id:newId,ticker:pos.ticker,type:pos.type,strike:newStrike,qty:pos.qty||1,
       openDate:rollDate,expDate:newExpiry,premium:newPremium,
       marginType:pos.marginType,customMargin:pos.customMargin||0,
       currentPrice:pos.currentPrice,optionPrice:null,
@@ -2400,7 +2437,7 @@ cloudLoaded.current=true;
                 </div>
               ):(<>
                 <ClosedTableHeader/>
-                {closed.map(c=><ClosedRow key={c.id} c={c} commPerSide={commPerSide} onDelete={()=>removeClosedRecord(c.id)}/>)}
+                {closed.map(c=><ClosedRow key={c.id} c={c} commPerSide={commPerSide} positions={positions} closed={closed} onDelete={()=>removeClosedRecord(c.id)}/>)}
               </>)}
             </>
           )}
