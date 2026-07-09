@@ -22,6 +22,7 @@ const calcAnnual=(profit,capital,days)=>{
 
 const DEFAULT_COMM=0.65;
 const SK={POS:'whl-pos-v2',CLOSED:'whl-closed-v1',STOCKS:'whl-stocks-v1',SGOV:'whl-sgov-v3',CFG:'whl-cfg-v2',KEY:'whl-api-key',FH_KEY:'whl-finnhub-key',THEME:'whl-theme'};
+const CLOSED_GRID='3px minmax(104px,.7fr) minmax(78px,.55fr) minmax(118px,.8fr) minmax(128px,.85fr) minmax(230px,1.35fr) minmax(148px,.95fr) minmax(112px,.75fr) minmax(112px,.75fr) 32px';
 
 /* ── 本地缓存（localStorage）：仅作本设备快速启动用，云端为主 ── */
 const ls=(k,fb=null)=>{try{const s=localStorage.getItem(k);return s?JSON.parse(s):fb}catch{return fb}};
@@ -1784,6 +1785,7 @@ function ClosedRow({c,commPerSide,onDelete,positions=[],closed=[]}){
   const holdPrice=holdQuote.data?.price??null;
   const holdBuyback=holdPrice!=null?holdPrice*100*r.qty:null;
   const holdProfit=holdBuyback!=null?r.openPrem-holdBuyback-r.commUsed:null;
+  const detailNet=isAssigned?r.openPrem-(c.assignedMarketValue||0)-r.commUsed:r.profit;
   const badgeStyle=isRoll
     ?{color:ACC.purple,background:ACC.purpleBg,borderColor:`${ACC.purple}44`}
     :isAssigned
@@ -1793,7 +1795,7 @@ function ClosedRow({c,commPerSide,onDelete,positions=[],closed=[]}){
       :{color:ACC.blue,background:ACC.blueBg,borderColor:`${ACC.blue}44`};
   return(
     <div className="row-click" style={{borderBottom:'1px solid '+V('line'),overflow:'hidden'}}>
-      <div className="closed-row-inner" style={{display:'grid',gridTemplateColumns:'3px 110px 86px 118px 132px 1fr 132px 120px 120px 36px',alignItems:'center',minHeight:52,padding:'4px 0'}}>
+      <div className="closed-row-inner" style={{display:'grid',gridTemplateColumns:CLOSED_GRID,alignItems:'center',minHeight:52,padding:'4px 0'}}>
         <div style={{background:r.profit>=0?ACC.profit:ACC.loss,height:'100%',minHeight:46,borderRadius:2,opacity:.6}}/>
         <div style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:2}}>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:14,color:V('dim')}}>{c.ticker}</span>
@@ -1834,6 +1836,9 @@ function ClosedRow({c,commPerSide,onDelete,positions=[],closed=[]}){
           </div>
           <div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint'),letterSpacing:'.04em'}}>
             {isExpired?'权利金 − 手续费':(isAssigned?'权利金 − 接货 − 费用':(isRoll?'旧仓权利金 − 买回 − 费用':'权利金 − 买回 − 费用'))}
+          </div>
+          <div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:detailNet>=0?ACC.profit:ACC.loss,letterSpacing:'.04em',fontWeight:700}}>
+            相减 = {fmtM(detailNet)}
           </div>
           {isRoll&&c.rollNetCredit!=null&&(
             <div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:c.rollNetCredit>=0?ACC.profit:ACC.loss,letterSpacing:'.04em'}}>
@@ -1992,7 +1997,7 @@ function AddStockForm({onAdd,onCancel}){
 function ClosedTableHeader(){
   const H=({t,right})=><div style={{fontSize:10,color:V('faint'),letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',textAlign:right?'right':'left',padding:'0 4px'}}>{t}</div>;
   return(
-    <div className="closed-table-header" style={{display:'grid',gridTemplateColumns:'4px 110px 86px 118px 132px 1fr 132px 120px 120px 36px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
+    <div className="closed-table-header" style={{display:'grid',gridTemplateColumns:CLOSED_GRID,alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
       <div/><H t="标的"/><H t="行权价"/><H t="开/平仓日"/><H t="方式"/><H t="收支明细"/><H t="未平估算" right/><H t="净利润" right/><H t="实现年化" right/><div/>
     </div>
   );
