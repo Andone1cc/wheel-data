@@ -235,6 +235,27 @@ async function fetchOptionPriceCBOE(ticker, expDate, strike, type){
   }
 }
 
+async function fetchOptionChainCBOE(ticker, signal){
+  const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
+  const res=await fetch(`${proxyBase}/api/cboe/${encodeURIComponent(ticker)}`,{signal});
+  if(!res.ok)throw new Error(`CBOE ${ticker} HTTP ${res.status}`);
+  const data=await res.json();
+  const dd=data?.data||{};
+  const options=Array.isArray(dd.options)?dd.options:[];
+  if(!options.length)throw new Error(`CBOE ${ticker} empty option chain`);
+  const n=v=>{const x=Number(v);return Number.isFinite(x)?x:null;};
+  const iv30=n(dd.iv30);
+  const hi=n(dd.iv30_one_year_high);
+  const lo=n(dd.iv30_one_year_low);
+  return{
+    options,
+    stockPrice:n(dd.current_price)||n(dd.close)||n(dd.prev_day_close),
+    stockIV:iv30,
+    stockHV:null,
+    ivRank:(iv30!=null&&hi!=null&&lo!=null&&hi>lo)?Math.round((iv30-lo)/(hi-lo)*100):null,
+  };
+}
+
 /* ═══════════════════════════════════════════════════
    期权现价 - 备用源1：Finnhub /quote（OCC合约代码）
 ═══════════════════════════════════════════════════ */
@@ -988,13 +1009,17 @@ function ScanPanel(){
   const [maxDelta,setMaxDelta]=useState('0.18');
   const [minAnnual,setMinAnnual]=useState('5');
 
-  const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
-
   const scan=async()=>{
     setLoading(true);setResults([]);setError('');
     const today=new Date();
     const found=[];
-    // 从富途获取观察列表
+    const n=v=>{const x=Number(v);return Number.isFinite(x)?x:null;};
+    const toPct=v=>{
+      const x=n(v);
+      if(x==null)return null;
+      return Math.abs(x)<=3?x*100:x;
+    };
+    // 优先从富途获取观察列表；失败时用本地观察列表，行情扫描走 CBOE 公开延迟数据
     let watchlist=[];
     try{
       const wlRes=await futuFetch('/api/futu/watchlist',{signal:AbortSignal.timeout(8000)});
@@ -1007,74 +1032,53 @@ function ScanPanel(){
 
     for(const code of watchlist){
       const display=code.replace(/^US\./,'').replace(/^HK\./,'');
-      setProgress('扫描 '+display+'…');
+      setProgress('扫描 '+display+' CBOE…');
       try{
-        // 1. 获取到期日列表
-        const daysRes=await futuFetch('/api/futu/option-days?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(10000)});
-        const daysData=await daysRes.json();
-        if(daysData.status!=='success'||!Array.isArray(daysData.data))continue;
+        const chain=await fetchOptionChainCBOE(display,AbortSignal.timeout(12000));
+        console.log(display+' CBOE Put/Call 数量:',chain.options.length);
 
-        console.log(display+' 到期日数量:',daysData.data.length,daysData.data.map(d=>d.strike_time).slice(0,5));
-        // 2. 筛选 DTE 在范围内的到期日
-        const validDates=daysData.data.filter(d=>{
-          const exp=new Date(d.strike_time);
+        for(const opt of chain.options){
+          const parsed=parseOCC(opt.option);
+          if(!parsed||parsed.type!=='put')continue;
+          const dateStr=parsed.expiry;
+          const exp=new Date(parsed.expiry);
           const dte=Math.round((exp-today)/86400000);
-          return dte>=Number(minDte)&&dte<=Number(maxDte);
-        });
-        if(!validDates.length)continue;
+          if(dte<Number(minDte)||dte>Number(maxDte))continue;
 
-        // 3. 获取正股摘要（IV/HV/IV Rank）
-        let stockSummary={};
-        try{
-          const sumRes=await futuFetch('/api/futu/stock-option-summary?code='+encodeURIComponent(code),{signal:AbortSignal.timeout(10000)});
-          const sumData=await sumRes.json();
-          if(sumData.status==='success')stockSummary=sumData.data||{};
-        }catch{}
+          const rawDelta=n(opt.delta);
+          if(rawDelta==null)continue;
+          const delta=Math.abs(rawDelta);
+          if(delta<Number(minDelta)||delta>Number(maxDelta))continue;
+          const bid=n(opt.bid)||0;
+          const ask=n(opt.ask)||0;
+          const last=n(opt.last_trade_price);
+          const mid=(bid>0&&ask>0)?(bid+ask)/2:last;
+          if(!mid||mid<=0)continue;
+          const annual=calcAnnual(mid*100-DEFAULT_COMM,parsed.strike*100,dte)||0;
+          if(annual<Number(minAnnual))continue;
 
-        console.log(display+' 符合DTE的日期:',validDates.length,validDates.map(d=>d.strike_time.split(' ')[0]));
-        // 4. 对每个到期日拉 Put 期权链
-        for(const dateObj of validDates){
-          const dateStr=dateObj.strike_time.split(' ')[0];
-          const chainRes=await futuFetch('/api/futu/option-chain?code='+encodeURIComponent(code)+'&date='+dateStr+'&option_type=PUT',{signal:AbortSignal.timeout(12000)});
-          const chainData=await chainRes.json();
-          if(chainData.status!=='success'||!Array.isArray(chainData.data))continue;
-
-          const exp=new Date(dateStr);
-          const dte=Math.round((exp-today)/86400000);
-          if(dte<=0)continue;
-
-          console.log(display+' '+dateStr+' Put数量:',chainData.data.length);
-          for(const opt of chainData.data){
-            const delta=Math.abs(opt.delta||0);
-            if(delta<Number(minDelta)||delta>Number(maxDelta))continue;
-            const annual=opt.seller_annual_return||0;
-            if(annual<Number(minAnnual))continue;
-            const mid=opt.mid_price||0;
-            if(mid<=0)continue;
-
-            found.push({
-              ticker:display,
-              code:opt.code,
-              stockPrice:null,
-              expiry:dateStr,
-              strike:opt.strike_price,
-              delta:delta,
-              bid:opt.bid_price||0,
-              ask:opt.ask_price||0,
-              mid:mid,
-              iv:opt.implied_volatility||null,
-              theta:opt.theta||null,
-              gamma:opt.gamma||null,
-              openInterest:opt.open_interest||0,
-              annualPct:annual,
-              profitProb:opt.profit_probability||null,
-              dte:dte,
-              ivRank:stockSummary.iv_rank||null,
-              ivPct:stockSummary.iv_percentile||null,
-              stockIV:stockSummary.iv||null,
-              stockHV:stockSummary.hv||null,
-            });
-          }
+          found.push({
+            ticker:display,
+            code:opt.option,
+            stockPrice:chain.stockPrice,
+            expiry:dateStr,
+            strike:parsed.strike,
+            delta:delta,
+            bid:bid,
+            ask:ask,
+            mid:mid,
+            iv:toPct(opt.iv),
+            theta:n(opt.theta),
+            gamma:n(opt.gamma),
+            openInterest:n(opt.open_interest)||0,
+            annualPct:annual,
+            profitProb:(1-delta)*100,
+            dte:dte,
+            ivRank:chain.ivRank,
+            ivPct:null,
+            stockIV:chain.stockIV,
+            stockHV:chain.stockHV,
+          });
         }
       }catch(err){
         console.warn('Scan '+code+':',err.message);
@@ -1086,10 +1090,14 @@ function ScanPanel(){
       const key=r.ticker+'-'+r.expiry;
       if(!best[key]||r.annualPct>best[key].annualPct)best[key]=r;
     }
-    const sorted=Object.values(best).sort((a,b)=>b[sortKey]-a[sortKey]);
+    const sortVal=r=>{
+      const x=Number(r[sortKey]);
+      return Number.isFinite(x)?x:-Infinity;
+    };
+    const sorted=Object.values(best).sort((a,b)=>sortVal(b)-sortVal(a));
     setResults(sorted);
     setProgress('');
-    if(!sorted.length)setError('未找到符合条件的合约，请放宽筛选条件或检查富途 API 连接');
+    if(!sorted.length)setError('未找到符合条件的 CBOE 合约，请放宽 DTE / Delta / 年化条件，或检查 CBOE 代理连接');
     setLoading(false);
   };
 
@@ -1229,7 +1237,7 @@ function ScanPanel(){
 
 /* ══ 期权学习 ══════════════════════════════════════ */
 function LearnPanel(){
-  const [section,setSection]=useState('concepts');
+  const [section,setSection]=useState('guide');
   const ref=React.useRef(null);
 
   // KaTeX 渲染
@@ -1246,6 +1254,7 @@ function LearnPanel(){
   },[section]);
 
   const sections={
+    guide:{label:'实战指南',icon:'📊'},
     concepts:{label:'核心概念',icon:'📖'},
     greeks:{label:'希腊字母',icon:'Δ'},
     case1:{label:'案例·牛熊震荡',icon:'🚀'},
@@ -1294,10 +1303,114 @@ function LearnPanel(){
 <div class="step"><div class="stt"><span class="n">02</span> Vega 的降维打击 <span class="chip pos" style="margin-left:auto">账面 +</span></div><p>恐慌消散，IV 暴跌 30 点至 50%：</p><div class="eq"><div class="lab">Vega 贡献（线性估算）</div>\\[ \\Delta\\mathrm{IV}\\times\\mathrm{Vega} = (-30)\\times 0.15 = -4.50 \\]</div><p class="impact">作为卖方，期权费暴跌是利好，账面盈利 $450。</p></div>
 <div class="eq"><div class="lab">最终结算 · 期权市场价</div><div class="flow"><span class="t">初始 $6.0</span><span class="op">+</span><span class="t" style="color:#f46a5a">Delta/Gamma +$0.68</span><span class="op">+</span><span class="t" style="color:#3dd68c">Vega −$4.50</span><span class="op">=</span><span class="res">≈ $2.18</span></div><div class="flow" style="margin-top:10px"><span class="t">最终净利润</span><span class="op">=</span><span class="t">$6.0 − $2.18</span><span class="op">=</span><span class="res" style="background:rgba(61,214,140,.1);border-color:rgba(61,214,140,.3);color:#3dd68c">+$3.82 / 手</span></div></div>
 <div class="callout note"><span class="ic">!</span><span><b>核心顿悟 —</b> 在高 IV 开仓时，<b>Vega 的盈利空间以压倒性姿态，盖过了 Delta/Gamma 下跌带来的惩罚</b>。即使方向猜错，卖方依然能赢。</span></div>
-<div class="triple"><div class="th"><span class="x">✕</span><h4>但这个顿悟必须加上边界 — 卖方真正的死法</h4></div><p style="padding:12px 18px 0;color:var(--dim);font-size:13px">上述结论成立，<b style="color:var(--ink)">仅仅因为本场景是「价格小跌 + 恐慌消散」的良性场景</b>。真正让卖方爆仓的是：股指急跌时 IV 通常<b style="color:#f46a5a">飙升</b>而非消散。届时三记重击同时落下：</p><div class="kills"><div class="kill"><div class="g">Δ</div><div class="t">Delta 亏</div><p>价格向不利方向走，方向直接亏损。</p></div><div class="kill"><div class="g">Γ</div><div class="t">Gamma 加速</div><p>等效敞口被动放大，越跌套得越多。</p></div><div class="kill"><div class="g">ν</div><div class="t">Vega 亏</div><p>IV 暴涨让期权更贵，回购成本飙升。</p></div></div><div class="foot"><b style="color:#ffd2cc">三杀叠加，才是卖方真正的死法。</b> 高 IV 开仓做卖方，赢的是 Vega 顺风——只在波动率回落时存在。遇到价跌+波动率飙升的真崩盘，Δ、Γ、ν 会一起反咬。</div></div>
+  <div class="triple"><div class="th"><span class="x">✕</span><h4>但这个顿悟必须加上边界 — 卖方真正的死法</h4></div><p style="padding:12px 18px 0;color:var(--dim);font-size:13px">上述结论成立，<b style="color:var(--ink)">仅仅因为本场景是「价格小跌 + 恐慌消散」的良性场景</b>。真正让卖方爆仓的是：股指急跌时 IV 通常<b style="color:#f46a5a">飙升</b>而非消散。届时三记重击同时落下：</p><div class="kills"><div class="kill"><div class="g">Δ</div><div class="t">Delta 亏</div><p>价格向不利方向走，方向直接亏损。</p></div><div class="kill"><div class="g">Γ</div><div class="t">Gamma 加速</div><p>等效敞口被动放大，越跌套得越多。</p></div><div class="kill"><div class="g">ν</div><div class="t">Vega 亏</div><p>IV 暴涨让期权更贵，回购成本飙升。</p></div></div><div class="foot"><b style="color:#ffd2cc">三杀叠加，才是卖方真正的死法。</b> 高 IV 开仓做卖方，赢的是 Vega 顺风——只在波动率回落时存在。遇到价跌+波动率飙升的真崩盘，Δ、Γ、ν 会一起反咬。</div></div>
+  `;
+
+  const guideHTML=`
+<div class="eyebrow">实战指南 / 量化底层与账户风控</div>
+<h2>📊 美股期权底层量化、策略构建与账户风控</h2>
+<p class="sec-sub">把公式、策略和账户风控压缩成一套可执行的交易地图：先理解期权链上的定价铁律，再决定用哪种结构暴露风险，最后用 SGOV 和现金线把账户活下来。</p>
+
+<div class="guide-grid">
+  <div class="guide-card accent">
+    <div class="tg">01 · 双胞胎定律</div>
+    <h4>Put-Call Parity</h4>
+    <div class="eq compact">\\[ C - P = S - K e^{-rt} \\]</div>
+    <p>同到期、同行权价的 Call 与 Put 是一架天平。移项后可理解为 <b>Call + 履约现金</b> 等价于 <b>正股 + Put 保险</b>。</p>
+  </div>
+  <div class="guide-card">
+    <div class="tg">02 · 情绪温度计</div>
+    <h4>Skew 与 25Δ Risk Reversal</h4>
+    <div class="eq compact">\\[ RR = IV_{25\\Delta Call} - IV_{25\\Delta Put} \\]</div>
+    <p>极负代表 Put 恐慌溢价很高；接近 0 或转正，说明防空险变便宜，适合检查多头尾部保护。</p>
+  </div>
+</div>
+
+<div class="def"><h4>三种理解平价公式的方式</h4><div class="sub"><p><b>天平模型：</b>\\(C+K=S+P\\)。到期终点线两边清算结果一致，因此今天的组合价格也应一致。</p><p><b>积木法：</b>\\(C-P\\) 是合成多头，数学上等同于持有正股并借入履约现金。</p><p><b>套利直觉：</b>若极端情绪导致天平失衡，量化团队会用买 Call、卖 Put、做空正股等组合快速抹平差价。</p></div></div>
+
+<div class="callout note"><span class="ic">⚠</span><span><b>实战边界 —</b> 在 SPY、QQQ、VOO、SPX 等高流动性标的上，Put-Call Parity 基本可信；但在宽价差、深虚值、小成交量合约上，滑点和借券成本会吃掉理论套利。</span></div>
+
+<h2>进阶策略：合成多头与盒式套利</h2>
+<div class="strategy-grid">
+  <div class="strategy-card">
+    <div class="tagline">Synthetic Long</div>
+    <h4>合成多头：买 ATM Call + 卖 ATM Put</h4>
+    <p>核心结构是 \\(C-P\\)，到期损益几乎复制 100 股正股。好处是开仓成本低，Call 的时间损耗被 Put 的时间收入抵消，整体接近 Delta 1。</p>
+    <div class="rule-list">
+      <div><b>红利：</b>低成本获得正股贝塔，横盘时 Theta 更中性。</div>
+      <div><b>盲区：</b>下方本质有裸 Sell Put，暴跌时 IV 上升和保证金会一起放大。</div>
+      <div><b>纪律：</b>账户保留等额现金或 SGOV，不用名义杠杆把自己顶满。</div>
+    </div>
+  </div>
+  <div class="strategy-card danger">
+    <div class="tagline">Box Spread</div>
+    <h4>盒式套利：低 K 合成多头 + 高 K 合成空头</h4>
+    <p>四腿组合把正股方向完全抵消，到期价值固定为 \\((K_2-K_1)\\times100\\)。它不是方向交易，而是一个期权市场里的借贷工具。</p>
+    <div class="rule-list">
+      <div><b>Short Box：</b>今天拿到折现现金，到期支付固定面值，差额就是隐含利息。</div>
+      <div><b>只选欧式：</b>优先 SPX。不要用个股或 ETF 做美式盒子，提前指派会让盒子散架。</div>
+      <div><b>期限：</b>常看 DTE 180-365，流动性和手续费摊薄更友好。</div>
+    </div>
+  </div>
+</div>
+
+<div class="payoff-grid">
+  <div class="payoff-card">
+    <h4>合成多头到期损益</h4>
+    <pre class="payoff">账户盈利 (+)
+    ^
+    |                              /
+    |                            /
+----|--------------------------/--------> 到期正股价格
+    |                        /
+    |                      /  K 附近为盈亏平衡
+账户亏损 (-)</pre>
+  </div>
+  <div class="payoff-card">
+    <h4>Short Box 到期价值</h4>
+    <pre class="payoff">到期资产价值
+    ^
+$10k|============================== 固定清算值
+    |
+$9.5| - - - - - - - - - - - - -  今日收到现金
+    |
+  $0+-----------------------------> 到期正股价格</pre>
+  </div>
+</div>
+
+<h2>Box Spread 四条筛选铁律</h2>
+<div class="rule-grid">
+  <div class="rule"><span>1</span><b>标的</b><p>必须使用欧式期权，例如 SPX。避开个股和 ETF 的美式提前指派风险。</p></div>
+  <div class="rule"><span>2</span><b>期限</b><p>优先 6 个月到 1 年，兼顾流动性、隐含利率和交易成本。</p></div>
+  <div class="rule"><span>3</span><b>间距</b><p>\\((K_2-K_1)\\times100\\) 对齐借款规模，行权价尽量包住 ATM 区域。</p></div>
+  <div class="rule"><span>4</span><b>限价</b><p>净流入卡在国债折现价和券商融资折现价之间，逼近更优资金成本。</p></div>
+</div>
+
+<h2>Margin Account 与 SGOV 双线抽水</h2>
+<div class="guide-grid">
+  <div class="guide-card">
+    <div class="tg">账户字段</div>
+    <h4>先看懂券商给你的四条线</h4>
+    <p><b>Account Value</b> 是真实净资产；<b>Options</b> 为负通常代表卖方未平仓负债；<b>Cash + Borrowing</b> 是购买力，不等于已经借钱；<b>SMA</b> 是历史盈利沉淀出的额外开仓和提现额度。</p>
+  </div>
+  <div class="guide-card accent">
+    <div class="tg">SGOV 底仓</div>
+    <h4>用低波动国债 ETF 做保证金地基</h4>
+    <p>大额本金放在 SGOV 吃底层利息，同时因波动低、保证金折扣小，通常能释放接近期权购买力。保守打法是让所有 Sell Put 名义接货额不超过 SGOV 市值。</p>
+  </div>
+</div>
+
+<div class="scen">
+  <div class="sh"><span class="nm">实盘风控纪律</span><span class="mv flat">不付融资利息风格</span></div>
+  <div class="row"><div class="wlab"><b>开仓上限</b></div><div class="metric"><span class="ml">名义风险</span><span class="mn zero">≤ SGOV 市值</span></div><div class="metric"><span class="ml">Delta</span><span class="mn zero">偏深虚值</span></div></div>
+  <div class="row"><div class="wlab"><b>利息触发点</b></div><div class="metric"><span class="ml">只有被指派</span><span class="mn neg">Cash 变负</span></div><div class="metric"><span class="ml">未行权</span><span class="mn pos">不产生融资息</span></div></div>
+  <div class="row"><div class="wlab"><b>近月危机</b></div><div class="metric"><span class="ml">DTE</span><span class="mn neg">≤ 10 天且 ITM</span></div><div class="metric"><span class="ml">动作</span><span class="mn pos">Roll 收 Net Credit</span></div></div>
+  <div class="row"><div class="wlab"><b>确定接盘</b></div><div class="metric"><span class="ml">T+1</span><span class="mn zero">卖 SGOV 补现金</span></div><div class="metric"><span class="ml">目标</span><span class="mn pos">抹平负现金</span></div></div>
+  <div class="take">核心不是把购买力用满，而是让 SGOV、现金线和期权名义风险始终能互相覆盖。账户先活着，Theta 才能继续工作。</div>
+</div>
 `;
 
-  const htmlMap={concepts:conceptsHTML,greeks:greeksHTML,case1:case1HTML,case2:case2HTML};
+  const htmlMap={guide:guideHTML,concepts:conceptsHTML,greeks:greeksHTML,case1:case1HTML,case2:case2HTML};
 
   return(
     <div className="lp" ref={ref}>
