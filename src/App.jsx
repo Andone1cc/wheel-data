@@ -1326,7 +1326,11 @@ function LearnPanel(){
   </div>
 </div>
 
-<div class="def"><h4>三种理解平价公式的方式</h4><div class="sub"><p><b>天平模型：</b>\\(C+K=S+P\\)。到期终点线两边清算结果一致，因此今天的组合价格也应一致。</p><p><b>积木法：</b>\\(C-P\\) 是合成多头，数学上等同于持有正股并借入履约现金。</p><p><b>套利直觉：</b>若极端情绪导致天平失衡，量化团队会用买 Call、卖 Put、做空正股等组合快速抹平差价。</p></div></div>
+<div class="view-grid">
+  <div class="view-card"><div class="tg">视角一</div><h4>天平模型 · 到期终点线等价</h4><p>移项为 \\(C+K=S+P\\)：左盘是看涨期权 + 履约现金，右盘是正股 + 看跌保险。无论到期暴涨还是暴跌，两边最终都清算成同一份股票或同一笔现金，所以今天组合价格必须相等。</p></div>
+  <div class="view-card"><div class="tg">视角二</div><h4>代数积木法 · 同源重组</h4><p>\\(C-P\\) 就是合成多头，数学上等同于 \\(S-K\\)：正股现货减现金。把 Call、Put、正股、现金这些积木重新移项，就能拼出盒式套利等结构；它们不是孤立招式，而是同一公式的变形。</p></div>
+  <div class="view-card"><div class="tg">视角三</div><h4>天平失衡 · 套利抹平</h4><p>若恐慌抢 Put 导致 \\(C-P<S-K\\)，理论上出现无风险套利。量化团队会买 Call、卖 Put 合成多头，同时做空正股，毫秒级抹平差价；在高流动性标的上，这条铁律可以高度信任。</p></div>
+</div>
 
 <div class="callout note"><span class="ic">⚠</span><span><b>实战边界 —</b> 在 SPY、QQQ、VOO、SPX 等高流动性标的上，Put-Call Parity 基本可信；但在宽价差、深虚值、小成交量合约上，滑点和借券成本会吃掉理论套利。</span></div>
 
