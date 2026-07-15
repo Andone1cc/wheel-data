@@ -2525,7 +2525,7 @@ cloudLoaded.current=true;
   const totalMarginUsed=positions.reduce((s,p)=>s+(p.marginType==='cash'?p.strike*100:(p.customMargin||0))*(p.qty||1),0);
 
   return(
-    <div style={{minHeight:'100vh',display:'flex',flexDirection:'column'}}>
+    <div className="app-shell" style={{minHeight:'100vh',display:'flex',flexDirection:'column'}}>
       {toast&&<div className="toast" style={{background:toast.color,color:'#0c1217'}}>{toast.msg}</div>}
       {showApiModal&&<ApiKeyModal onSave={saveApiKey} onClose={()=>setShowApiModal(false)}/>}
       {showFhModal&&<FinnhubModal current={finnhubKey} onSave={saveFhKey} onClose={()=>setShowFhModal(false)}/>}
