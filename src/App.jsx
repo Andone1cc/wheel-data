@@ -349,6 +349,73 @@ function calc(p,comm=DEFAULT_COMM){
   return{qty,commTotal,commExp,openPrem,capital,daysHeld,daysTotal,daysLeft,thetaPct,profitNow,yieldNow,annualNow,capturedPct,profitExp,yieldExp,annualExp,buffer};
 }
 
+function clamp(n,min,max){return Math.max(min,Math.min(max,n));}
+function scoreColor(score){
+  return score>=85?ACC.profit:score>=72?ACC.teal:score>=58?ACC.amber:score>=42?'#ff8a4c':ACC.loss;
+}
+function scoreLabel(score){
+  if(score>=85)return'优秀';
+  if(score>=72)return'健康';
+  if(score>=58)return'观察';
+  if(score>=42)return'预警';
+  return'危险';
+}
+function scorePosition(p,r,ctx={}){
+  let score=76;
+  const notes=[];
+  const add=(n,msg)=>{score+=n;if(msg)notes.push({delta:n,msg});};
+  const delta=Math.abs(Number(p.optionDelta??p.delta));
+
+  if(r.buffer==null)add(-8,'缺少正股价格，无法判断价外缓冲');
+  else if(r.buffer<=0)add(-34,'已进入 ITM，优先处理或 Roll');
+  else if(r.buffer<=3)add(-22,'距离行权价小于 3%，接近危险线');
+  else if(r.buffer<=8)add(-10,'价外缓冲偏薄');
+  else if(r.buffer>=18)add(7,'价外缓冲充足');
+  else if(r.buffer>=12)add(4,'价外缓冲较健康');
+
+  if(r.daysLeft<=3)add(-24,'到期 3 天内，Gamma/指派风险高');
+  else if(r.daysLeft<=7)add(-17,'到期 7 天内，需要盯盘');
+  else if(r.daysLeft<=14)add(-9,'到期两周内，适合准备平仓或 Roll');
+  else if(r.daysLeft>=25&&r.daysLeft<=55)add(5,'DTE 位于卖方舒适区');
+  else if(r.daysLeft>90)add(-4,'期限过长，资金周转偏慢');
+
+  if(Number.isFinite(delta)){
+    if(delta>0.35)add(-18,'Delta 偏高，方向敞口过大');
+    else if(delta>0.25)add(-10,'Delta 已偏高');
+    else if(delta>=0.08&&delta<=0.18)add(8,'Delta 落在收租甜区');
+    else if(delta<0.04)add(1,'Delta 很低，安全但收益可能偏薄');
+  }else add(-3,'缺少 Delta，评分保守处理');
+
+  if(r.capturedPct!=null){
+    if(r.capturedPct<0)add(-12,'当前回补为亏损');
+    else if(r.capturedPct>=80)add(9,'权利金捕获超过 80%');
+    else if(r.capturedPct>=50)add(6,'权利金捕获超过 50%');
+    else if(r.capturedPct<25&&r.thetaPct>45)add(-5,'持仓过半但权利金捕获不足');
+  }
+
+  if(r.annualExp!=null){
+    if(r.annualExp<5)add(-6,'持到到期年化偏低');
+    else if(r.annualExp>=8&&r.annualExp<=45)add(5,'持到到期年化合理');
+    else if(r.annualExp>90)add(-5,'年化异常偏高，通常意味着风险也高');
+  }
+
+  const marginRatio=ctx.sgov?.marketValue&&ctx.totalMargin>0?(ctx.totalMargin/ctx.sgov.marketValue)*100:null;
+  if(marginRatio!=null){
+    if(marginRatio>90)add(-14,'组合保证金/SGOV 超过 90%');
+    else if(marginRatio>75)add(-8,'组合保证金/SGOV 偏高');
+    else if(marginRatio<=45)add(4,'组合保证金压力较低');
+  }
+
+  const finalScore=Math.round(clamp(score,0,100));
+  return{
+    score:finalScore,
+    label:scoreLabel(finalScore),
+    color:scoreColor(finalScore),
+    notes:notes.sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta)).slice(0,4),
+    marginRatio,
+  };
+}
+
 /* ── 计算已平仓收益 ── */
 function calcClosed(c,comm=DEFAULT_COMM){
   const qty=c.qty||1;
@@ -1609,6 +1676,9 @@ function SummaryBar({positions,commPerSide,sgov}){
   const sgovMV=sgov?.marketValue||null;
   const si=calcSgov(sgov);
   const marginRatio=sgovMV&&totalMargin>0?(totalMargin/sgovMV)*100:null;
+  const scored=positions.map((p,i)=>({p,r:rs[i],...scorePosition(p,rs[i],{totalMargin,sgov})}));
+  const avgScore=scored.length?Math.round(scored.reduce((s,x)=>s+x.score,0)/scored.length):null;
+  const worstScore=scored.length?scored.reduce((w,x)=>!w||x.score<w.score?x:w,null):null;
 
   // 对SGOV年化：总利润 ÷ SGOV市值
   const nowVsSgov=(totalProfitNow!=null&&sgovMV&&withOpt.length)?(()=>{
@@ -1646,6 +1716,7 @@ function SummaryBar({positions,commPerSide,sgov}){
         <Box label="净权利金（到期）" value={`$${fmt(totalNet)}`} color={ACC.profit} hl={ACC.profit}/>
         {withOpt.length>0&&<Box label="当前浮动净利" value={fmtM(totalProfitNow)} color={totalProfitNow>=0?ACC.profit:ACC.loss} sub={`${withOpt.length}/${positions.length} 已录价`}/>}
         {sgovMV&&marginRatio!=null&&<Box label="保证金/SGOV" value={`${marginRatio.toFixed(1)}%`} color={marginRatio>80?ACC.loss:marginRatio>60?ACC.amber:ACC.profit} sub={`$${fmt(totalMargin,0)}/$${fmt(sgovMV,0)}`}/>}
+        {avgScore!=null&&<Box label="仓位健康分" value={`${avgScore}`} color={scoreColor(avgScore)} hl={scoreColor(avgScore)} sub={worstScore?`最低 ${worstScore.p.ticker} ${worstScore.score} · ${scoreLabel(avgScore)}`:''}/>}
       </div>
       <div className="summary-grid" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:18}}>
         {avgNow!=null&&<BigA label="现在卖出年化" main={fmtA(avgNow)} mainColor={ACC.blue} vs={nowVsSgov} sub={nowVsSgov?`对保证金 ${fmtA(avgNow)} · 对SGOV ${fmtA(nowVsSgov)}`:'录入期权现价后计算'}/>}
@@ -1714,7 +1785,7 @@ function AddForm({onAdd,onCancel,commPerSide}){
 }
 
 /* ══ 详情抽屉 ══════════════════════════════════════ */
-function DetailDrawer({p,r,commPerSide,onUpdateOptionPrice,onClose,onDelete,onRoll}){
+function DetailDrawer({p,r,health,commPerSide,onUpdateOptionPrice,onClose,onDelete,onRoll}){
   return(
     <div className="detail-drawer anim-fade" style={{borderTop:`1px solid ${V('line')}`,background:V('surface'),borderRadius:'0 0 14px 14px',padding:'18px 20px'}}>
       <div style={{marginBottom:16}}>
@@ -1734,6 +1805,26 @@ function DetailDrawer({p,r,commPerSide,onUpdateOptionPrice,onClose,onDelete,onRo
         {r.capturedPct!=null&&<Stat label="权利金捕获" value={`${r.capturedPct.toFixed(1)}%`} color={r.capturedPct>=50?ACC.profit:ACC.amber}/>}
         {r.buffer!=null&&<Stat label={p.type==='P'?'价外缓冲':'价外距离'} value={`${r.buffer>0?'+':''}${r.buffer.toFixed(1)}%`} sub={`现价 $${fmt(p.currentPrice)}`} color={r.buffer>0?ACC.profit:ACC.loss}/>}
       </div>
+      {health&&(
+        <div className="health-card" style={{'--health-color':health.color}}>
+          <div className="health-card-head">
+            <div>
+              <div className="section-label">仓位健康分</div>
+              <div className="health-card-title">{health.label} · {health.score}/100</div>
+            </div>
+            <div className="health-ring" style={{background:`conic-gradient(${health.color} ${health.score*3.6}deg, rgba(255,255,255,.08) 0deg)`}}>
+              <span>{health.score}</span>
+            </div>
+          </div>
+          <div className="health-notes">
+            {health.notes.length?health.notes.map((n,i)=>(
+              <div key={i} className={n.delta>=0?'pos':'neg'}>
+                <span>{n.delta>=0?'+'+n.delta:n.delta}</span>{n.msg}
+              </div>
+            )):<div className="pos"><span>+0</span>暂无明显风险项，继续按计划管理</div>}
+          </div>
+        </div>
+      )}
       <div className="detail-scenario-grid" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
         <div className="card" style={{padding:14}}>
           <div style={{fontSize:10,color:ACC.blue,letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',marginBottom:10}}>场景 A · 现在卖出</div>
@@ -1781,8 +1872,9 @@ function DetailDrawer({p,r,commPerSide,onUpdateOptionPrice,onClose,onDelete,onRo
 }
 
 /* ══ 活跃仓位行 ══════════════════════════════════════ */
-function PositionRow({p,commPerSide,expanded,onToggle,onUpdateOptionPrice,onClose,onDelete,onRoll}){
+function PositionRow({p,commPerSide,portfolio,expanded,onToggle,onUpdateOptionPrice,onClose,onDelete,onRoll}){
   const r=calc(p,commPerSide);
+  const health=scorePosition(p,r,portfolio);
   const isCall=p.type==='C';
   const typeColor=isCall?ACC.loss:ACC.profit;
   const urgency=r.daysLeft<=7?ACC.loss:r.daysLeft<=21?ACC.amber:V('dim');
@@ -1793,7 +1885,7 @@ function PositionRow({p,commPerSide,expanded,onToggle,onUpdateOptionPrice,onClos
   return(
     <div style={{overflow:'hidden',marginBottom:expanded?8:0,transition:'box-shadow .2s',boxShadow:expanded?'0 4px 24px rgba(0,0,0,.2)':'none',...(expanded?{borderRadius:14,border:'1px solid '+V('line-br')}:{})}}>
       <div className={`pos-clean-row pos-row-inner ${riskClass}`} onClick={onToggle}
-        style={{'--row-accent':typeColor,display:'grid',gridTemplateColumns:'4px 110px 86px 96px 1fr 90px 116px 116px 116px 36px',
+        style={{'--row-accent':typeColor,display:'grid',gridTemplateColumns:'4px 110px 82px 86px 1fr 88px 106px 104px 104px 90px 36px',
           alignItems:'center',minHeight:56,padding:'2px 0',...(expanded?{background:V('card-hover')}:{})}}>
         <div className="pos-row-col-streak" style={{background:typeColor,height:'100%',minHeight:56,width:3,borderRadius:2}}/>
         <div className="pos-row-col-main" style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:3}}>
@@ -1829,7 +1921,7 @@ function PositionRow({p,commPerSide,expanded,onToggle,onUpdateOptionPrice,onClos
           {p.currentPrice?(<>
             <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('ink'),fontWeight:600}}>{'$'+fmt(p.currentPrice)}</span>
             {r.buffer!=null&&<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:r.buffer>0?ACC.profit:ACC.loss,fontWeight:600}}>{(r.buffer>0?'↑':'↓')+Math.abs(r.buffer).toFixed(1)+'%'}</span>}
-            {p.optionPrice!=null&&<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:9,color:V('faint'),letterSpacing:'.03em'}}>{'Δ '+(p.delta!=null?p.delta.toFixed(2):'—')}</span>}
+            {p.optionPrice!=null&&<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:9,color:V('faint'),letterSpacing:'.03em'}}>{'Δ '+(p.optionDelta!=null?p.optionDelta.toFixed(2):'—')}</span>}
           </>):<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('faint')}}>{'—'}</span>}
           {/* 移动端在价格下面补充年化 */}
           <div className="pos-row-mobile-extra" style={{display:'none',flexDirection:'column',gap:1,alignItems:'flex-end',marginTop:2}}>
@@ -1844,9 +1936,13 @@ function PositionRow({p,commPerSide,expanded,onToggle,onUpdateOptionPrice,onClos
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:ACC.amber,letterSpacing:'.05em'}}>持到到期</span>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,fontWeight:600,color:ACC.amber}}>{fmtA(r.annualExp)}</span>
         </div>
+        <div className="pos-row-col-score" style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-end',paddingRight:8}}>
+          <span className="health-pill" style={{'--health-color':health.color}}>{health.score}</span>
+          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:9,color:health.color,letterSpacing:'.05em'}}>{health.label}</span>
+        </div>
         <div className="pos-row-col-arrow" style={{display:'flex',justifyContent:'center',color:V('faint'),fontSize:11,transform:expanded?'rotate(180deg)':'rotate(0)',transition:'transform .22s ease'}}>▼</div>
       </div>
-      {expanded&&<DetailDrawer p={p} r={r} commPerSide={commPerSide}
+      {expanded&&<DetailDrawer p={p} r={r} health={health} commPerSide={commPerSide}
         onUpdateOptionPrice={v=>onUpdateOptionPrice(p.id,v)}
         onClose={onClose} onDelete={onDelete} onRoll={onRoll}/>}
     </div>
@@ -1856,8 +1952,8 @@ function PositionRow({p,commPerSide,expanded,onToggle,onUpdateOptionPrice,onClos
 function ActiveTableHeader(){
   const H=({t,right})=><div style={{fontSize:10,color:V('faint'),letterSpacing:'.14em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',textAlign:right?'right':'left',padding:'0 4px'}}>{t}</div>;
   return(
-    <div className="pos-table-header" style={{display:'grid',gridTemplateColumns:'4px 110px 86px 96px 1fr 90px 116px 116px 116px 36px',alignItems:'center',padding:'4px 0 10px',marginBottom:0,borderBottom:'1px solid rgba(28,44,58,.4)'}}>
-      <div/><H t="标的"/><H t="行权价"/><H t="到期"/><H t="Θ 衰减"/><H t="权利金" right/><H t="股价" right/><H t="现在卖出" right/><H t="持到到期" right/><div/>
+    <div className="pos-table-header" style={{display:'grid',gridTemplateColumns:'4px 110px 82px 86px 1fr 88px 106px 104px 104px 90px 36px',alignItems:'center',padding:'4px 0 10px',marginBottom:0,borderBottom:'1px solid rgba(28,44,58,.4)'}}>
+      <div/><H t="标的"/><H t="行权价"/><H t="到期"/><H t="Θ 衰减"/><H t="权利金" right/><H t="股价" right/><H t="现在卖出" right/><H t="持到到期" right/><H t="健康分" right/><div/>
     </div>
   );
 }
@@ -2578,6 +2674,7 @@ cloudLoaded.current=true;
                   <ActiveTableHeader/>
                   {positions.map(p=>(
                     <PositionRow key={p.id} p={p} commPerSide={commPerSide}
+                      portfolio={{totalMargin:totalMarginUsed,sgov}}
                       expanded={expanded===p.id}
                       onToggle={()=>toggleExpand(p.id)}
                       onUpdateOptionPrice={updateOptionPrice}
