@@ -137,6 +137,75 @@ module.exports = async function handler(req, res) {
   }
 
   // ══════════════════════════════════════════════════
+  // 历史收盘价代理（用于已平仓到期复盘）
+  // /api/history/:ticker?date=YYYY-MM-DD
+  // ══════════════════════════════════════════════════
+  if (reqUrl.startsWith('/api/history/')) {
+    const [rawTicker, query = ''] = reqUrl.replace('/api/history/', '').split('?');
+    const ticker = decodeURIComponent(rawTicker);
+    const params = new URLSearchParams(query);
+    const date = params.get('date');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
+      return res.status(400).json({ ticker, price: null, error: 'date must be YYYY-MM-DD' });
+    }
+
+    const [y, m, d] = date.split('-').map(Number);
+    const target = Date.UTC(y, m - 1, d);
+    const period1 = Math.floor((target - 5 * 86400000) / 1000);
+    const period2 = Math.floor((target + 3 * 86400000) / 1000);
+
+    const pickClose = (rows) => {
+      if (!rows.length) return null;
+      const targetEnd = Math.floor((target + 86399999) / 1000);
+      const beforeOrOn = rows.filter(row => row.ts <= targetEnd).sort((a, b) => b.ts - a.ts)[0];
+      return beforeOrOn || rows.sort((a, b) => a.ts - b.ts)[0];
+    };
+
+    try {
+      const yahooRes = await fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&period1=${period1}&period2=${period2}`,
+        { headers: { 'User-Agent': 'Mozilla/5.0' } }
+      );
+      const yahooText = await yahooRes.text();
+      const data = yahooText.trim().startsWith('{') ? JSON.parse(yahooText) : null;
+      const result = data?.chart?.result?.[0];
+      const timestamps = result?.timestamp || [];
+      const closes = result?.indicators?.quote?.[0]?.close || [];
+      const yahooRows = timestamps
+        .map((ts, i) => ({ ts, price: closes[i], date: new Date(ts * 1000).toISOString().slice(0, 10) }))
+        .filter(row => Number.isFinite(Number(row.price)));
+      const yahooPicked = pickClose(yahooRows);
+      if (yahooPicked) {
+        return res.status(200).json({ ticker, date: yahooPicked.date, requestedDate: date, price: Number(yahooPicked.price), source: 'Yahoo' });
+      }
+
+      const d1 = new Date(target - 5 * 86400000).toISOString().slice(0, 10).replace(/-/g, '');
+      const d2 = new Date(target + 3 * 86400000).toISOString().slice(0, 10).replace(/-/g, '');
+      const stooqRes = await fetch(
+        `https://stooq.com/q/d/l/?s=${encodeURIComponent(ticker.toLowerCase() + '.us')}&d1=${d1}&d2=${d2}&i=d`,
+        { headers: { 'User-Agent': 'Mozilla/5.0' } }
+      );
+      const stooqText = await stooqRes.text();
+      const stooqRows = stooqText.trim().split(/\r?\n/).slice(1)
+        .map(line => {
+          const [rowDate, , , , close] = line.split(',');
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(rowDate || '')) return null;
+          const [yy, mm, dd] = rowDate.split('-').map(Number);
+          return { date: rowDate, ts: Math.floor(Date.UTC(yy, mm - 1, dd) / 1000), price: Number(close) };
+        })
+        .filter(row => row && Number.isFinite(row.price));
+      const stooqPicked = pickClose(stooqRows);
+      if (stooqPicked) {
+        return res.status(200).json({ ticker, date: stooqPicked.date, requestedDate: date, price: Number(stooqPicked.price), source: 'Stooq' });
+      }
+
+      return res.status(200).json({ ticker, date, price: null });
+    } catch (e) {
+      return res.status(200).json({ ticker, date, price: null });
+    }
+  }
+
+  // ══════════════════════════════════════════════════
   // 云端数据同步（需密码）
   // ══════════════════════════════════════════════════
   if (!passwordOk) {
