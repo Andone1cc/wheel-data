@@ -215,6 +215,24 @@ async function fetchStockPrices(tickers){
   return results;
 }
 
+function cnStockQuoteSymbol(market,ticker){
+  const code=String(ticker||'').trim().toUpperCase();
+  if(!code)return'';
+  if(market==='HK'){
+    const digits=code.replace(/\D/g,'');
+    return digits?`${String(Number(digits)).padStart(4,'0')}.HK`:'';
+  }
+  if(/\.(SS|SZ)$/.test(code))return code;
+  return `${code}.${/^[569]/.test(code)?'SS':'SZ'}`;
+}
+
+async function fetchCnStockPrice(market,ticker){
+  const quoteSymbol=cnStockQuoteSymbol(market,ticker);
+  if(!quoteSymbol)return{quoteSymbol:'',price:null};
+  const prices=await fetchStockPrices([quoteSymbol]);
+  return{quoteSymbol,price:prices[quoteSymbol]??null};
+}
+
 async function fetchStockCloseOnDate(ticker,date){
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
   try{
@@ -549,6 +567,7 @@ function Stat({label,value,sub,color,sz=15,hl}){
 /* 文本输入 */
 function Field({label,hint,value,onChange,placeholder,type='text',prefix,suffix,readOnly,color}){
   const [focused,setFocused]=useState(false);
+  const prefixPadding=prefix?18+Array.from(String(prefix)).length*10:12;
   return(
     <div style={{display:'flex',flexDirection:'column',gap:5}}>
       {label&&<div style={{display:'flex',alignItems:'center',gap:5}}>
@@ -560,7 +579,7 @@ function Field({label,hint,value,onChange,placeholder,type='text',prefix,suffix,
         <input className="field" type={type} value={value??''} onChange={e=>onChange(e.target.value)}
           placeholder={placeholder} readOnly={readOnly}
           onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)}
-          style={{paddingLeft:prefix?28:12,paddingRight:suffix?32:12,color:color||V('ink'),cursor:readOnly?'default':'text',background:readOnly?'transparent':undefined,borderStyle:readOnly?'dashed':undefined}}/>
+          style={{paddingLeft:prefixPadding,paddingRight:suffix?32:12,color:color||V('ink'),cursor:readOnly?'default':'text',background:readOnly?'transparent':undefined,borderStyle:readOnly?'dashed':undefined}}/>
         {suffix&&<span style={{position:'absolute',right:11,color:V('faint'),fontSize:12,fontFamily:'IBM Plex Mono,monospace',pointerEvents:'none'}}>{suffix}</span>}
       </div>
     </div>
@@ -2755,29 +2774,36 @@ function CnOptionRow({p,totalMargin,currentIndex,onUpdate,onClose,onDelete}){
 }
 
 function CnStockForm({onAdd,onCancel}){
-  const [f,setF]=useState({market:'CN',ticker:'',name:'',shares:'',costPerShare:'',currentPrice:'',acquireDate:today()});
+  const [f,setF]=useState({market:'CN',ticker:'',name:'',shares:'',costPerShare:'',acquireDate:today()});
+  const [saving,setSaving]=useState(false);
   const set=(key,value)=>setF(prev=>({...prev,[key]:value}));
   const valid=f.ticker&&f.shares&&f.costPerShare;
+  const submit=async()=>{
+    if(!valid||saving)return;
+    setSaving(true);
+    const quote=await fetchCnStockPrice(f.market,f.ticker);
+    onAdd({...f,id:Date.now(),shares:num(f.shares),costPerShare:num(f.costPerShare),
+      currentPrice:quote.price,currency:f.market==='HK'?'HKD':'CNY',source:'auto-quote',
+      quoteSymbol:quote.quoteSymbol,priceUpdatedAt:quote.price==null?null:Date.now()});
+  };
   return(
     <div className="cn-account-form anim-in">
-      <div className="cn-form-title"><span>＋ 录入股票持仓</span><small>港股通使用 HKD 单独统计，不与人民币市值直接相加</small></div>
+      <div className="cn-form-title"><span>＋ 录入股票持仓</span><small>只填写建仓信息；当前价格保存时自动获取，港股通使用 HKD 单独统计</small></div>
       <div className="cn-form-grid stock">
         <SelectField label="市场" value={f.market} onChange={v=>set('market',v)} options={[{value:'CN',label:'A 股'},{value:'HK',label:'港股通'}]}/>
         <Field label="证券代码" value={f.ticker} onChange={v=>set('ticker',v.trim())} placeholder={f.market==='HK'?'00700':'600519'}/>
         <Field label="证券名称" value={f.name} onChange={v=>set('name',v)} placeholder="可选"/>
         <NumField label="持仓股数" value={f.shares} onChange={v=>set('shares',v)} suffix="股"/>
         <NumField label="每股成本" prefix={f.market==='HK'?'HK$':'¥'} value={f.costPerShare} onChange={v=>set('costPerShare',v)}/>
-        <NumField label="当前价格" prefix={f.market==='HK'?'HK$':'¥'} value={f.currentPrice} onChange={v=>set('currentPrice',v)} placeholder="可后续更新"/>
         <DateField label="买入日期" value={f.acquireDate} onChange={v=>set('acquireDate',v)}/>
+        <div className="cn-stock-autoquote"><span>当前价格</span><strong>{saving?'正在获取…':'自动获取'}</strong><small>{f.ticker?cnStockQuoteSymbol(f.market,f.ticker):'填写代码后保存'}</small></div>
       </div>
-      <div className="cn-form-actions"><button className="btn btn-primary" disabled={!valid} onClick={()=>onAdd({...f,id:Date.now(),shares:num(f.shares),costPerShare:num(f.costPerShare),currentPrice:f.currentPrice===''?null:num(f.currentPrice),currency:f.market==='HK'?'HKD':'CNY',source:'manual'})}>保存持仓</button><button className="btn btn-ghost" onClick={onCancel}>取消</button></div>
+      <div className="cn-form-actions"><button className="btn btn-primary" disabled={!valid||saving} onClick={submit}>{saving?'获取行情中…':'保存持仓'}</button><button className="btn btn-ghost" onClick={onCancel}>取消</button></div>
     </div>
   );
 }
 
-function CnStockRow({stock,onUpdate,onDelete}){
-  const [editing,setEditing]=useState(false);
-  const [price,setPrice]=useState(stock.currentPrice??'');
+function CnStockRow({stock,onRefresh,onDelete,refreshing}){
   const currency=stock.currency||((stock.market==='HK')?'HKD':'CNY');
   const cost=num(stock.shares)*num(stock.costPerShare);
   const value=stock.currentPrice==null?null:num(stock.shares)*num(stock.currentPrice);
@@ -2786,9 +2812,8 @@ function CnStockRow({stock,onUpdate,onDelete}){
   return(
     <article className="cn-stock-card">
       <div className="cn-stock-id"><b>{stock.ticker}</b><strong>{stock.name||'未命名证券'}</strong><span className={stock.market==='HK'?'hk':''}>{exchange}</span></div>
-      <div className="cn-stock-metrics"><Stat label="持仓" value={`${fmt(stock.shares,0)} 股`} sub={stock.acquireDate}/><Stat label="成本价" value={cnMoney(stock.costPerShare,currency)} sub={`成本 ${cnMoney(cost,currency)}`}/><Stat label="当前价" value={stock.currentPrice==null?'待录入':cnMoney(stock.currentPrice,currency)} sub={value==null?'—':`市值 ${cnMoney(value,currency)}`}/><Stat label="浮动盈亏" value={pnl==null?'—':cnMoney(pnl,currency,true)} sub={pnl==null?'录入现价后计算':fmtA(cost?100*pnl/cost:null)} color={pnl==null?V('dim'):pnl>=0?ACC.profit:ACC.loss}/></div>
-      <div className="cn-row-actions"><button onClick={()=>setEditing(!editing)}>更新价格</button><button className="danger" onClick={()=>{if(window.confirm(`确认删除 ${stock.ticker}？`))onDelete(stock.id);}}>删除</button></div>
-      {editing&&<div className="cn-stock-edit"><NumField label="当前价格" prefix={currency==='HKD'?'HK$':'¥'} value={price} onChange={setPrice}/><button className="btn btn-primary" onClick={()=>{onUpdate(stock.id,{currentPrice:num(price)});setEditing(false);}}>保存</button><button className="btn btn-ghost" onClick={()=>setEditing(false)}>取消</button></div>}
+      <div className="cn-stock-metrics"><Stat label="持仓" value={`${fmt(stock.shares,0)} 股`} sub={stock.acquireDate}/><Stat label="成本价" value={cnMoney(stock.costPerShare,currency)} sub={`成本 ${cnMoney(cost,currency)}`}/><Stat label="当前价" value={stock.currentPrice==null?'同步中':cnMoney(stock.currentPrice,currency)} sub={value==null?'自动行情':`市值 ${cnMoney(value,currency)}`}/><Stat label="浮动盈亏" value={pnl==null?'—':cnMoney(pnl,currency,true)} sub={pnl==null?'行情同步后计算':fmtA(cost?100*pnl/cost:null)} color={pnl==null?V('dim'):pnl>=0?ACC.profit:ACC.loss}/></div>
+      <div className="cn-row-actions"><button onClick={()=>onRefresh(stock)} disabled={refreshing}>{refreshing?'同步中…':'刷新行情'}</button><button className="danger" onClick={()=>{if(window.confirm(`确认删除 ${stock.ticker}？`))onDelete(stock.id);}}>删除</button></div>
     </article>
   );
 }
@@ -2797,6 +2822,7 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
   const [view,setView]=useState('options');
   const [showForm,setShowForm]=useState(false);
   const [indexQuote,setIndexQuote]=useState(()=>readCsi500Cache());
+  const [refreshingStock,setRefreshingStock]=useState(null);
   useEffect(()=>{
     let alive=true;
     loadCsi500Index().then(payload=>{if(alive&&payload?.price>0)setIndexQuote(payload);});
@@ -2810,8 +2836,28 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
   const cnStocks=stocks.filter(s=>s.market!=='HK'),hkStocks=stocks.filter(s=>s.market==='HK');
   const totals=(items)=>items.reduce((acc,s)=>{const cost=num(s.shares)*num(s.costPerShare);const value=s.currentPrice==null?null:num(s.shares)*num(s.currentPrice);return{cost:acc.cost+cost,value:acc.value+(value??0),priced:acc.priced+(value==null?0:1)};},{cost:0,value:0,priced:0});
   const cnTotal=totals(cnStocks),hkTotal=totals(hkStocks);
+  const stockQuoteKey=stocks.map(stock=>`${stock.id}:${stock.market}:${stock.ticker}`).join('|');
+  useEffect(()=>{
+    if(!stockQuoteKey)return;
+    let alive=true;
+    Promise.all(stocks.map(async stock=>({id:stock.id,...await fetchCnStockPrice(stock.market,stock.ticker)}))).then(quotes=>{
+      if(!alive)return;
+      const byId=new Map(quotes.filter(item=>item.price!=null).map(item=>[item.id,item]));
+      let changed=false;
+      const next=stocks.map(stock=>{const quote=byId.get(stock.id);if(!quote||quote.price===stock.currentPrice)return stock;changed=true;return{...stock,currentPrice:quote.price,quoteSymbol:quote.quoteSymbol,priceUpdatedAt:Date.now()};});
+      if(changed)onStocks(next);
+    });
+    return()=>{alive=false;};
+  },[stockQuoteKey]);
   const addLabel=view==='options'?'录入期权':view==='stocks'?'录入股票':'';
   const addPosition=(item)=>{onPositions([...positions,item]);setShowForm(false);showToast(`已添加 ${item.underlying} ${item.type==='P'?'认沽':'认购'}`);};
+  const refreshStock=async(stock)=>{
+    setRefreshingStock(stock.id);
+    const quote=await fetchCnStockPrice(stock.market,stock.ticker);
+    if(quote.price==null)showToast(`${stock.ticker} 行情暂时没有返回`,ACC.loss);
+    else{onStocks(stocks.map(item=>item.id===stock.id?{...item,currentPrice:quote.price,quoteSymbol:quote.quoteSymbol,priceUpdatedAt:Date.now()}:item));showToast(`${stock.ticker} 当前价已更新`);}
+    setRefreshingStock(null);
+  };
   const closePosition=(p,data)=>{const record={...p,...data,closedAt:Date.now()};onAccountChange(positions.filter(item=>item.id!==p.id),[record,...closed],stocks);showToast(`${p.underlying} 已平仓 · ${cnMoney(calcCnClosed(record).pnl,'CNY',true)}`);};
   return(
     <section className="cn-account">
@@ -2839,9 +2885,9 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
       </>}
 
       {view==='stocks'&&<>
-        {showForm&&<CnStockForm onAdd={s=>{onStocks([...stocks,s]);setShowForm(false);showToast(`已添加 ${s.market==='HK'?'港股通':'A股'} ${s.ticker}`);}} onCancel={()=>setShowForm(false)}/>}
+        {showForm&&<CnStockForm onAdd={s=>{onStocks([...stocks,s]);setShowForm(false);showToast(`已添加 ${s.market==='HK'?'港股通':'A股'} ${s.ticker}${s.currentPrice==null?' · 行情稍后自动重试':` · 当前价 ${cnMoney(s.currentPrice,s.currency)}`}`);}} onCancel={()=>setShowForm(false)}/>}
         {!!stocks.length&&<div className="cn-stock-summary"><div><span>A 股 · CNY</span><strong>{cnMoney(cnTotal.value,'CNY')}</strong><small>成本 {cnMoney(cnTotal.cost,'CNY')} · {cnTotal.priced}/{cnStocks.length} 已录价</small></div><div className="hk"><span>港股通 · HKD</span><strong>{cnMoney(hkTotal.value,'HKD')}</strong><small>成本 {cnMoney(hkTotal.cost,'HKD')} · {hkTotal.priced}/{hkStocks.length} 已录价</small></div></div>}
-        {!stocks.length&&!showForm?<div className="cn-account-empty"><span>沪港</span><strong>还没有股票持仓</strong><p>支持 A 股和港股通；人民币与港币市值会分开呈现。</p><button className="btn btn-primary" onClick={()=>setShowForm(true)}>＋ 录入第一笔</button></div>:<div className="cn-stock-list">{stocks.map(s=><CnStockRow key={s.id} stock={s} onUpdate={(id,patch)=>onStocks(stocks.map(item=>item.id===id?{...item,...patch}:item))} onDelete={id=>onStocks(stocks.filter(item=>item.id!==id))}/>)}</div>}
+        {!stocks.length&&!showForm?<div className="cn-account-empty"><span>沪港</span><strong>还没有股票持仓</strong><p>支持 A 股和港股通；人民币与港币市值会分开呈现。</p><button className="btn btn-primary" onClick={()=>setShowForm(true)}>＋ 录入第一笔</button></div>:<div className="cn-stock-list">{stocks.map(s=><CnStockRow key={s.id} stock={s} onRefresh={refreshStock} refreshing={refreshingStock===s.id} onDelete={id=>onStocks(stocks.filter(item=>item.id!==id))}/>)}</div>}
       </>}
 
       {view==='closed'&&<>
