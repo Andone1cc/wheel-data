@@ -326,7 +326,13 @@ function szseReportUrl(params) {
 }
 
 async function fetchSzseReport(params) {
-  const payload = await fetchJson(szseReportUrl(params), { headers: SZSE_HEADERS, timeoutMs: 10000 });
+  // 深交所标准 HTTPS 接口通常在 1 秒内返回。限制单次等待和重试次数，
+  // 避免 Vercel 因一个上游请求反复重试而耗尽整次函数执行时间。
+  const payload = await fetchJson(szseReportUrl(params), {
+    headers: SZSE_HEADERS,
+    timeoutMs: 4500,
+    attempts: 2,
+  });
   const report = Array.isArray(payload) ? payload[0] : payload;
   if (!report || report.error) throw new Error(report?.error || '深交所官方数据为空');
   return report;
@@ -417,11 +423,14 @@ async function fetchSzseOfficialCloseChain(config, month, months) {
         contracts: enrichLocalGreeks(contracts, underlyingPrice),
         delayed: true,
         source: 'szse-official-close',
-        warning: `深交所官方收盘行情（${quoteDate}），不含实时买卖盘。`,
+        notice: `深交所官方收盘行情（${quoteDate}），不含实时买卖盘。`,
         greekNote: 'IV/Delta 由深交所官方收盘价按 Black-Scholes 反推，仅供研究。',
       };
     } catch (error) {
+      // 网络层错误与交易日无关，继续扫描前 7 天只会重复等待同一个故障源。
+      // 立即交给共享快照兜底；仅在接口成功但当天无数据时才继续找上一交易日。
       latestError = error;
+      break;
     }
   }
   throw latestError || new Error('深交所最近交易日行情为空');
@@ -499,7 +508,7 @@ async function fetchSseOfficialChain(config, month, months) {
     quoteTime: formatSseQuoteTime(chain.date, chain.time),
     contracts: enrichLocalGreeks(contracts, underlyingPrice),
     source: 'sse-official-realtime',
-    warning: '上交所官方实时行情；官方公网接口不含 Bid/Ask、成交量和持仓量。',
+    notice: '上交所官方实时行情；官方公网接口不含 Bid/Ask、成交量和持仓量。',
     greekNote: 'IV/Delta 由上交所官方实时最新价按 Black-Scholes 反推，仅供研究。',
   };
 }
@@ -512,8 +521,12 @@ async function fetchSseChain(config, requestedMonth) {
 }
 
 async function fetchSzseChain(config, requestedMonth) {
-  const months = await getSseMonths();
-  const month = months.includes(requestedMonth) ? requestedMonth : months[0];
+  // 深交所链路不再调用上交所 32042 端口获取月份。ETF 期权月份规则可在
+  // 本地生成；用户明确选择的 YYYYMM 也直接交给深交所官方接口验证。
+  const months = fallbackOptionMonths();
+  const requested = /^\d{6}$/.test(String(requestedMonth || '')) ? String(requestedMonth) : '';
+  const month = requested || months[0];
+  if (requested && !months.includes(requested)) months.unshift(requested);
   if (!month) throw new Error('暂未查询到深交所可用合约月份');
   return fetchSzseOfficialCloseChain(config, month, months);
 }
@@ -541,15 +554,39 @@ async function fetchCnOptionChain(symbol, month) {
         indexStrike: contract.strike > 0 ? (contract.strike / data.underlyingPrice) * index.price : null,
       })),
     } : data;
-    cnOptionCache.set(cacheKey, { time: Date.now(), data: enriched });
-    return { ...enriched, cached: false, stale: false };
+    const snapshot = { ...enriched, snapshotSavedAt: Date.now() };
+    cnOptionCache.set(cacheKey, { time: Date.now(), data: snapshot });
+    const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+    const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+    if (redisUrl && redisToken) {
+      try {
+        await redisSet(redisUrl, redisToken, `wheel_cn_option_${cacheKey}`, JSON.stringify(snapshot));
+      } catch {}
+    }
+    return { ...snapshot, cached: false, stale: false };
   } catch (error) {
-    if (cached) {
+    let fallback = cached?.data || null;
+    if (!fallback) {
+      const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+      const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+      if (redisUrl && redisToken) {
+        try {
+          const raw = await redisGet(redisUrl, redisToken, `wheel_cn_option_${cacheKey}`);
+          const parsed = raw ? JSON.parse(raw) : null;
+          if (parsed?.contracts?.length) fallback = parsed;
+        } catch {}
+      }
+    }
+    if (fallback) {
+      const snapshotTime = fallback.quoteTime || (fallback.snapshotSavedAt
+        ? new Date(fallback.snapshotSavedAt).toISOString()
+        : '时间未知');
       return {
-        ...cached.data,
+        ...fallback,
         cached: true,
         stale: true,
-        warning: `上游行情暂时不可用，已返回最近快照：${error.message}`,
+        cacheScope: cached ? 'memory' : 'shared',
+        warning: `官方行情暂时不可用，已返回云端最近快照（${snapshotTime}）。`,
       };
     }
     throw error;
@@ -762,6 +799,11 @@ module.exports = async function handler(req, res) {
     const month = url.searchParams.get('month') || '';
     try {
       const data = await fetchCnOptionChain(symbol, month);
+      // 深交所提供的是日终收盘数据，允许 CDN 较长复用；上交所为实时行情，
+      // 只做短缓存。stale-while-revalidate 可在上游抖动时继续返回成功版本。
+      res.setHeader('Cache-Control', data.exchange === 'SZSE'
+        ? 'public, s-maxage=900, stale-while-revalidate=86400'
+        : 'public, s-maxage=30, stale-while-revalidate=600');
       return res.status(200).json(data);
     } catch (e) {
       return res.status(502).json({ error: 'A 股期权行情拉取失败', detail: e.message });
