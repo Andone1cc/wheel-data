@@ -7,6 +7,7 @@
     { "source": "/api/health",          "destination": "/api/data" },
     { "source": "/api/cboe/:ticker",    "destination": "/api/data" },
     { "source": "/api/quote/:ticker",   "destination": "/api/data" },
+    { "source": "/api/history/:ticker", "destination": "/api/data" },
     { "source": "/api/futu/:path*",     "destination": "/api/data" },
     { "source": "/(.*)",                "destination": "/index.html" }
   ],

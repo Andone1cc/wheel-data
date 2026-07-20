@@ -61,6 +61,7 @@ const CN_OPTION_UNDERLYINGS = {
 const cnOptionCache = new Map();
 let cnMonthCache = { time: 0, months: [] };
 let csi500IndexCache = { time: 0, data: null };
+const CSI500_INDEX_CACHE_MS = 5 * 60 * 1000;
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36';
 const SZSE_HEADERS = {
   Accept: 'application/json, text/plain, */*',
@@ -89,9 +90,9 @@ function marketNumber(value) {
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function fetchUpstream(url, options = {}, format = 'text') {
-  const { timeoutMs = 8000, ...fetchOptions } = options;
+  const { timeoutMs = 8000, attempts = 3, ...fetchOptions } = options;
   let lastError;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
       const response = await fetch(url, { ...fetchOptions, signal: AbortSignal.timeout(timeoutMs) });
       if (!response.ok) {
@@ -107,7 +108,7 @@ async function fetchUpstream(url, options = {}, format = 'text') {
       lastError = error;
       if (/^4\d\d /.test(error.message) && !error.message.startsWith('429 ')) throw error;
     }
-    if (attempt < 2) await wait(250 + attempt * 450);
+    if (attempt < attempts - 1) await wait(250 + attempt * 450);
   }
   throw lastError || new Error('上游行情暂时不可用');
 }
@@ -249,24 +250,31 @@ function formatSseQuoteTime(dateValue, timeValue) {
 }
 
 async function fetchCsi500Index() {
-  if (csi500IndexCache.data && Date.now() - csi500IndexCache.time < 60000) {
+  if (csi500IndexCache.data && Date.now() - csi500IndexCache.time < CSI500_INDEX_CACHE_MS) {
     return { ...csi500IndexCache.data, cached: true };
   }
-  const payload = await fetchJson(sseHqUrl('v1/sh1/list/self/000905', {
-    select: 'code,cpxxextendname,last,change,chg_rate,amp_rate,volume,amount,prev_close',
-  }), { headers: SSE_HEADERS, timeoutMs: 6500 });
-  const row = payload?.list?.[0];
-  const price = marketNumber(row?.[2]);
-  if (!(price > 0)) throw new Error('中证500指数行情为空');
-  const data = {
-    code: '000905', name: '中证500指数', price,
-    change: marketNumber(row?.[3]), changePct: marketNumber(row?.[4]),
-    previousClose: marketNumber(row?.[8]),
-    quoteTime: formatSseQuoteTime(payload.date, payload.time),
-    source: 'sse-official-index',
-  };
-  csi500IndexCache = { time: Date.now(), data };
-  return { ...data, cached: false };
+  try {
+    const payload = await fetchJson(sseHqUrl('v1/sh1/list/self/000905', {
+      select: 'code,cpxxextendname,last,change,chg_rate,amp_rate,volume,amount,prev_close',
+    }), { headers: SSE_HEADERS, timeoutMs: 2200, attempts: 1 });
+    const row = payload?.list?.[0];
+    const price = marketNumber(row?.[2]);
+    if (!(price > 0)) throw new Error('中证500指数行情为空');
+    const data = {
+      code: '000905', name: '中证500指数', price,
+      change: marketNumber(row?.[3]), changePct: marketNumber(row?.[4]),
+      previousClose: marketNumber(row?.[8]),
+      quoteTime: formatSseQuoteTime(payload.date, payload.time),
+      source: 'sse-official-index',
+    };
+    csi500IndexCache = { time: Date.now(), data };
+    return { ...data, cached: false };
+  } catch (error) {
+    if (csi500IndexCache.data) {
+      return { ...csi500IndexCache.data, cached: true, stale: true };
+    }
+    throw error;
+  }
 }
 
 function sseHqUrl(path, params) {
@@ -483,10 +491,12 @@ async function fetchCnOptionChain(symbol, month) {
   const cached = cnOptionCache.get(cacheKey);
   if (cached && Date.now() - cached.time < 60000) return { ...cached.data, cached: true };
   try {
-    const [data, index] = await Promise.all([
-      config.exchange === 'SSE' ? fetchSseChain(config, month) : fetchSzseChain(config, month),
-      fetchCsi500Index().catch(() => null),
-    ]);
+    // 指数仅用于换算展示，不能阻塞期权链主请求。若进程中已有缓存则顺手带回，
+    // 否则由前端独立请求 /api/cn-options?indexOnly=1。
+    const data = config.exchange === 'SSE'
+      ? await fetchSseChain(config, month)
+      : await fetchSzseChain(config, month);
+    const index = csi500IndexCache.data;
     const enriched = index && data.underlyingPrice > 0 ? {
       ...data,
       indexPrice: index.price,
@@ -597,6 +607,108 @@ module.exports = async function handler(req, res) {
   }
 
   // ══════════════════════════════════════════════════
+  // 历史收盘价代理（用于已平仓到期复盘）
+  // /api/history/:ticker?date=YYYY-MM-DD
+  // ══════════════════════════════════════════════════
+  if (reqUrl.startsWith('/api/history/')) {
+    const [rawTicker, query = ''] = reqUrl.replace('/api/history/', '').split('?');
+    const ticker = decodeURIComponent(rawTicker);
+    const params = new URLSearchParams(query);
+    const date = params.get('date');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
+      return res.status(400).json({ ticker, price: null, error: 'date must be YYYY-MM-DD' });
+    }
+
+    const [y, m, d] = date.split('-').map(Number);
+    const target = Date.UTC(y, m - 1, d);
+    const period1 = Math.floor((target - 5 * 86400000) / 1000);
+    const period2 = Math.floor((target + 3 * 86400000) / 1000);
+    const pickClose = (rows) => {
+      if (!rows.length) return null;
+      const targetEnd = Math.floor((target + 86399999) / 1000);
+      const beforeOrOn = rows.filter((row) => row.ts <= targetEnd).sort((a, b) => b.ts - a.ts)[0];
+      return beforeOrOn || rows.sort((a, b) => a.ts - b.ts)[0];
+    };
+
+    try {
+      const yahooRes = await fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&period1=${period1}&period2=${period2}`,
+        { headers: { 'User-Agent': BROWSER_USER_AGENT }, signal: AbortSignal.timeout(4500) }
+      );
+      const yahooText = await yahooRes.text();
+      const payload = yahooText.trim().startsWith('{') ? JSON.parse(yahooText) : null;
+      const result = payload?.chart?.result?.[0];
+      const timestamps = result?.timestamp || [];
+      const closes = result?.indicators?.quote?.[0]?.close || [];
+      const rows = timestamps
+        .map((ts, index) => ({ ts, price: closes[index], date: new Date(ts * 1000).toISOString().slice(0, 10) }))
+        .filter((row) => Number.isFinite(Number(row.price)));
+      const picked = pickClose(rows);
+      if (picked) {
+        res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=604800');
+        return res.status(200).json({ ticker, date: picked.date, requestedDate: date, price: Number(picked.price), source: 'Yahoo' });
+      }
+    } catch {}
+
+    try {
+      const fromDate = new Date(target - 5 * 86400000).toISOString().slice(0, 10);
+      const toDate = new Date(target + 3 * 86400000).toISOString().slice(0, 10);
+      const nasdaqUrl = new URL(`https://api.nasdaq.com/api/quote/${encodeURIComponent(ticker)}/historical`);
+      nasdaqUrl.searchParams.set('assetclass', 'stocks');
+      nasdaqUrl.searchParams.set('fromdate', fromDate);
+      nasdaqUrl.searchParams.set('todate', toDate);
+      nasdaqUrl.searchParams.set('limit', '20');
+      const nasdaqRes = await fetch(nasdaqUrl, {
+        headers: {
+          'User-Agent': BROWSER_USER_AGENT,
+          Accept: 'application/json, text/plain, */*',
+          Origin: 'https://www.nasdaq.com',
+          Referer: 'https://www.nasdaq.com/',
+        },
+        signal: AbortSignal.timeout(5000),
+      });
+      const rows = ((await nasdaqRes.json())?.data?.tradesTable?.rows || [])
+        .map((row) => {
+          const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(row.date || '');
+          const price = Number(String(row.close || '').replace(/[$,]/g, ''));
+          if (!match || !Number.isFinite(price)) return null;
+          const isoDate = `${match[3]}-${match[1]}-${match[2]}`;
+          return { date: isoDate, ts: Math.floor(Date.UTC(Number(match[3]), Number(match[1]) - 1, Number(match[2])) / 1000), price };
+        })
+        .filter(Boolean);
+      const picked = pickClose(rows);
+      if (picked) {
+        res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=604800');
+        return res.status(200).json({ ticker, date: picked.date, requestedDate: date, price: picked.price, source: 'Nasdaq' });
+      }
+    } catch {}
+
+    try {
+      const d1 = new Date(target - 5 * 86400000).toISOString().slice(0, 10).replace(/-/g, '');
+      const d2 = new Date(target + 3 * 86400000).toISOString().slice(0, 10).replace(/-/g, '');
+      const stooqRes = await fetch(
+        `https://stooq.com/q/d/l/?s=${encodeURIComponent(ticker.toLowerCase() + '.us')}&d1=${d1}&d2=${d2}&i=d`,
+        { headers: { 'User-Agent': BROWSER_USER_AGENT }, signal: AbortSignal.timeout(4500) }
+      );
+      const rows = (await stooqRes.text()).trim().split(/\r?\n/).slice(1)
+        .map((line) => {
+          const [rowDate, , , , close] = line.split(',');
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(rowDate || '')) return null;
+          const [yy, mm, dd] = rowDate.split('-').map(Number);
+          return { date: rowDate, ts: Math.floor(Date.UTC(yy, mm - 1, dd) / 1000), price: Number(close) };
+        })
+        .filter((row) => row && Number.isFinite(row.price));
+      const picked = pickClose(rows);
+      if (picked) {
+        res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=604800');
+        return res.status(200).json({ ticker, date: picked.date, requestedDate: date, price: Number(picked.price), source: 'Stooq' });
+      }
+    } catch {}
+
+    return res.status(200).json({ ticker, date, price: null });
+  }
+
+  // ══════════════════════════════════════════════════
   // A 股中证 500 ETF 期权查询（公开只读，无需账户密码）
   // /api/cn-options?symbol=510500&month=202608
   // ══════════════════════════════════════════════════
@@ -605,6 +717,7 @@ module.exports = async function handler(req, res) {
     const url = new URL(reqUrl, 'http://localhost');
     if (url.searchParams.get('indexOnly') === '1') {
       try {
+        res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=3600');
         return res.status(200).json(await fetchCsi500Index());
       } catch (e) {
         return res.status(502).json({ error: '中证500指数行情拉取失败', detail: e.message });

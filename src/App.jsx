@@ -91,8 +91,36 @@ async function cnIndexFetch(opts={}){
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
   return fetch(`${proxyBase}/api/cn-options?indexOnly=1`,{
     ...opts,
-    signal:opts.signal||AbortSignal.timeout(9000),
+    signal:opts.signal||AbortSignal.timeout(3500),
   });
+}
+
+const CSI500_LOCAL_CACHE='whl-csi500-index-v1';
+function readCsi500Cache(maxAge=24*60*60*1000){
+  try{
+    const saved=JSON.parse(localStorage.getItem(CSI500_LOCAL_CACHE)||'null');
+    return saved?.payload?.price>0&&Date.now()-(saved.savedAt||0)<maxAge?saved.payload:null;
+  }catch{return null;}
+}
+function saveCsi500Cache(payload){
+  if(!(payload?.price>0))return;
+  try{localStorage.setItem(CSI500_LOCAL_CACHE,JSON.stringify({savedAt:Date.now(),payload}));}catch{}
+}
+let csi500IndexPending=null;
+async function loadCsi500Index(force=false){
+  const fresh=readCsi500Cache(5*60*1000);
+  if(!force&&fresh)return fresh;
+  if(csi500IndexPending)return csi500IndexPending;
+  csi500IndexPending=(async()=>{
+    try{
+      const response=await cnIndexFetch();
+      if(!response.ok)return readCsi500Cache();
+      const payload=await response.json();
+      if(payload?.price>0){saveCsi500Cache(payload);return payload;}
+    }catch{}
+    return readCsi500Cache();
+  })().finally(()=>{csi500IndexPending=null;});
+  return csi500IndexPending;
 }
 
 async function cloudPut(data, password) {
@@ -185,6 +213,21 @@ async function fetchStockPrices(tickers){
     }catch{results[ticker]=null;}
   }));
   return results;
+}
+
+async function fetchStockCloseOnDate(ticker,date){
+  const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
+  try{
+    const res=await fetch(`${proxyBase}/api/history/${encodeURIComponent(ticker)}?date=${encodeURIComponent(date)}`,{signal:AbortSignal.timeout(10000)});
+    if(!res.ok)return null;
+    const data=await res.json();
+    const price=Number(data?.price);
+    if(!Number.isFinite(price))return null;
+    return{price,date:data?.date||date,requestedDate:data?.requestedDate||date,source:data?.source||'History'};
+  }catch(e){
+    console.warn(`history fetch ${ticker} ${date}:`,e.message);
+    return null;
+  }
 }
 
 /* ═══════════════════════════════════════════════════
@@ -452,6 +495,21 @@ function calcClosed(c,comm=DEFAULT_COMM){
   const annual=calcAnnual(profit,capital,daysHeld);
   const yld=capital?(profit/capital)*100:null;
   return{qty,openPrem,closePrem,profit,capital,daysHeld,annual,yld,commUsed};
+}
+
+function calcExpiryReview(c,r,expiryPrice,comm=DEFAULT_COMM){
+  if(expiryPrice==null)return null;
+  const qty=c.qty||1;
+  const intrinsicPerShare=c.type==='P'
+    ?Math.max(0,c.strike-expiryPrice)
+    :Math.max(0,expiryPrice-c.strike);
+  const wouldAssign=intrinsicPerShare>0.005;
+  const intrinsicValue=intrinsicPerShare*100*qty;
+  const expiryComm=comm*qty;
+  const expiryMarkProfit=r.openPrem-intrinsicValue-expiryComm;
+  const netDiff=expiryMarkProfit-r.profit;
+  const lostPremium=Math.max(0,r.closePrem);
+  return{wouldAssign,intrinsicPerShare,intrinsicValue,expiryMarkProfit,netDiff,lostPremium};
 }
 
 function calcSgov(s){
@@ -1086,12 +1144,18 @@ function cnMonthLabel(month){
 function CnOptionsPanel({embedded=false}){
   const [symbol,setSymbol]=useState('159922');
   const [data,setData]=useState(null);
+  const [indexQuote,setIndexQuote]=useState(()=>readCsi500Cache());
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState('');
   const [typeFilter,setTypeFilter]=useState('P');
   const [query,setQuery]=useState('');
   const [lastLoaded,setLastLoaded]=useState(null);
   const cacheRef=React.useRef(new Map());
+
+  const refreshIndex=useCallback(async(force=false)=>{
+    const payload=await loadCsi500Index(force);
+    if(payload?.price>0)setIndexQuote(payload);
+  },[]);
 
   const load=useCallback(async(nextSymbol,nextMonth='',force=false)=>{
     const key=`${nextSymbol}-${nextMonth||'near'}`;
@@ -1137,6 +1201,7 @@ function CnOptionsPanel({embedded=false}){
   },[]);
 
   useEffect(()=>{load(symbol,CN_OPTION_NEXT_MONTH);},[symbol,load]);
+  useEffect(()=>{refreshIndex();},[refreshIndex]);
 
   const contracts=(data?.contracts||[]).filter(contract=>{
     if(typeFilter!=='ALL'&&contract.type!==typeFilter)return false;
@@ -1146,6 +1211,8 @@ function CnOptionsPanel({embedded=false}){
   }).sort((a,b)=>a.strike-b.strike||(a.type==='C'?-1:1));
   const selectedTarget=CN_OPTION_TARGETS.find(item=>item.symbol===symbol)||CN_OPTION_TARGETS[0];
   const totalVolume=contracts.reduce((sum,item)=>sum+(item.volume||0),0);
+  const indexPrice=indexQuote?.price??data?.indexPrice??null;
+  const indexQuoteTime=indexQuote?.quoteTime??data?.indexQuoteTime??null;
   const atmStrike=data?.underlyingPrice&&data?.contracts?.length
     ? data.contracts.reduce((best,item)=>Math.abs(item.strike-data.underlyingPrice)<Math.abs(best-data.underlyingPrice)?item.strike:best,data.contracts[0].strike)
     : null;
@@ -1158,7 +1225,7 @@ function CnOptionsPanel({embedded=false}){
           <h2>A股期权数据台</h2>
           <p>中证500 ETF 近月合约 · 实时盘口、成交持仓、IV 与 Delta 一屏查询</p>
         </div>
-        <button className="btn cnopt-refresh" onClick={()=>load(symbol,data?.selectedMonth||'',true)} disabled={loading}>
+        <button className="btn cnopt-refresh" onClick={()=>{load(symbol,data?.selectedMonth||'',true);refreshIndex(true);}} disabled={loading}>
           {loading?'同步中…':'↻ 刷新数据'}
         </button>
       </div>}
@@ -1170,7 +1237,7 @@ function CnOptionsPanel({embedded=false}){
             <span className="cnopt-exchange">{item.exchange}</span>
             <strong>{item.symbol}</strong>
             <span>{item.name}</span>
-            <i>{symbol===item.symbol?'正在查询':'切换标的'} →</i>
+            <i>{symbol===item.symbol?(loading?'正在查询':'当前标的'):'切换标的'} →</i>
           </button>
         ))}
       </div>
@@ -1187,7 +1254,7 @@ function CnOptionsPanel({embedded=false}){
           {(data.stale||data.clientStale||data.warning)&&<div className="cnopt-stale">⚠ {data.warning||'上游行情暂时不可用，正在展示最近一次成功快照。'}</div>}
           <div className="cnopt-snapshot">
             <div><span>标的现价</span><strong>¥ {fmt(data.underlyingPrice,3)}</strong><small>{selectedTarget.exchange} · {symbol}</small></div>
-            <div className="cnopt-index"><span>中证500指数</span><strong>{data.indexPrice==null?'—':fmt(data.indexPrice,2)}</strong><small>{data.indexQuoteTime||'官方指数行情'}</small></div>
+            <div className="cnopt-index"><span>中证500指数</span><strong>{indexPrice==null?'—':fmt(indexPrice,2)}</strong><small>{indexQuoteTime||(indexPrice?'本机最近快照':'独立同步中，不阻塞期权链')}</small></div>
             <div><span>合约月份</span><strong>{cnMonthLabel(data.selectedMonth)}</strong><small>{data.contracts?.[0]?.expiry||'—'} 到期</small></div>
             <div><span>合约数量</span><strong>{data.contracts?.length||0}</strong><small>Call + Put</small></div>
             <div><span>当前筛选成交量</span><strong>{fmt(totalVolume,0)}</strong><small>{contracts.length} 条结果</small></div>
@@ -1221,7 +1288,7 @@ function CnOptionsPanel({embedded=false}){
                 <div className={`cnopt-row ${contract.type==='C'?'call':'put'}${isAtm?' atm':''}`} key={contract.code}>
                   <div className="cnopt-contract-type"><strong>{contract.type==='C'?'CALL':'PUT'}</strong><small>{contract.contractStyle==='A'?'调整合约':'标准合约'}</small></div>
                   <div data-label="ETF行权价"><strong>¥ {fmt(contract.strike,3)}</strong>{isAtm&&<em>ATM</em>}</div>
-                  <div data-label="指数等效"><strong>{contract.indexStrike==null&&data.indexPrice&&data.underlyingPrice?fmt(contract.strike/data.underlyingPrice*data.indexPrice,0):fmt(contract.indexStrike,0)}</strong><small>点</small></div>
+                  <div data-label="指数等效"><strong>{data.underlyingPrice&&indexPrice?fmt(contract.strike/data.underlyingPrice*indexPrice,0):fmt(contract.indexStrike,0)}</strong><small>点</small></div>
                   <div data-label="最新"><strong>{fmt(contract.last,4)}</strong></div>
                   <div data-label="Bid / Ask"><span>{fmt(contract.bid,4)}</span><i>/</i><span>{fmt(contract.ask,4)}</span></div>
                   <div data-label="涨跌" className={(contract.changePct||0)>=0?'pos':'neg'}>{contract.changePct==null?'—':`${contract.changePct>=0?'+':''}${fmt(contract.changePct,2)}%`}</div>
@@ -2159,7 +2226,7 @@ function ActiveTableHeader(){
 }
 
 /* ══ 已平仓历史行 ══════════════════════════════════════ */
-function ClosedRow({c,commPerSide,onDelete,positions=[],closed=[]}){
+function ClosedRow({c,commPerSide,onDelete,onUpdateExpiryReview,positions=[],closed=[]}){
   const r=calcClosed(c,commPerSide);
   const isCall=c.type==='C';
   const typeColor=isCall?ACC.loss:ACC.profit;
@@ -2168,7 +2235,10 @@ function ClosedRow({c,commPerSide,onDelete,positions=[],closed=[]}){
   const isRoll=c.closeType==='roll';
   const isManual=!isRoll&&!isAssigned&&!isExpired;
   const canEstimateHold=isManual&&c.expDate&&c.expDate>=today();
+  const canReviewExpiry=!!(c.expDate&&c.expDate<today()&&!isExpired&&!isAssigned);
+  const cachedExpiryPrice=Number.isFinite(Number(c.expiryReviewPrice))?Number(c.expiryReviewPrice):null;
   const [holdQuote,setHoldQuote]=useState({loading:false,data:null,error:false});
+  const [expiryQuote,setExpiryQuote]=useState({loading:false,data:null,error:false});
   const nextPos=positions.find(p=>p.rolledFrom===c.id);
   const nextClosed=closed.find(x=>x.rolledFrom===c.id);
   const rollTo={
@@ -2195,9 +2265,43 @@ function ClosedRow({c,commPerSide,onDelete,positions=[],closed=[]}){
     });
     return()=>{alive=false;};
   },[canEstimateHold,c.ticker,c.expDate,c.strike,c.type]);
+  useEffect(()=>{
+    if(!canReviewExpiry){
+      setExpiryQuote({loading:false,data:null,error:false});
+      return;
+    }
+    if(cachedExpiryPrice!=null){
+      setExpiryQuote({loading:false,data:{
+        price:cachedExpiryPrice,
+        date:c.expiryReviewDate||c.expDate,
+        source:c.expiryReviewSource||'Cached',
+      },error:false});
+      return;
+    }
+    let alive=true;
+    setExpiryQuote({loading:true,data:null,error:false});
+    fetchStockCloseOnDate(c.ticker,c.expDate).then(data=>{
+      if(!alive)return;
+      setExpiryQuote({loading:false,data,error:!data?.price});
+      if(data?.price&&onUpdateExpiryReview){
+        onUpdateExpiryReview(c.id,{
+          price:data.price,
+          date:data.date||c.expDate,
+          source:data.source||'History',
+          manual:false,
+          silent:true,
+        });
+      }
+    }).catch(()=>{
+      if(alive)setExpiryQuote({loading:false,data:null,error:true});
+    });
+    return()=>{alive=false;};
+  },[canReviewExpiry,cachedExpiryPrice,c.expiryReviewDate,c.expiryReviewSource,c.ticker,c.expDate,c.id,onUpdateExpiryReview]);
   const holdPrice=holdQuote.data?.price??null;
   const holdBuyback=holdPrice!=null?holdPrice*100*r.qty:null;
   const holdProfit=holdBuyback!=null?r.openPrem-holdBuyback-r.commUsed:null;
+  const expiryPrice=expiryQuote.data?.price??null;
+  const expiryReview=calcExpiryReview(c,r,expiryPrice,commPerSide);
   const detailNet=isAssigned?r.openPrem-(c.assignedMarketValue||0)-r.commUsed:r.profit;
   const badgeStyle=isRoll
     ?{color:ACC.purple,background:ACC.purpleBg,borderColor:`${ACC.purple}44`}
@@ -2260,7 +2364,41 @@ function ClosedRow({c,commPerSide,onDelete,positions=[],closed=[]}){
           )}
         </div>
         <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-end',paddingRight:8}}>
-          {canEstimateHold?(
+          {canReviewExpiry?(
+            expiryQuote.loading?(
+              <>
+                <span className="section-label">到期复盘</span>
+                <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:12,color:V('faint')}}>拉取中...</span>
+              </>
+            ):expiryReview?(
+              <>
+                <span className="section-label">到期复盘</span>
+                <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:12,color:expiryReview.wouldAssign?ACC.loss:ACC.profit,fontWeight:700}}>
+                  {expiryReview.wouldAssign?'会行权':'未行权'}
+                  <span style={{color:V('dim'),fontWeight:600}}> · </span>
+                  <InlineEdit value={expiryPrice} onSave={v=>onUpdateExpiryReview&&onUpdateExpiryReview(c.id,{
+                    price:v,date:c.expDate,source:'Manual',manual:true,
+                  })}/>
+                </span>
+                <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>
+                  {expiryQuote.data?.date&&expiryQuote.data.date!==c.expDate?`${expiryQuote.data.date} 收盘`:c.expiryReviewManual?'手动修正':'已缓存'}
+                </span>
+                <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:12,color:expiryReview.wouldAssign?ACC.amber:ACC.loss,fontWeight:600}}>
+                  {expiryReview.wouldAssign
+                    ?`避开内在 $${fmt(expiryReview.intrinsicValue)}`
+                    :`少收权利金 $${fmt(expiryReview.lostPremium)}`}
+                </span>
+              </>
+            ):(
+              <>
+                <span className="section-label">到期复盘</span>
+                <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:12,color:V('faint')}}>暂无到期价</span>
+                <InlineEdit value={null} onSave={v=>onUpdateExpiryReview&&onUpdateExpiryReview(c.id,{
+                  price:v,date:c.expDate,source:'Manual',manual:true,
+                })}/>
+              </>
+            )
+          ):canEstimateHold?(
             holdQuote.loading?(
               <>
                 <span className="section-label">未平估算</span>
@@ -2411,7 +2549,7 @@ function ClosedTableHeader(){
   const H=({t,right})=><div style={{fontSize:10,color:V('faint'),letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',textAlign:right?'right':'left',padding:'0 4px'}}>{t}</div>;
   return(
     <div className="closed-table-header" style={{display:'grid',gridTemplateColumns:CLOSED_GRID,alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
-      <div/><H t="标的"/><H t="行权价"/><H t="开/平仓日"/><H t="方式"/><H t="收支明细"/><H t="未平估算" right/><H t="净利润" right/><H t="实现年化" right/><div/>
+      <div/><H t="标的"/><H t="行权价"/><H t="开/平仓日"/><H t="方式"/><H t="收支明细"/><H t="估算 / 复盘" right/><H t="净利润" right/><H t="实现年化" right/><div/>
     </div>
   );
 }
@@ -2635,15 +2773,11 @@ function CnStockRow({stock,onUpdate,onDelete}){
 function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,onAccountChange,showToast}){
   const [view,setView]=useState('options');
   const [showForm,setShowForm]=useState(false);
-  const [indexQuote,setIndexQuote]=useState(null);
+  const [indexQuote,setIndexQuote]=useState(()=>readCsi500Cache());
   useEffect(()=>{
-    const controller=new AbortController();
-    cnIndexFetch({signal:controller.signal}).then(async response=>{
-      if(!response.ok)return;
-      const payload=await response.json();
-      if(payload?.price>0)setIndexQuote(payload);
-    }).catch(()=>{});
-    return()=>controller.abort();
+    let alive=true;
+    loadCsi500Index().then(payload=>{if(alive&&payload?.price>0)setIndexQuote(payload);});
+    return()=>{alive=false;};
   },[]);
   const totalMargin=positions.reduce((sum,p)=>sum+num(p.marginUsed),0);
   const optionPnl=positions.reduce((sum,p)=>sum+calcCnOption(p).pnl,0);
@@ -2860,6 +2994,22 @@ cloudLoaded.current=true;
     setClosed(next);lss(SK.CLOSED,next);
     pushCloud(buildPayload(positions,next,stocks,sgov,cfg));
   };
+  const updateClosedExpiryReview=useCallback((id,data)=>{
+    setClosed(prev=>{
+      const next=prev.map(c=>c.id===id?{
+        ...c,
+        expiryReviewPrice:data.price,
+        expiryReviewDate:data.date,
+        expiryReviewSource:data.source||'History',
+        expiryReviewManual:!!data.manual,
+        expiryReviewUpdatedAt:Date.now(),
+      }:c);
+      lss(SK.CLOSED,next);
+      pushCloud(buildPayload(positions,next,stocks,sgov,cfg));
+      return next;
+    });
+    if(!data.silent)showToast('到期价已修正');
+  },[positions,stocks,sgov,cfg,pushCloud]);
   const mutateStocks=(next)=>{
     setStocks(next);lss(SK.STOCKS,next);
     pushCloud(buildPayload(positions,closed,next,sgov,cfg));
@@ -3167,7 +3317,7 @@ cloudLoaded.current=true;
                 </div>
               ):(<>
                 <ClosedTableHeader/>
-                {closed.map(c=><ClosedRow key={c.id} c={c} commPerSide={commPerSide} positions={positions} closed={closed} onDelete={()=>removeClosedRecord(c.id)}/>)}
+                {closed.map(c=><ClosedRow key={c.id} c={c} commPerSide={commPerSide} positions={positions} closed={closed} onUpdateExpiryReview={updateClosedExpiryReview} onDelete={()=>removeClosedRecord(c.id)}/>)}
               </>)}
             </>
           )}
