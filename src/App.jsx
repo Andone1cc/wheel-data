@@ -26,6 +26,7 @@ const SK={
   CN_POS:'whl-cn-pos-v1',CN_CLOSED:'whl-cn-closed-v1',CN_STOCKS:'whl-cn-stocks-v1',
   KEY:'whl-api-key',FH_KEY:'whl-finnhub-key',THEME:'whl-theme',
 };
+const US_ACCOUNT_TABS=['active','stocks','closed','sgov'];
 const CLOSED_GRID='3px minmax(104px,.7fr) minmax(78px,.55fr) minmax(118px,.8fr) minmax(128px,.85fr) minmax(230px,1.35fr) minmax(148px,.95fr) minmax(112px,.75fr) minmax(112px,.75fr) 32px';
 
 /* ── 本地缓存（localStorage）：仅作本设备快速启动用，云端为主 ── */
@@ -83,6 +84,14 @@ async function cnOptionFetch(symbol,month='',opts={}){
   return fetch(`${proxyBase}/api/cn-options?${params.toString()}`,{
     ...opts,
     signal:opts.signal||AbortSignal.timeout(20000),
+  });
+}
+
+async function cnIndexFetch(opts={}){
+  const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
+  return fetch(`${proxyBase}/api/cn-options?indexOnly=1`,{
+    ...opts,
+    signal:opts.signal||AbortSignal.timeout(9000),
   });
 }
 
@@ -1178,10 +1187,11 @@ function CnOptionsPanel({embedded=false}){
           {(data.stale||data.clientStale||data.warning)&&<div className="cnopt-stale">⚠ {data.warning||'上游行情暂时不可用，正在展示最近一次成功快照。'}</div>}
           <div className="cnopt-snapshot">
             <div><span>标的现价</span><strong>¥ {fmt(data.underlyingPrice,3)}</strong><small>{selectedTarget.exchange} · {symbol}</small></div>
+            <div className="cnopt-index"><span>中证500指数</span><strong>{data.indexPrice==null?'—':fmt(data.indexPrice,2)}</strong><small>{data.indexQuoteTime||'官方指数行情'}</small></div>
             <div><span>合约月份</span><strong>{cnMonthLabel(data.selectedMonth)}</strong><small>{data.contracts?.[0]?.expiry||'—'} 到期</small></div>
             <div><span>合约数量</span><strong>{data.contracts?.length||0}</strong><small>Call + Put</small></div>
             <div><span>当前筛选成交量</span><strong>{fmt(totalVolume,0)}</strong><small>{contracts.length} 条结果</small></div>
-            <div className="cnopt-source"><span>Greeks 口径</span><strong>{data.exchange==='SZSE'?'本地 BS 反推':'实时行情'}</strong><small>{data.quoteTime||'—'}</small></div>
+            <div className="cnopt-source"><span>行情 / Greeks</span><strong>交易所官方</strong><small>{data.exchange==='SZSE'?'官方收盘价 · BS 反推':'官方实时价 · BS 反推'}</small></div>
           </div>
 
           <div className="cnopt-toolbar">
@@ -1199,18 +1209,19 @@ function CnOptionsPanel({embedded=false}){
             </div>
           </div>
 
-          <div className="cnopt-note"><span>i</span>{data.greekNote}<b> 行情为延时/收盘快照，仅用于数据研究。</b></div>
+          <div className="cnopt-note"><span>i</span>{data.greekNote}<b> 指数等效 = 行权价 ÷ ETF 现价 × 中证500现点，受跟踪误差与分红影响，仅作近似参考。</b></div>
 
           <div className={`cnopt-chain${loading?' loading':''}`}>
             <div className="cnopt-chain-head">
-              {['方向','行权价','最新','Bid / Ask','涨跌','成交量','持仓量','IV','Delta','到期','合约'].map(label=><span key={label}>{label}</span>)}
+              {['方向','ETF行权价','指数等效','最新','Bid / Ask','涨跌','成交量','持仓量','IV','Delta','到期','合约'].map(label=><span key={label}>{label}</span>)}
             </div>
             {contracts.map(contract=>{
               const isAtm=atmStrike!=null&&contract.strike===atmStrike;
               return(
                 <div className={`cnopt-row ${contract.type==='C'?'call':'put'}${isAtm?' atm':''}`} key={contract.code}>
                   <div className="cnopt-contract-type"><strong>{contract.type==='C'?'CALL':'PUT'}</strong><small>{contract.contractStyle==='A'?'调整合约':'标准合约'}</small></div>
-                  <div data-label="行权价"><strong>¥ {fmt(contract.strike,3)}</strong>{isAtm&&<em>ATM</em>}</div>
+                  <div data-label="ETF行权价"><strong>¥ {fmt(contract.strike,3)}</strong>{isAtm&&<em>ATM</em>}</div>
+                  <div data-label="指数等效"><strong>{contract.indexStrike==null&&data.indexPrice&&data.underlyingPrice?fmt(contract.strike/data.underlyingPrice*data.indexPrice,0):fmt(contract.indexStrike,0)}</strong><small>点</small></div>
                   <div data-label="最新"><strong>{fmt(contract.last,4)}</strong></div>
                   <div data-label="Bid / Ask"><span>{fmt(contract.bid,4)}</span><i>/</i><span>{fmt(contract.ask,4)}</span></div>
                   <div data-label="涨跌" className={(contract.changePct||0)>=0?'pos':'neg'}>{contract.changePct==null?'—':`${contract.changePct>=0?'+':''}${fmt(contract.changePct,2)}%`}</div>
@@ -2447,6 +2458,8 @@ const cnMoney=(n,currency='CNY',signed=false,d=2)=>{
 };
 const datePlus=(days)=>{const d=new Date();d.setDate(d.getDate()+days);return d.toISOString().slice(0,10);};
 const num=(value,fallback=0)=>{const n=Number(value);return Number.isFinite(n)?n:fallback;};
+const cnIndexEquivalent=(strike,etfPrice,indexPrice)=>num(strike)>0&&num(etfPrice)>0&&num(indexPrice)>0
+  ?num(strike)/num(etfPrice)*num(indexPrice):null;
 
 function calcCnOption(p,markPrice=p.currentPrice){
   const qty=Math.max(1,num(p.qty,1));
@@ -2505,11 +2518,11 @@ function calcCnClosed(p){
   return{...r,pnl,totalFees:r.fees+closeFees,daysHeld,annual:calcAnnual(pnl,capital,daysHeld)};
 }
 
-function CnOptionForm({onAdd,onCancel}){
+function CnOptionForm({onAdd,onCancel,currentIndex}){
   const [f,setF]=useState({
     underlying:'159922',underlyingName:'嘉实中证500ETF',exchange:'SZSE',contractCode:'',
     type:'P',side:'SELL',strike:'',qty:'1',multiplier:'10000',openDate:today(),expDate:datePlus(30),
-    openPrice:'',currentPrice:'',underlyingPrice:'',delta:'',iv:'',marginUsed:'',fees:'0',
+    openPrice:'',currentPrice:'',underlyingPrice:'',indexPrice:currentIndex??'',delta:'',iv:'',marginUsed:'',fees:'0',
   });
   const set=(key,value)=>setF(prev=>({...prev,[key]:value}));
   const valid=f.underlying&&f.strike&&f.qty&&f.multiplier&&f.openPrice&&f.expDate;
@@ -2518,7 +2531,8 @@ function CnOptionForm({onAdd,onCancel}){
     onAdd({...f,id:Date.now(),qty:num(f.qty,1),multiplier:num(f.multiplier,10000),strike:num(f.strike),
       openPrice:num(f.openPrice),currentPrice:f.currentPrice===''?num(f.openPrice):num(f.currentPrice),
       underlyingPrice:f.underlyingPrice===''?null:num(f.underlyingPrice),delta:f.delta===''?null:num(f.delta),
-      iv:f.iv===''?null:num(f.iv)/100,marginUsed:num(f.marginUsed),fees:num(f.fees),currency:'CNY'});
+      indexPrice:f.indexPrice===''?null:num(f.indexPrice),iv:f.iv===''?null:num(f.iv)/100,
+      marginUsed:num(f.marginUsed),fees:num(f.fees),currency:'CNY'});
   };
   return(
     <div className="cn-account-form anim-in">
@@ -2536,6 +2550,7 @@ function CnOptionForm({onAdd,onCancel}){
         <NumField label="开仓价" prefix="¥" value={f.openPrice} onChange={v=>set('openPrice',v)} placeholder="0.1200"/>
         <NumField label="期权现价" prefix="¥" value={f.currentPrice} onChange={v=>set('currentPrice',v)} placeholder="默认等于开仓价"/>
         <NumField label="标的现价" prefix="¥" value={f.underlyingPrice} onChange={v=>set('underlyingPrice',v)} placeholder="可选"/>
+        <NumField label="中证500指数" value={f.indexPrice} onChange={v=>set('indexPrice',v)} suffix="点" placeholder="自动获取"/>
         <DateField label="开仓日期" value={f.openDate} onChange={v=>set('openDate',v)}/>
         <DateField label="到期日期" value={f.expDate} onChange={v=>set('expDate',v)}/>
         <NumField label="Delta" value={f.delta} onChange={v=>set('delta',v)} placeholder="-0.18"/>
@@ -2548,11 +2563,13 @@ function CnOptionForm({onAdd,onCancel}){
   );
 }
 
-function CnOptionRow({p,totalMargin,onUpdate,onClose,onDelete}){
+function CnOptionRow({p,totalMargin,currentIndex,onUpdate,onClose,onDelete}){
   const [mode,setMode]=useState('');
-  const [edit,setEdit]=useState({currentPrice:p.currentPrice??'',underlyingPrice:p.underlyingPrice??'',delta:p.delta??'',iv:p.iv==null?'':p.iv*100,marginUsed:p.marginUsed??''});
+  const [edit,setEdit]=useState({currentPrice:p.currentPrice??'',underlyingPrice:p.underlyingPrice??'',indexPrice:currentIndex??p.indexPrice??'',delta:p.delta??'',iv:p.iv==null?'':p.iv*100,marginUsed:p.marginUsed??''});
   const [close,setClose]=useState({closePrice:p.currentPrice??'',closeDate:today(),closeFees:'0'});
   const r=calcCnOption(p),health=scoreCnOption(p,r,totalMargin);
+  const indexPrice=currentIndex??p.indexPrice;
+  const indexStrike=cnIndexEquivalent(p.strike,p.underlyingPrice,indexPrice);
   const setE=(key,value)=>setEdit(prev=>({...prev,[key]:value}));
   const setC=(key,value)=>setClose(prev=>({...prev,[key]:value}));
   return(
@@ -2563,14 +2580,14 @@ function CnOptionRow({p,totalMargin,onUpdate,onClose,onDelete}){
           <Stat label="行权价" value={`¥${fmt(p.strike,3)}`} sub={`${r.qty}张 × ${fmt(r.multiplier,0)}`}/>
           <Stat label="到期" value={`${r.daysLeft}天`} sub={p.expDate}/>
           <Stat label="开仓 / 现价" value={`${fmt(p.openPrice,4)} / ${fmt(p.currentPrice,4)}`} sub={p.contractCode||'手动录入'}/>
-          <Stat label="标的现价" value={p.underlyingPrice==null?'待录入':`¥${fmt(p.underlyingPrice,3)}`} sub={r.buffer==null?'未计算缓冲':`缓冲 ${fmt(r.buffer,1)}%`}/>
+          <Stat label="ETF / 指数等效" value={p.underlyingPrice==null?'待录入':`¥${fmt(p.underlyingPrice,3)} → ${indexStrike==null?'—':fmt(indexStrike,0)}点`} sub={`${indexPrice?`中证500 ${fmt(indexPrice,0)} · `:''}${r.buffer==null?'未计算缓冲':`缓冲 ${fmt(r.buffer,1)}%`}`}/>
           <Stat label="IV / Delta" value={`${p.iv==null?'—':fmt(p.iv*100,1)+'%'} / ${p.delta==null?'—':fmt(p.delta,3)}`} sub={`保证金 ${cnMoney(r.margin)}`}/>
           <Stat label="浮动盈亏" value={cnMoney(r.pnl,'CNY',true)} sub={`手续费 ${cnMoney(r.fees)}`} color={r.pnl>=0?ACC.profit:ACC.loss}/>
         </div>
         <div className="cn-position-side"><span className="section-label">健康分</span><strong className="health-pill" style={{'--health-color':health.color}}>{health.score}</strong><small style={{color:health.color}}>{health.label}</small></div>
         <div className="cn-row-actions"><button onClick={()=>setMode(mode==='edit'?'':'edit')}>更新</button><button className="profit" onClick={()=>setMode(mode==='close'?'':'close')}>平仓</button><button className="danger" onClick={()=>{if(window.confirm(`确认删除 ${p.underlying} 这笔持仓？`))onDelete(p.id);}}>删除</button></div>
       </div>
-      {mode==='edit'&&<div className="cn-inline-panel"><div className="cn-inline-grid"><NumField label="期权现价" prefix="¥" value={edit.currentPrice} onChange={v=>setE('currentPrice',v)}/><NumField label="标的现价" prefix="¥" value={edit.underlyingPrice} onChange={v=>setE('underlyingPrice',v)}/><NumField label="Delta" value={edit.delta} onChange={v=>setE('delta',v)}/><NumField label="IV" suffix="%" value={edit.iv} onChange={v=>setE('iv',v)}/><NumField label="保证金占用" prefix="¥" value={edit.marginUsed} onChange={v=>setE('marginUsed',v)}/></div><div className="cn-form-actions"><button className="btn btn-primary" onClick={()=>{onUpdate(p.id,{currentPrice:num(edit.currentPrice),underlyingPrice:edit.underlyingPrice===''?null:num(edit.underlyingPrice),delta:edit.delta===''?null:num(edit.delta),iv:edit.iv===''?null:num(edit.iv)/100,marginUsed:num(edit.marginUsed)});setMode('');}}>保存行情</button><button className="btn btn-ghost" onClick={()=>setMode('')}>取消</button></div></div>}
+      {mode==='edit'&&<div className="cn-inline-panel"><div className="cn-inline-grid"><NumField label="期权现价" prefix="¥" value={edit.currentPrice} onChange={v=>setE('currentPrice',v)}/><NumField label="标的现价" prefix="¥" value={edit.underlyingPrice} onChange={v=>setE('underlyingPrice',v)}/><NumField label="中证500指数" suffix="点" value={edit.indexPrice} onChange={v=>setE('indexPrice',v)}/><NumField label="Delta" value={edit.delta} onChange={v=>setE('delta',v)}/><NumField label="IV" suffix="%" value={edit.iv} onChange={v=>setE('iv',v)}/><NumField label="保证金占用" prefix="¥" value={edit.marginUsed} onChange={v=>setE('marginUsed',v)}/></div><div className="cn-form-actions"><button className="btn btn-primary" onClick={()=>{onUpdate(p.id,{currentPrice:num(edit.currentPrice),underlyingPrice:edit.underlyingPrice===''?null:num(edit.underlyingPrice),indexPrice:edit.indexPrice===''?null:num(edit.indexPrice),delta:edit.delta===''?null:num(edit.delta),iv:edit.iv===''?null:num(edit.iv)/100,marginUsed:num(edit.marginUsed)});setMode('');}}>保存行情</button><button className="btn btn-ghost" onClick={()=>setMode('')}>取消</button></div></div>}
       {mode==='close'&&<div className="cn-inline-panel close"><div><strong>确认平仓</strong><p>实现收益会按开平价、方向、乘数及两端手续费计算。</p></div><div className="cn-inline-grid compact"><NumField label="平仓价" prefix="¥" value={close.closePrice} onChange={v=>setC('closePrice',v)}/><DateField label="平仓日期" value={close.closeDate} onChange={v=>setC('closeDate',v)}/><NumField label="平仓手续费" prefix="¥" value={close.closeFees} onChange={v=>setC('closeFees',v)}/></div><div className="cn-form-actions"><button className="btn btn-primary" disabled={close.closePrice===''} onClick={()=>onClose(p,{closePrice:num(close.closePrice),closeDate:close.closeDate,closeFees:num(close.closeFees)})}>计入已平仓</button><button className="btn btn-ghost" onClick={()=>setMode('')}>取消</button></div></div>}
     </article>
   );
@@ -2618,6 +2635,16 @@ function CnStockRow({stock,onUpdate,onDelete}){
 function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,onAccountChange,showToast}){
   const [view,setView]=useState('options');
   const [showForm,setShowForm]=useState(false);
+  const [indexQuote,setIndexQuote]=useState(null);
+  useEffect(()=>{
+    const controller=new AbortController();
+    cnIndexFetch({signal:controller.signal}).then(async response=>{
+      if(!response.ok)return;
+      const payload=await response.json();
+      if(payload?.price>0)setIndexQuote(payload);
+    }).catch(()=>{});
+    return()=>controller.abort();
+  },[]);
   const totalMargin=positions.reduce((sum,p)=>sum+num(p.marginUsed),0);
   const optionPnl=positions.reduce((sum,p)=>sum+calcCnOption(p).pnl,0);
   const closedPnl=closed.reduce((sum,p)=>sum+calcCnClosed(p).pnl,0);
@@ -2633,7 +2660,7 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
     <section className="cn-account">
       <div className="cn-account-hero">
         <div><div className="cnopt-kicker">CN / HK CONNECT · PORTFOLIO</div><h2>A/H 股账户</h2><p>A 股期权、A 股与港股通股票统一管理；币种独立汇总，风险口径不依赖 SGOV。</p></div>
-        <div className="cn-account-hero-badges"><span>人民币账户</span><span>港股通</span><span>手动行情可编辑</span></div>
+        <div className="cn-account-hero-badges"><span>人民币账户</span><span>港股通</span><span>{indexQuote?.price?`中证500 ${fmt(indexQuote.price,0)}点`:'指数同步中'}</span></div>
       </div>
       <div className="cn-account-overview">
         <div><span>活跃期权</span><strong>{positions.length}</strong><small>浮盈 {cnMoney(optionPnl,'CNY',true)}</small></div>
@@ -2650,8 +2677,8 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
       </div>
 
       {view==='options'&&<>
-        {showForm&&<CnOptionForm onAdd={addPosition} onCancel={()=>setShowForm(false)}/>}
-        {!positions.length&&!showForm?<div className="cn-account-empty"><span>Δ</span><strong>还没有 A 股期权持仓</strong><p>录入买入或卖出仓位后，会自动计算浮盈、价外缓冲和健康分。</p><button className="btn btn-primary" onClick={()=>setShowForm(true)}>＋ 录入第一笔</button></div>:<div className="cn-position-list">{positions.map(p=><CnOptionRow key={p.id} p={p} totalMargin={totalMargin} onUpdate={(id,patch)=>onPositions(positions.map(item=>item.id===id?{...item,...patch}:item))} onClose={closePosition} onDelete={id=>onPositions(positions.filter(item=>item.id!==id))}/>)}</div>}
+        {showForm&&<CnOptionForm onAdd={addPosition} onCancel={()=>setShowForm(false)} currentIndex={indexQuote?.price}/>}
+        {!positions.length&&!showForm?<div className="cn-account-empty"><span>Δ</span><strong>还没有 A 股期权持仓</strong><p>录入买入或卖出仓位后，会自动计算浮盈、指数等效行权价和健康分。</p><button className="btn btn-primary" onClick={()=>setShowForm(true)}>＋ 录入第一笔</button></div>:<div className="cn-position-list">{positions.map(p=><CnOptionRow key={p.id} p={p} totalMargin={totalMargin} currentIndex={indexQuote?.price} onUpdate={(id,patch)=>onPositions(positions.map(item=>item.id===id?{...item,...patch}:item))} onClose={closePosition} onDelete={id=>onPositions(positions.filter(item=>item.id!==id))}/>)}</div>}
       </>}
 
       {view==='stocks'&&<>
@@ -3041,12 +3068,12 @@ cloudLoaded.current=true;
                 borderColor:cloudStatus==='ok'?`${ACC.teal}44`:cloudStatus==='err'?`${ACC.loss}44`:cloudStatus==='syncing'?`${ACC.amber}44`:V('line')}}>
               {cloudStatus==='ok'?'☁ 已同步':cloudStatus==='err'?'☁ 同步失败':cloudStatus==='syncing'?'☁ 同步中…':'☁ 未配置'}
             </button>
-            <button onClick={()=>setShowCommModal(true)} className="btn btn-ghost btn-comm" style={{fontSize:12,fontFamily:'IBM Plex Mono,monospace',padding:'7px 12px'}}>¢ ${commPerSide}/张</button>
-            <button onClick={refreshPrices} disabled={!!loading} className="btn"
+            {US_ACCOUNT_TABS.includes(tab)&&<button onClick={()=>setShowCommModal(true)} className="btn btn-ghost btn-comm" style={{fontSize:12,fontFamily:'IBM Plex Mono,monospace',padding:'7px 12px'}}>¢ ${commPerSide}/张</button>}
+            {US_ACCOUNT_TABS.includes(tab)&&<button onClick={refreshPrices} disabled={!!loading} className="btn"
               style={{background:loading==='refresh'?V('line'):ACC.blueBg,color:loading==='refresh'?V('faint'):ACC.blue,
                 border:`1.5px solid ${loading==='refresh'?V('line'):`${ACC.blue}44`}`,fontWeight:500}}>
               {loading==='refresh'?'拉取中…':'↻ CBOE 刷新'}
-            </button>
+            </button>}
             {tab==='active'&&<button onClick={()=>setShowForm(s=>!s)} className="btn"
               style={{background:ACC.amberSoft,color:ACC.amber,border:`1.5px solid ${ACC.amber}44`,fontWeight:600}}>
               {showForm?'✕ 取消':'＋ 添加'}
@@ -3060,33 +3087,17 @@ cloudLoaded.current=true;
       <div className="layout" style={{flex:1}}>
         {/* 左侧 Tab 导航 */}
         <div className="sidebar">
-          <div className="sidebar-section">仓位</div>
-          <button className={`tab-btn${tab==='active'?' active':''}`} onClick={()=>setTab('active')}>
+          <div className="sidebar-section">账户</div>
+          <button className={`tab-btn${US_ACCOUNT_TABS.includes(tab)?' active':''}`} onClick={()=>setTab('active')}>
             <span className="tab-dot" style={{background:ACC.profit}}/>
-            <span className="tab-label tab-label-full">活跃期权</span><span className="tab-label tab-label-short">活跃</span>
-            <span className="tab-count">{positions.length}</span>
+            <span className="tab-label tab-label-full">美股账户</span><span className="tab-label tab-label-short">美股</span>
+            <span className="tab-unit">USD</span>
+            <span className="tab-count">{positions.length+stocks.length}</span>
           </button>
-          <button className={`tab-btn${tab==='stocks'?' active':''}`} onClick={()=>setTab('stocks')}>
-            <span className="tab-dot" style={{background:ACC.blue}}/>
-            <span className="tab-label tab-label-full">股票持仓</span><span className="tab-label tab-label-short">股票</span>
-            <span className="tab-count">{stocks.length}</span>
-          </button>
-          <button className={`tab-btn${tab==='closed'?' active':''}`} onClick={()=>setTab('closed')}>
-            <span className="tab-dot" style={{background:V('faint')}}/>
-            <span className="tab-label tab-label-full">已平仓</span><span className="tab-label tab-label-short">平仓</span>
-            <span className="tab-count">{closed.length}</span>
-          </button>
-          <div className="sidebar-sep"/>
-          <div className="sidebar-section">底仓</div>
-          <button className={`tab-btn${tab==='sgov'?' active':''}`} onClick={()=>setTab('sgov')}>
-            <span className="tab-dot" style={{background:ACC.teal}}/>
-            <span className="tab-label">SGOV</span>
-          </button>
-          <div className="sidebar-sep"/>
-          <div className="sidebar-section">A/H 市场</div>
           <button className={`tab-btn${tab==='cnaccount'?' active':''}`} onClick={()=>setTab('cnaccount')}>
             <span className="tab-dot" style={{background:ACC.loss}}/>
             <span className="tab-label tab-label-full">A/H 股账户</span><span className="tab-label tab-label-short">A/H</span>
+            <span className="tab-unit">CNY</span>
             <span className="tab-count">{cnPositions.length+cnStocks.length}</span>
           </button>
           <div className="sidebar-sep"/>
@@ -3103,6 +3114,17 @@ cloudLoaded.current=true;
 
         {/* 右侧内容 */}
         <div className="main-area">
+          {US_ACCOUNT_TABS.includes(tab)&&(
+            <div className="market-account-bar us-market">
+              <div className="market-account-title"><span>US PORTFOLIO</span><strong>美股账户</strong><b>$ · USD</b></div>
+              <div className="market-account-tabs">
+                {[
+                  ['active','活跃期权',positions.length],['stocks','股票持仓',stocks.length],
+                  ['closed','期权已平仓',closed.length],['sgov','SGOV 底仓',null],
+                ].map(([key,label,count])=><button key={key} className={tab===key?'active':''} onClick={()=>setTab(key)}><span>{label}</span>{count!=null&&<b>{count}</b>}</button>)}
+              </div>
+            </div>
+          )}
           {/* 活跃仓位 Tab */}
           {tab==='active'&&(
             <>
