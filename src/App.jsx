@@ -2619,6 +2619,8 @@ const cnMoney=(n,currency='CNY',signed=false,d=2)=>{
 };
 const datePlus=(days)=>{const d=new Date();d.setDate(d.getDate()+days);return d.toISOString().slice(0,10);};
 const num=(value,fallback=0)=>{const n=Number(value);return Number.isFinite(n)?n:fallback;};
+const CN_OPTION_FEE_PER_CONTRACT=2;
+const cnOptionFee=(value,qty,manual=false)=>manual?num(value):(num(value)>0?num(value):Math.max(1,num(qty,1))*CN_OPTION_FEE_PER_CONTRACT);
 const cnIndexEquivalent=(strike,etfPrice,indexPrice)=>num(strike)>0&&num(etfPrice)>0&&num(indexPrice)>0
   ?num(strike)/num(etfPrice)*num(indexPrice):null;
 const cnOptionExpiry=(month)=>{
@@ -2664,7 +2666,7 @@ function calcCnOption(p,markPrice=p.currentPrice){
   const currentPrice=num(markPrice);
   const direction=p.side==='BUY'?1:-1;
   const gross=(currentPrice-openPrice)*multiplier*qty*direction;
-  const fees=num(p.fees);
+  const fees=cnOptionFee(p.fees,qty,p.feesManual===true);
   const pnl=gross-fees;
   const openCash=openPrice*multiplier*qty;
   const nominal=num(p.strike)*multiplier*qty;
@@ -2707,7 +2709,7 @@ function scoreCnOption(p,r,totalMargin=0){
 
 function calcCnClosed(p){
   const r=calcCnOption(p,p.closePrice);
-  const closeFees=num(p.closeFees);
+  const closeFees=cnOptionFee(p.closeFees,r.qty,p.closeFeesManual===true);
   const pnl=r.pnl-closeFees;
   const daysHeld=Math.max(1,daysBetween(p.openDate||today(),p.closeDate||today()));
   const capital=num(p.marginUsed)||r.openCash||r.nominal;
@@ -2718,7 +2720,7 @@ function CnOptionForm({onAdd,onCancel,currentIndex}){
   const [f,setF]=useState({
     underlying:'159922',underlyingName:'嘉实中证500ETF',exchange:'SZSE',contractCode:'',
     type:'P',side:'SELL',strike:'',qty:'1',multiplier:'10000',openDate:today(),expDate:cnOptionExpiry(CN_OPTION_NEXT_MONTH),
-    openPrice:'',currentPrice:'',underlyingPrice:'',indexPrice:currentIndex??'',delta:'',iv:'',marginUsed:'',fees:'0',
+    openPrice:'',currentPrice:'',underlyingPrice:'',indexPrice:currentIndex??'',delta:'',iv:'',marginUsed:'',fees:'',
   });
   const [advanced,setAdvanced]=useState(false);
   const set=(key,value)=>setF(prev=>({...prev,[key]:value}));
@@ -2737,7 +2739,7 @@ function CnOptionForm({onAdd,onCancel,currentIndex}){
       openPrice:num(f.openPrice),currentPrice:f.currentPrice===''?num(f.openPrice):num(f.currentPrice),
       underlyingPrice:f.underlyingPrice===''?null:num(f.underlyingPrice),delta:f.delta===''?null:num(f.delta),
       indexPrice:f.indexPrice===''?null:num(f.indexPrice),iv:f.iv===''?null:num(f.iv)/100,
-      marginUsed:num(f.marginUsed),fees:num(f.fees),currency:'CNY'});
+      marginUsed:num(f.marginUsed),fees:f.fees===''?qty*CN_OPTION_FEE_PER_CONTRACT:num(f.fees),feesManual:f.fees!=='',feePerContract:CN_OPTION_FEE_PER_CONTRACT,currency:'CNY'});
   };
   return(
     <div className="cn-account-form anim-in">
@@ -2753,7 +2755,7 @@ function CnOptionForm({onAdd,onCancel,currentIndex}){
         <div className="cn-entry-preview">
           <span>自动计算</span>
           <strong>{f.openPrice?cnMoney(grossPremium):'等待权利金'}</strong>
-          <small>{f.strike?`名义本金 ${cnMoney(nominal)}`:'乘数 10,000 份/张'}</small>
+          <small>{f.strike?`名义本金 ${cnMoney(nominal)} · 手续费 ¥${CN_OPTION_FEE_PER_CONTRACT}/张`:`乘数 10,000 份/张 · 手续费 ¥${CN_OPTION_FEE_PER_CONTRACT}/张`}</small>
         </div>
       </div>
       <button type="button" className={`cn-advanced-toggle${advanced?' open':''}`} onClick={()=>setAdvanced(value=>!value)} aria-expanded={advanced}>
@@ -2767,7 +2769,7 @@ function CnOptionForm({onAdd,onCancel,currentIndex}){
         <NumField label="Delta" value={f.delta} onChange={v=>set('delta',v)} placeholder="-0.18"/>
         <NumField label="IV" value={f.iv} onChange={v=>set('iv',v)} suffix="%" placeholder="25.0"/>
         <NumField label="保证金占用" prefix="¥" value={f.marginUsed} onChange={v=>set('marginUsed',v)} placeholder="卖方选填"/>
-        <NumField label="累计手续费" prefix="¥" value={f.fees} onChange={v=>set('fees',v)} placeholder="0"/>
+        <NumField label="开仓手续费" prefix="¥" value={f.fees} onChange={v=>set('fees',v)} placeholder={`默认 ${fmt(qty*CN_OPTION_FEE_PER_CONTRACT,2)}`}/>
       </div>}
       <div className="cn-form-actions"><button className="btn btn-primary" disabled={!valid} onClick={submit}>添加仓位</button><button className="btn btn-ghost" onClick={onCancel}>取消</button></div>
     </div>
@@ -2777,7 +2779,7 @@ function CnOptionForm({onAdd,onCancel,currentIndex}){
 function CnOptionRow({p,totalMargin,currentIndex,onUpdate,onClose,onDelete}){
   const [mode,setMode]=useState('');
   const [edit,setEdit]=useState({currentPrice:p.currentPrice??'',underlyingPrice:p.underlyingPrice??'',indexPrice:currentIndex??p.indexPrice??'',delta:p.delta??'',iv:p.iv==null?'':p.iv*100,marginUsed:p.marginUsed??''});
-  const [close,setClose]=useState({closePrice:p.currentPrice??'',closeDate:today(),closeFees:'0'});
+  const [close,setClose]=useState({closePrice:p.currentPrice??'',closeDate:today(),closeFees:String(Math.max(1,num(p.qty,1))*CN_OPTION_FEE_PER_CONTRACT)});
   const r=calcCnOption(p),health=scoreCnOption(p,r,totalMargin);
   const indexPrice=currentIndex??p.indexPrice;
   const indexStrike=cnIndexEquivalent(p.strike,p.underlyingPrice,indexPrice);
@@ -2799,7 +2801,7 @@ function CnOptionRow({p,totalMargin,currentIndex,onUpdate,onClose,onDelete}){
         <div className="cn-row-actions"><button onClick={()=>setMode(mode==='edit'?'':'edit')}>更新</button><button className="profit" onClick={()=>setMode(mode==='close'?'':'close')}>平仓</button><button className="danger" onClick={()=>{if(window.confirm(`确认删除 ${p.underlying} 这笔持仓？`))onDelete(p.id);}}>删除</button></div>
       </div>
       {mode==='edit'&&<div className="cn-inline-panel"><div className="cn-inline-grid"><NumField label="期权现价" prefix="¥" value={edit.currentPrice} onChange={v=>setE('currentPrice',v)}/><NumField label="标的现价" prefix="¥" value={edit.underlyingPrice} onChange={v=>setE('underlyingPrice',v)}/><NumField label="中证500指数" suffix="点" value={edit.indexPrice} onChange={v=>setE('indexPrice',v)}/><NumField label="Delta" value={edit.delta} onChange={v=>setE('delta',v)}/><NumField label="IV" suffix="%" value={edit.iv} onChange={v=>setE('iv',v)}/><NumField label="保证金占用" prefix="¥" value={edit.marginUsed} onChange={v=>setE('marginUsed',v)}/></div><div className="cn-form-actions"><button className="btn btn-primary" onClick={()=>{onUpdate(p.id,{currentPrice:num(edit.currentPrice),underlyingPrice:edit.underlyingPrice===''?null:num(edit.underlyingPrice),indexPrice:edit.indexPrice===''?null:num(edit.indexPrice),delta:edit.delta===''?null:num(edit.delta),iv:edit.iv===''?null:num(edit.iv)/100,marginUsed:num(edit.marginUsed)});setMode('');}}>保存行情</button><button className="btn btn-ghost" onClick={()=>setMode('')}>取消</button></div></div>}
-      {mode==='close'&&<div className="cn-inline-panel close"><div><strong>确认平仓</strong><p>实现收益会按开平价、方向、乘数及两端手续费计算。</p></div><div className="cn-inline-grid compact"><NumField label="平仓价" prefix="¥" value={close.closePrice} onChange={v=>setC('closePrice',v)}/><DateField label="平仓日期" value={close.closeDate} onChange={v=>setC('closeDate',v)}/><NumField label="平仓手续费" prefix="¥" value={close.closeFees} onChange={v=>setC('closeFees',v)}/></div><div className="cn-form-actions"><button className="btn btn-primary" disabled={close.closePrice===''} onClick={()=>onClose(p,{closePrice:num(close.closePrice),closeDate:close.closeDate,closeFees:num(close.closeFees)})}>计入已平仓</button><button className="btn btn-ghost" onClick={()=>setMode('')}>取消</button></div></div>}
+      {mode==='close'&&<div className="cn-inline-panel close"><div><strong>确认平仓</strong><p>实现收益会按开平价、方向、乘数及两端手续费计算。</p></div><div className="cn-inline-grid compact"><NumField label="平仓价" prefix="¥" value={close.closePrice} onChange={v=>setC('closePrice',v)}/><DateField label="平仓日期" value={close.closeDate} onChange={v=>setC('closeDate',v)}/><NumField label="平仓手续费（¥2/张）" prefix="¥" value={close.closeFees} onChange={v=>setC('closeFees',v)}/></div><div className="cn-form-actions"><button className="btn btn-primary" disabled={close.closePrice===''} onClick={()=>onClose(p,{closePrice:num(close.closePrice),closeDate:close.closeDate,closeFees:num(close.closeFees),closeFeesManual:true,closeFeePerContract:CN_OPTION_FEE_PER_CONTRACT})}>计入已平仓</button><button className="btn btn-ghost" onClick={()=>setMode('')}>取消</button></div></div>}
     </article>
   );
 }
