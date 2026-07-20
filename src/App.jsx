@@ -1060,6 +1060,10 @@ const CN_OPTION_TARGETS=[
   {symbol:'510500',name:'南方中证500ETF',exchange:'上交所',accent:ACC.blue},
   {symbol:'159922',name:'嘉实中证500ETF',exchange:'深交所',accent:ACC.teal},
 ];
+const CN_OPTION_NEXT_MONTH=(()=>{
+  const next=new Date(new Date().getFullYear(),new Date().getMonth()+1,1);
+  return `${next.getFullYear()}${String(next.getMonth()+1).padStart(2,'0')}`;
+})();
 
 function cnMonthLabel(month){
   if(!month||month.length!==6)return month||'—';
@@ -1067,11 +1071,11 @@ function cnMonthLabel(month){
 }
 
 function CnOptionsPanel(){
-  const [symbol,setSymbol]=useState('510500');
+  const [symbol,setSymbol]=useState('159922');
   const [data,setData]=useState(null);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState('');
-  const [typeFilter,setTypeFilter]=useState('ALL');
+  const [typeFilter,setTypeFilter]=useState('P');
   const [query,setQuery]=useState('');
   const [lastLoaded,setLastLoaded]=useState(null);
   const cacheRef=React.useRef(new Map());
@@ -1093,7 +1097,7 @@ function CnOptionsPanel(){
     finally{setLoading(false);}
   },[]);
 
-  useEffect(()=>{load(symbol);},[symbol,load]);
+  useEffect(()=>{load(symbol,CN_OPTION_NEXT_MONTH);},[symbol,load]);
 
   const contracts=(data?.contracts||[]).filter(contract=>{
     if(typeFilter!=='ALL'&&contract.type!==typeFilter)return false;
@@ -1123,7 +1127,7 @@ function CnOptionsPanel(){
       <div className="cnopt-targets">
         {CN_OPTION_TARGETS.map(item=>(
           <button key={item.symbol} className={`cnopt-target${symbol===item.symbol?' active':''}`}
-            style={{'--target-accent':item.accent}} onClick={()=>{setSymbol(item.symbol);setTypeFilter('ALL');setQuery('');}}>
+            style={{'--target-accent':item.accent}} onClick={()=>{setSymbol(item.symbol);setTypeFilter('P');setQuery('');}}>
             <span className="cnopt-exchange">{item.exchange}</span>
             <strong>{item.symbol}</strong>
             <span>{item.name}</span>
