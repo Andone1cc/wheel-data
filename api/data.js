@@ -68,10 +68,21 @@ const SINA_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36',
   Referer: 'https://stock.finance.sina.com.cn/',
 };
+const SZSE_HEADERS = {
+  Accept: 'application/json, text/plain, */*',
+  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+  'User-Agent': SINA_HEADERS['User-Agent'],
+  Referer: 'https://www.szse.cn/market/product/option/index.html',
+};
 
 function finiteNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function marketNumber(value) {
+  if (value == null || value === '') return null;
+  return finiteNumber(String(value).replace(/,/g, ''));
 }
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -257,6 +268,131 @@ function fallbackOptionMonths() {
   return result;
 }
 
+function shanghaiDate(offsetDays = 0) {
+  const now = new Date(Date.now() + offsetDays * 86400000);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function daysUntil(dateString, fromDate = shanghaiDate()) {
+  const expiry = new Date(`${dateString}T00:00:00+08:00`).getTime();
+  const start = new Date(`${fromDate}T00:00:00+08:00`).getTime();
+  return Math.max(0, Math.round((expiry - start) / 86400000));
+}
+
+function szseReportUrl(params) {
+  const url = new URL('https://www.szse.cn/api/report/ShowReport/data');
+  Object.entries({ SHOWTYPE: 'JSON', ...params }).forEach(([key, value]) => {
+    if (value != null && value !== '') url.searchParams.set(key, value);
+  });
+  return url.toString();
+}
+
+async function fetchSzseReport(params) {
+  const payload = await fetchJson(szseReportUrl(params), { headers: SZSE_HEADERS, timeoutMs: 10000 });
+  const report = Array.isArray(payload) ? payload[0] : payload;
+  if (!report || report.error) throw new Error(report?.error || '深交所官方数据为空');
+  return report;
+}
+
+async function fetchSzseReportPages(params, firstReport) {
+  const pageCount = Math.max(1, Number(firstReport?.metadata?.pagecount) || 1);
+  if (pageCount === 1) return firstReport.data || [];
+  const remaining = await Promise.all(
+    Array.from({ length: pageCount - 1 }, (_, index) => fetchSzseReport({ ...params, PAGENO: index + 2 }))
+  );
+  return [firstReport, ...remaining].flatMap((report) => report.data || []);
+}
+
+async function fetchSzseOfficialCloseChain(config, month, months) {
+  const monthLabel = `${Number(month.slice(-2))}月`;
+  const optionQueries = [`中证500ETF购${monthLabel}`, `中证500ETF沽${monthLabel}`];
+  let latestError;
+
+  for (let offset = 0; offset >= -7; offset -= 1) {
+    const quoteDate = shanghaiDate(offset);
+    const quoteParams = optionQueries.map((query) => ({
+      CATALOGID: '1815_stock_snapshot', TABKEY: 'tab6', txtDMorJC: query,
+      txtBeginDate: quoteDate, txtEndDate: quoteDate, PAGENO: 1,
+    }));
+    const catalogParams = optionQueries.map((query) => ({
+      CATALOGID: 'ysplbrb', TABKEY: 'tab1', txtQueryKeyAndJC: query, PAGENO: 1,
+    }));
+    const underlyingParams = {
+      CATALOGID: '1815_stock_snapshot', TABKEY: 'tab2', txtDMorJC: config.symbol,
+      txtBeginDate: quoteDate, txtEndDate: quoteDate, PAGENO: 1,
+    };
+
+    try {
+      const [callQuotesFirst, putQuotesFirst, callCatalog, putCatalog, underlyingReport] = await Promise.all([
+        fetchSzseReport(quoteParams[0]),
+        fetchSzseReport(quoteParams[1]),
+        fetchSzseReport(catalogParams[0]),
+        fetchSzseReport(catalogParams[1]),
+        fetchSzseReport(underlyingParams),
+      ]);
+      const underlyingRow = (underlyingReport.data || [])[0];
+      if (!(underlyingRow && marketNumber(underlyingRow.ss) > 0)) continue;
+      if (!(callQuotesFirst.data?.length || putQuotesFirst.data?.length)) continue;
+
+      const [callQuotes, putQuotes] = await Promise.all([
+        fetchSzseReportPages(quoteParams[0], callQuotesFirst),
+        fetchSzseReportPages(quoteParams[1], putQuotesFirst),
+      ]);
+      const catalogByCode = new Map(
+        [...(callCatalog.data || []), ...(putCatalog.data || [])].map((row) => [row.hydm, row])
+      );
+      const contracts = [...callQuotes, ...putQuotes].map((row) => {
+        const catalog = catalogByCode.get(row.hybm) || {};
+        const expiry = catalog.xqrq || null;
+        return {
+          code: row.hybm,
+          name: catalog.hymc || row.hyjc || '',
+          type: (catalog.hylx || row.hyjc || '').includes('沽') ? 'P' : 'C',
+          strike: marketNumber(catalog.xqj),
+          multiplier: marketNumber(catalog.hydw) || config.multiplier,
+          expiry,
+          dte: expiry ? daysUntil(expiry, quoteDate) : null,
+          bidSize: null,
+          bid: null,
+          ask: null,
+          askSize: null,
+          last: marketNumber(row.jspj) ?? marketNumber(row.jjsj),
+          settlement: marketNumber(row.jjsj),
+          previousSettlement: marketNumber(row.qjsj),
+          changePct: marketNumber(row.zdf),
+          volume: marketNumber(row.cjl),
+          openInterest: marketNumber(row.wpcl),
+          quoteTime: quoteDate,
+          contractStyle: 'M',
+          priceSource: 'szse-official-close',
+        };
+      }).filter((contract) => contract.code && contract.strike > 0);
+      if (!contracts.length) continue;
+
+      const underlyingPrice = marketNumber(underlyingRow.ss);
+      return {
+        ...config,
+        months,
+        selectedMonth: month,
+        underlyingPrice,
+        quoteTime: quoteDate,
+        contracts: enrichLocalGreeks(contracts, underlyingPrice),
+        delayed: true,
+        source: 'szse-official-close',
+        warning: `新浪实时行情不可用，已自动切换为深交所官方收盘行情（${quoteDate}），不含实时买卖盘。`,
+        greekNote: 'IV/Delta 由深交所官方收盘价按 Black-Scholes 反推，仅供研究。',
+      };
+    } catch (error) {
+      latestError = error;
+    }
+  }
+  throw latestError || new Error('深交所最近交易日行情为空');
+}
+
 async function getSseMonths() {
   if (cnMonthCache.months.length && Date.now() - cnMonthCache.time < 15 * 60 * 1000) return cnMonthCache.months;
   try {
@@ -313,32 +449,37 @@ async function fetchSzseChain(config, requestedMonth) {
   const months = await getSseMonths();
   const month = months.includes(requestedMonth) ? requestedMonth : months[0];
   if (!month) throw new Error('暂未查询到深交所可用合约月份');
-  const upKey = `OP_UP_${config.symbol}${month.slice(-4)}`;
-  const downKey = `OP_DOWN_${config.symbol}${month.slice(-4)}`;
-  const codeRows = await fetchSinaRows([upKey, downKey]);
-  const calls = (codeRows.get(upKey) || []).filter(Boolean).map((item) => item.replace('CON_OP_', ''));
-  const puts = (codeRows.get(downKey) || []).filter(Boolean).map((item) => item.replace('CON_OP_', ''));
-  const types = new Map([...calls.map((code) => [code, 'C']), ...puts.map((code) => [code, 'P'])]);
-  const codes = [...calls, ...puts];
-  if (!codes.length) throw new Error(`${month} 深交所合约列表为空`);
-  const [quoteRows, underlying] = await Promise.all([
-    fetchSinaRows(codes, 'CON_OP_'),
-    fetchUnderlying(config),
-  ]);
-  if (!(underlying.price > 0)) throw new Error('深交所标的行情为空');
-  const contracts = codes.map((code) => quoteFromSina(code, quoteRows.get(code), {
-    type: types.get(code), multiplier: config.multiplier, contractStyle: 'M',
-  })).filter(Boolean);
-  if (!contracts.length) throw new Error(`${month} 深交所期权行情为空`);
-  return {
-    ...config,
-    months,
-    selectedMonth: month,
-    underlyingPrice: underlying.price,
-    quoteTime: [underlying.date, underlying.time].filter(Boolean).join(' '),
-    contracts: enrichLocalGreeks(contracts, underlying.price),
-    greekNote: '深交所公开行情未提供可靠 Greeks；IV/Delta 由同执行价 Call/Put 中间价按 Black-Scholes 反推，仅供研究。',
-  };
+  try {
+    const upKey = `OP_UP_${config.symbol}${month.slice(-4)}`;
+    const downKey = `OP_DOWN_${config.symbol}${month.slice(-4)}`;
+    const codeRows = await fetchSinaRows([upKey, downKey]);
+    const calls = (codeRows.get(upKey) || []).filter(Boolean).map((item) => item.replace('CON_OP_', ''));
+    const puts = (codeRows.get(downKey) || []).filter(Boolean).map((item) => item.replace('CON_OP_', ''));
+    const types = new Map([...calls.map((code) => [code, 'C']), ...puts.map((code) => [code, 'P'])]);
+    const codes = [...calls, ...puts];
+    if (!codes.length) throw new Error(`${month} 深交所合约列表为空`);
+    const [quoteRows, underlying] = await Promise.all([
+      fetchSinaRows(codes, 'CON_OP_'),
+      fetchUnderlying(config),
+    ]);
+    if (!(underlying.price > 0)) throw new Error('深交所标的行情为空');
+    const contracts = codes.map((code) => quoteFromSina(code, quoteRows.get(code), {
+      type: types.get(code), multiplier: config.multiplier, contractStyle: 'M',
+    })).filter(Boolean);
+    if (!contracts.length) throw new Error(`${month} 深交所期权行情为空`);
+    return {
+      ...config,
+      months,
+      selectedMonth: month,
+      underlyingPrice: underlying.price,
+      quoteTime: [underlying.date, underlying.time].filter(Boolean).join(' '),
+      contracts: enrichLocalGreeks(contracts, underlying.price),
+      source: 'sina-realtime',
+      greekNote: '深交所公开行情未提供可靠 Greeks；IV/Delta 由同执行价 Call/Put 中间价按 Black-Scholes 反推，仅供研究。',
+    };
+  } catch {
+    return fetchSzseOfficialCloseChain(config, month, months);
+  }
 }
 
 async function fetchCnOptionChain(symbol, month) {
