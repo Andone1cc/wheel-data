@@ -1,8 +1,9 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "regions": ["hkg1"],
   "rewrites": [
-    { "source": "/api/cn-options", "destination": "/api/data" },
+    { "source": "/api/cn-options",     "destination": "/api/data" },
     { "source": "/api/health",          "destination": "/api/data" },
     { "source": "/api/cboe/:ticker",    "destination": "/api/data" },
     { "source": "/api/quote/:ticker",   "destination": "/api/data" },
