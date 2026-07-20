@@ -226,11 +226,15 @@ function cnStockQuoteSymbol(market,ticker){
   return `${code}.${/^[569]/.test(code)?'SS':'SZ'}`;
 }
 
-async function fetchCnStockPrice(market,ticker){
+async function fetchCnStockQuote(market,ticker){
   const quoteSymbol=cnStockQuoteSymbol(market,ticker);
-  if(!quoteSymbol)return{quoteSymbol:'',price:null};
-  const prices=await fetchStockPrices([quoteSymbol]);
-  return{quoteSymbol,price:prices[quoteSymbol]??null};
+  if(!quoteSymbol)return{quoteSymbol:'',price:null,name:null};
+  const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
+  try{
+    const response=await fetch(`${proxyBase}/api/quote/${encodeURIComponent(quoteSymbol)}`,{signal:AbortSignal.timeout(8000)});
+    const data=await response.json();
+    return{quoteSymbol,price:data?.price??null,name:data?.name||null};
+  }catch{return{quoteSymbol,price:null,name:null};}
 }
 
 async function fetchStockCloseOnDate(ticker,date){
@@ -2808,8 +2812,8 @@ function CnStockForm({onAdd,onCancel}){
   const submit=async()=>{
     if(!valid||saving)return;
     setSaving(true);
-    const quote=await fetchCnStockPrice(f.market,f.ticker);
-    onAdd({...f,id:Date.now(),shares:num(f.shares),costPerShare:num(f.costPerShare),
+    const quote=await fetchCnStockQuote(f.market,f.ticker);
+    onAdd({...f,name:f.name.trim()||quote.name||'',id:Date.now(),shares:num(f.shares),costPerShare:num(f.costPerShare),
       currentPrice:quote.price,currency:f.market==='HK'?'HKD':'CNY',source:'auto-quote',
       quoteSymbol:quote.quoteSymbol,priceUpdatedAt:quote.price==null?null:Date.now()});
   };
@@ -2819,7 +2823,7 @@ function CnStockForm({onAdd,onCancel}){
       <div className="cn-form-grid stock">
         <SelectField label="市场" value={f.market} onChange={v=>set('market',v)} options={[{value:'CN',label:'A 股'},{value:'HK',label:'港股通'}]}/>
         <Field label="证券代码" value={f.ticker} onChange={v=>set('ticker',v.trim())} placeholder={f.market==='HK'?'00700':'600519'}/>
-        <Field label="证券名称" value={f.name} onChange={v=>set('name',v)} placeholder="可选"/>
+        <Field label="证券名称" value={f.name} onChange={v=>set('name',v)} placeholder="自动获取，可选修改"/>
         <NumField label="持仓股数" value={f.shares} onChange={v=>set('shares',v)} suffix="股"/>
         <NumField label="每股成本" prefix={f.market==='HK'?'HK$':'¥'} value={f.costPerShare} onChange={v=>set('costPerShare',v)}/>
         <DateField label="买入日期" value={f.acquireDate} onChange={v=>set('acquireDate',v)}/>
@@ -2868,11 +2872,11 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
   useEffect(()=>{
     if(!stockQuoteKey)return;
     let alive=true;
-    Promise.all(stocks.map(async stock=>({id:stock.id,...await fetchCnStockPrice(stock.market,stock.ticker)}))).then(quotes=>{
+    Promise.all(stocks.map(async stock=>({id:stock.id,...await fetchCnStockQuote(stock.market,stock.ticker)}))).then(quotes=>{
       if(!alive)return;
-      const byId=new Map(quotes.filter(item=>item.price!=null).map(item=>[item.id,item]));
+      const byId=new Map(quotes.filter(item=>item.price!=null||item.name).map(item=>[item.id,item]));
       let changed=false;
-      const next=stocks.map(stock=>{const quote=byId.get(stock.id);if(!quote||quote.price===stock.currentPrice)return stock;changed=true;return{...stock,currentPrice:quote.price,quoteSymbol:quote.quoteSymbol,priceUpdatedAt:Date.now()};});
+      const next=stocks.map(stock=>{const quote=byId.get(stock.id);if(!quote)return stock;const currentPrice=quote.price??stock.currentPrice;const name=stock.name||quote.name||'';if(currentPrice===stock.currentPrice&&name===stock.name)return stock;changed=true;return{...stock,name,currentPrice,quoteSymbol:quote.quoteSymbol,priceUpdatedAt:quote.price==null?stock.priceUpdatedAt:Date.now()};});
       if(changed)onStocks(next);
     });
     return()=>{alive=false;};
@@ -2924,9 +2928,9 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
   };
   const refreshStock=async(stock)=>{
     setRefreshingStock(stock.id);
-    const quote=await fetchCnStockPrice(stock.market,stock.ticker);
-    if(quote.price==null)showToast(`${stock.ticker} 行情暂时没有返回`,ACC.loss);
-    else{onStocks(stocks.map(item=>item.id===stock.id?{...item,currentPrice:quote.price,quoteSymbol:quote.quoteSymbol,priceUpdatedAt:Date.now()}:item));showToast(`${stock.ticker} 当前价已更新`);}
+    const quote=await fetchCnStockQuote(stock.market,stock.ticker);
+    if(quote.price==null&&!quote.name)showToast(`${stock.ticker} 行情暂时没有返回`,ACC.loss);
+    else{onStocks(stocks.map(item=>item.id===stock.id?{...item,name:item.name||quote.name||'',currentPrice:quote.price??item.currentPrice,quoteSymbol:quote.quoteSymbol,priceUpdatedAt:quote.price==null?item.priceUpdatedAt:Date.now()}:item));showToast(`${stock.ticker} 行情与名称已更新`);}
     setRefreshingStock(null);
   };
   const closePosition=(p,data)=>{const record={...p,...data,closedAt:Date.now()};onAccountChange(positions.filter(item=>item.id!==p.id),[record,...closed],stocks);showToast(`${p.underlying} 已平仓 · ${cnMoney(calcCnClosed(record).pnl,'CNY',true)}`);};

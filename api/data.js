@@ -665,15 +665,41 @@ module.exports = async function handler(req, res) {
   if (reqUrl.startsWith('/api/quote/')) {
     const ticker = decodeURIComponent(reqUrl.replace('/api/quote/', '').split('?')[0]);
     try {
-      const r = await fetch(
-        `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`,
-        { headers: { 'User-Agent': 'Mozilla/5.0' } }
-      );
-      const data = await r.json();
-      const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice ?? null;
-      return res.status(200).json({ ticker, price });
+      const upperTicker = ticker.toUpperCase();
+      const isHk = upperTicker.endsWith('.HK');
+      const isSse = upperTicker.endsWith('.SS');
+      const isSzse = upperTicker.endsWith('.SZ');
+      const code = upperTicker.split('.')[0];
+      const tencentSymbol = isHk ? `hk${code.padStart(5, '0')}` : isSse ? `sh${code}` : isSzse ? `sz${code}` : '';
+      const locale = isHk ? '&lang=zh-Hant-HK&region=HK' : (isSse || isSzse) ? '&lang=zh-CN&region=CN' : '';
+      const yahooRequest = fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d${locale}`,
+        { headers: { 'User-Agent': BROWSER_USER_AGENT }, signal: AbortSignal.timeout(6000) }
+      ).then(async response => {
+        if (!response.ok) throw new Error(`Yahoo HTTP ${response.status}`);
+        return response.json();
+      });
+      const cnQuoteRequest = tencentSymbol ? fetch(
+        `https://qt.gtimg.cn/q=${encodeURIComponent(tencentSymbol)}`,
+        { headers: { 'User-Agent': BROWSER_USER_AGENT, Referer: 'https://gu.qq.com/' }, signal: AbortSignal.timeout(4500) }
+      ).then(async response => {
+        if (!response.ok) return null;
+        const text = new TextDecoder('gbk').decode(await response.arrayBuffer());
+        const fields = (text.match(/="([\s\S]*?)";/)?.[1] || '').split('~');
+        const cnPrice = Number(fields[3]);
+        return fields.length > 3 ? { name: fields[1] || null, price: Number.isFinite(cnPrice) ? cnPrice : null } : null;
+      }).catch(() => null) : Promise.resolve(null);
+      const [yahooResult, cnQuoteResult] = await Promise.allSettled([yahooRequest, cnQuoteRequest]);
+      const data = yahooResult.status === 'fulfilled' ? yahooResult.value : null;
+      const cnQuote = cnQuoteResult.status === 'fulfilled' ? cnQuoteResult.value : null;
+      const meta = data?.chart?.result?.[0]?.meta || {};
+      const price = meta.regularMarketPrice ?? cnQuote?.price ?? null;
+      const name = cnQuote?.name || meta.shortName || meta.longName || null;
+      if (price == null && !name) throw new Error('股票行情源暂时不可用');
+      res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+      return res.status(200).json({ ticker, price, name, source: meta.regularMarketPrice != null ? 'Yahoo' : 'Tencent' });
     } catch (e) {
-      return res.status(502).json({ ticker, price: null, error: e.message });
+      return res.status(502).json({ ticker, price: null, name: null, error: e.message });
     }
   }
 
