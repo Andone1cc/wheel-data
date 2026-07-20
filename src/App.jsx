@@ -1082,18 +1082,44 @@ function CnOptionsPanel(){
 
   const load=useCallback(async(nextSymbol,nextMonth='',force=false)=>{
     const key=`${nextSymbol}-${nextMonth||'near'}`;
+    const storageKey=`whl-cnopt-cache-${key}`;
     if(!force&&cacheRef.current.has(key)){
       setData(cacheRef.current.get(key));setError('');return;
     }
     setLoading(true);setError('');
     try{
-      const response=await cnOptionFetch(nextSymbol,nextMonth);
-      const payload=await response.json();
-      if(!response.ok)throw new Error(payload.detail||payload.error||`HTTP ${response.status}`);
+      let payload=null,lastError=null;
+      for(let attempt=0;attempt<2;attempt+=1){
+        try{
+          const response=await cnOptionFetch(nextSymbol,nextMonth);
+          const raw=await response.text();
+          let parsed;
+          try{parsed=JSON.parse(raw);}catch{throw new Error('行情接口返回格式异常');}
+          if(!response.ok)throw new Error(parsed.detail||parsed.error||`HTTP ${response.status}`);
+          payload=parsed;break;
+        }catch(fetchError){
+          lastError=fetchError;
+          if(attempt===0)await new Promise(resolve=>setTimeout(resolve,450));
+        }
+      }
+      if(!payload)throw lastError||new Error('行情拉取失败');
       cacheRef.current.set(key,payload);
       cacheRef.current.set(`${nextSymbol}-${payload.selectedMonth}`,payload);
+      try{localStorage.setItem(storageKey,JSON.stringify({savedAt:Date.now(),payload}));}catch{}
       setData(payload);setLastLoaded(new Date());
-    }catch(e){setError(e.message||'行情拉取失败');}
+    }catch(e){
+      let saved=null;
+      try{saved=JSON.parse(localStorage.getItem(storageKey)||'null');}catch{}
+      if(saved?.payload&&Date.now()-(saved.savedAt||0)<12*60*60*1000){
+        const fallback={...saved.payload,clientStale:true,warning:'行情源暂时不稳定，正在展示本设备最近一次成功快照。'};
+        cacheRef.current.set(key,fallback);setData(fallback);setError('');setLastLoaded(new Date(saved.savedAt));
+      }else{
+        const message=/fetch failed|network|timeout|aborted/i.test(e.message||'')
+          ?'行情源连接超时，系统已自动重试，请稍后再刷新'
+          :(e.message||'行情拉取失败');
+        setError(message);
+      }
+    }
     finally{setLoading(false);}
   },[]);
 
@@ -1145,6 +1171,7 @@ function CnOptionsPanel(){
 
       {!error&&data&&(
         <>
+          {(data.stale||data.clientStale)&&<div className="cnopt-stale">⚠ {data.warning||'上游行情暂时不可用，正在展示最近一次成功快照。'}</div>}
           <div className="cnopt-snapshot">
             <div><span>标的现价</span><strong>¥ {fmt(data.underlyingPrice,3)}</strong><small>{selectedTarget.exchange} · {symbol}</small></div>
             <div><span>合约月份</span><strong>{cnMonthLabel(data.selectedMonth)}</strong><small>{data.contracts?.[0]?.expiry||'—'} 到期</small></div>
@@ -2795,13 +2822,13 @@ cloudLoaded.current=true;
           </button>
           <div className="sidebar-sep"/>
           <div className="sidebar-section">工具</div>
-          <button className={`tab-btn${tab==='watchlist'?' active':''}`} onClick={()=>setTab('watchlist')}>
-            <span className="tab-dot" style={{background:ACC.blue}}/>
-            <span className="tab-label tab-label-full">观察列表</span><span className="tab-label tab-label-short">观察</span>
-          </button>
           <button className={`tab-btn${tab==='cnoptions'?' active':''}`} onClick={()=>setTab('cnoptions')}>
             <span className="tab-dot" style={{background:ACC.teal}}/>
             <span className="tab-label tab-label-full">A股期权</span><span className="tab-label tab-label-short">A期权</span>
+          </button>
+          <button className={`tab-btn${tab==='finews'?' active':''}`} onClick={()=>setTab('finews')}>
+            <span className="tab-dot" style={{background:ACC.blue}}/>
+            <span className="tab-label tab-label-full">收藏网站</span><span className="tab-label tab-label-short">收藏</span>
           </button>
           <button className={`tab-btn${tab==='learn'?' active':''}`} onClick={()=>setTab('learn')}>
             <span className="tab-dot" style={{background:ACC.purple}}/>
@@ -2893,13 +2920,13 @@ cloudLoaded.current=true;
             <SgovPanel sgov={sgov} onUpdate={mutateSgov} totalMarginUsed={totalMarginUsed}/>
           </div>
 
-          {/* 观察列表 Tab */}
+          {/* 观察列表暂时从导航隐藏，保留组件代码便于后续恢复 */}
           <div style={{display:tab==='watchlist'?'block':'none'}}><WatchlistPanel/></div>
 
           {/* A 股期权数据查询 Tab */}
           <div style={{display:tab==='cnoptions'?'block':'none'}}><CnOptionsPanel/></div>
 
-          {/* 期权筛选 / 收藏网站暂时从导航隐藏，保留组件代码便于后续恢复 */}
+          {/* 期权筛选暂时从导航隐藏，保留组件代码便于后续恢复 */}
           <div style={{display:tab==='scan'?'block':'none'}}><ScanPanel/></div>
           <div style={{display:tab==='finews'?'block':'none'}}><LinkHubPanel/></div>
 
