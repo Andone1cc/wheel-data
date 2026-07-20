@@ -249,24 +249,58 @@ function formatSseQuoteTime(dateValue, timeValue) {
   return `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}${timeValue == null ? '' : ` ${time.slice(0, 2)}:${time.slice(2, 4)}:${time.slice(4, 6)}`}`;
 }
 
+function formatTencentQuoteTime(value) {
+  const time = String(value || '');
+  if (!/^\d{14}$/.test(time)) return '';
+  return `${time.slice(0, 4)}-${time.slice(4, 6)}-${time.slice(6, 8)} ${time.slice(8, 10)}:${time.slice(10, 12)}:${time.slice(12, 14)}`;
+}
+
+async function fetchTencentCsi500Index() {
+  const text = await fetchText('https://qt.gtimg.cn/q=sh000905', {
+    headers: {
+      Accept: '*/*',
+      'User-Agent': BROWSER_USER_AGENT,
+      Referer: 'https://gu.qq.com/',
+    },
+    timeoutMs: 1800,
+    attempts: 1,
+  });
+  const quoted = /="([^"]+)"/.exec(text)?.[1];
+  const fields = quoted?.split('~') || [];
+  const price = marketNumber(fields[3]);
+  if (!(price > 0) || fields[2] !== '000905') throw new Error('腾讯中证500指数行情为空');
+  return {
+    code: '000905', name: '中证500指数', price,
+    change: marketNumber(fields[31]), changePct: marketNumber(fields[32]),
+    previousClose: marketNumber(fields[4]),
+    quoteTime: formatTencentQuoteTime(fields[30]),
+    source: 'tencent-quote-index',
+  };
+}
+
 async function fetchCsi500Index() {
   if (csi500IndexCache.data && Date.now() - csi500IndexCache.time < CSI500_INDEX_CACHE_MS) {
     return { ...csi500IndexCache.data, cached: true };
   }
   try {
-    const payload = await fetchJson(sseHqUrl('v1/sh1/list/self/000905', {
-      select: 'code,cpxxextendname,last,change,chg_rate,amp_rate,volume,amount,prev_close',
-    }), { headers: SSE_HEADERS, timeoutMs: 2200, attempts: 1 });
-    const row = payload?.list?.[0];
-    const price = marketNumber(row?.[2]);
-    if (!(price > 0)) throw new Error('中证500指数行情为空');
-    const data = {
-      code: '000905', name: '中证500指数', price,
-      change: marketNumber(row?.[3]), changePct: marketNumber(row?.[4]),
-      previousClose: marketNumber(row?.[8]),
-      quoteTime: formatSseQuoteTime(payload.date, payload.time),
-      source: 'sse-official-index',
-    };
+    let data;
+    try {
+      data = await fetchTencentCsi500Index();
+    } catch (tencentError) {
+      const payload = await fetchJson(sseHqUrl('v1/sh1/list/self/000905', {
+        select: 'code,cpxxextendname,last,change,chg_rate,amp_rate,volume,amount,prev_close',
+      }), { headers: SSE_HEADERS, timeoutMs: 2200, attempts: 1 });
+      const row = payload?.list?.[0];
+      const price = marketNumber(row?.[2]);
+      if (!(price > 0)) throw tencentError;
+      data = {
+        code: '000905', name: '中证500指数', price,
+        change: marketNumber(row?.[3]), changePct: marketNumber(row?.[4]),
+        previousClose: marketNumber(row?.[8]),
+        quoteTime: formatSseQuoteTime(payload.date, payload.time),
+        source: 'sse-official-index',
+      };
+    }
     csi500IndexCache = { time: Date.now(), data };
     return { ...data, cached: false };
   } catch (error) {
@@ -717,8 +751,9 @@ module.exports = async function handler(req, res) {
     const url = new URL(reqUrl, 'http://localhost');
     if (url.searchParams.get('indexOnly') === '1') {
       try {
+        const data = await fetchCsi500Index();
         res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=3600');
-        return res.status(200).json(await fetchCsi500Index());
+        return res.status(200).json(data);
       } catch (e) {
         return res.status(502).json({ error: '中证500指数行情拉取失败', detail: e.message });
       }
