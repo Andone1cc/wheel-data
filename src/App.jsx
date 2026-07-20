@@ -2625,6 +2625,33 @@ const cnOptionExpiry=(month)=>{
   const firstWednesday=1+((3-first.getDay()+7)%7);
   return `${year}-${String(monthIndex+1).padStart(2,'0')}-${String(firstWednesday+21).padStart(2,'0')}`;
 };
+const cnOptionMonthFromDate=(date)=>String(date||'').replace(/\D/g,'').slice(0,6);
+const findCnPositionContract=(position,contracts=[])=>{
+  const code=String(position.contractCode||'').trim().toUpperCase();
+  if(code){
+    const exact=contracts.find(contract=>String(contract.code||'').trim().toUpperCase()===code);
+    if(exact)return exact;
+  }
+  const strike=num(position.strike,NaN),expiry=String(position.expDate||'').slice(0,10);
+  const matches=contracts.filter(contract=>contract.type===position.type&&Number.isFinite(strike)&&Math.abs(num(contract.strike,NaN)-strike)<0.0005);
+  return matches.find(contract=>String(contract.expiry||'').slice(0,10)===expiry)||matches[0]||null;
+};
+const cnOptionMark=(contract)=>{
+  const last=num(contract?.last,NaN);
+  if(Number.isFinite(last)&&last>=0)return last;
+  const bid=num(contract?.bid,NaN),ask=num(contract?.ask,NaN);
+  if(Number.isFinite(bid)&&Number.isFinite(ask)&&bid>=0&&ask>=0)return(bid+ask)/2;
+  const settlement=num(contract?.settlement,NaN);
+  return Number.isFinite(settlement)&&settlement>=0?settlement:null;
+};
+async function fetchCnOptionSnapshot(symbol,month){
+  const response=await cnOptionFetch(symbol,month);
+  const raw=await response.text();
+  let payload;
+  try{payload=JSON.parse(raw);}catch{throw new Error('期权行情返回格式异常');}
+  if(!response.ok)throw new Error(payload?.detail||payload?.error||`HTTP ${response.status}`);
+  return payload;
+}
 
 function calcCnOption(p,markPrice=p.currentPrice){
   const qty=Math.max(1,num(p.qty,1));
@@ -2823,6 +2850,7 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
   const [showForm,setShowForm]=useState(false);
   const [indexQuote,setIndexQuote]=useState(()=>readCsi500Cache());
   const [refreshingStock,setRefreshingStock]=useState(null);
+  const [refreshingOptions,setRefreshingOptions]=useState(false);
   useEffect(()=>{
     let alive=true;
     loadCsi500Index().then(payload=>{if(alive&&payload?.price>0)setIndexQuote(payload);});
@@ -2851,6 +2879,49 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
   },[stockQuoteKey]);
   const addLabel=view==='options'?'录入期权':view==='stocks'?'录入股票':'';
   const addPosition=(item)=>{onPositions([...positions,item]);setShowForm(false);showToast(`已添加 ${item.underlying} ${item.type==='P'?'认沽':'认购'}`);};
+  const refreshOptionPositions=async()=>{
+    if(!positions.length||refreshingOptions)return;
+    setRefreshingOptions(true);
+    const groups=[...new Map(positions.map(position=>{
+      const month=cnOptionMonthFromDate(position.expDate);
+      return[`${position.underlying}-${month}`,{symbol:position.underlying,month}];
+    })).values()];
+    const [freshIndex,results]=await Promise.all([
+      loadCsi500Index(true),
+      Promise.all(groups.map(async group=>{
+        try{return{...group,payload:await fetchCnOptionSnapshot(group.symbol,group.month)};}
+        catch(error){return{...group,error};}
+      })),
+    ]);
+    if(freshIndex?.price>0)setIndexQuote(freshIndex);
+    const snapshots=new Map(results.filter(result=>result.payload).map(result=>[`${result.symbol}-${result.month}`,result.payload]));
+    let matched=0;
+    const updatedAt=Date.now();
+    const next=positions.map(position=>{
+      const month=cnOptionMonthFromDate(position.expDate);
+      const snapshot=snapshots.get(`${position.underlying}-${month}`);
+      const contract=findCnPositionContract(position,snapshot?.contracts);
+      const indexPrice=freshIndex?.price??snapshot?.indexPrice??position.indexPrice;
+      if(!snapshot||!contract)return indexPrice===position.indexPrice?position:{...position,indexPrice};
+      matched+=1;
+      const mark=cnOptionMark(contract);
+      return{...position,
+        currentPrice:mark??position.currentPrice,
+        underlyingPrice:snapshot.underlyingPrice??position.underlyingPrice,
+        indexPrice,
+        delta:contract.delta??position.delta,
+        iv:contract.iv??position.iv,
+        contractCode:position.contractCode||contract.code,
+        quoteUpdatedAt:updatedAt,
+        quoteSource:snapshot.source||contract.priceSource||'cn-options',
+      };
+    });
+    onPositions(next);
+    const failed=results.filter(result=>result.error).length;
+    if(matched)showToast(`已更新 ${matched}/${positions.length} 笔期权行情${failed?' · 部分行情源失败':''}`,failed?ACC.amber:ACC.profit);
+    else showToast('暂未匹配到持仓合约，请检查行权价和到期日',ACC.loss);
+    setRefreshingOptions(false);
+  };
   const refreshStock=async(stock)=>{
     setRefreshingStock(stock.id);
     const quote=await fetchCnStockPrice(stock.market,stock.ticker);
@@ -2876,7 +2947,10 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
         <div className="cn-account-tabs">
           {[['options','活跃期权',positions.length],['stocks','股票持仓',stocks.length],['closed','期权已平仓',closed.length],['chain','期权数据',null]].map(([key,label,count])=><button key={key} className={view===key?'active':''} onClick={()=>{setView(key);setShowForm(false);}}><span>{label}</span>{count!=null&&<b>{count}</b>}</button>)}
         </div>
-        {addLabel&&<button className="btn cn-account-add" onClick={()=>setShowForm(!showForm)}>{showForm?'✕ 取消':`＋ ${addLabel}`}</button>}
+        <div className="cn-account-actions">
+          {view==='options'&&<button className="btn cn-account-refresh" onClick={refreshOptionPositions} disabled={refreshingOptions||!positions.length}>{refreshingOptions?'同步行情中…':'↻ 获取最新数据'}</button>}
+          {addLabel&&<button className="btn cn-account-add" onClick={()=>setShowForm(!showForm)}>{showForm?'✕ 取消':`＋ ${addLabel}`}</button>}
+        </div>
       </div>
 
       {view==='options'&&<>
