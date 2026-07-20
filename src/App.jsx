@@ -2598,6 +2598,14 @@ const datePlus=(days)=>{const d=new Date();d.setDate(d.getDate()+days);return d.
 const num=(value,fallback=0)=>{const n=Number(value);return Number.isFinite(n)?n:fallback;};
 const cnIndexEquivalent=(strike,etfPrice,indexPrice)=>num(strike)>0&&num(etfPrice)>0&&num(indexPrice)>0
   ?num(strike)/num(etfPrice)*num(indexPrice):null;
+const cnOptionExpiry=(month)=>{
+  const value=String(month||'');
+  if(!/^\d{6}$/.test(value))return datePlus(30);
+  const year=Number(value.slice(0,4)),monthIndex=Number(value.slice(4,6))-1;
+  const first=new Date(year,monthIndex,1);
+  const firstWednesday=1+((3-first.getDay()+7)%7);
+  return `${year}-${String(monthIndex+1).padStart(2,'0')}-${String(firstWednesday+21).padStart(2,'0')}`;
+};
 
 function calcCnOption(p,markPrice=p.currentPrice){
   const qty=Math.max(1,num(p.qty,1));
@@ -2659,11 +2667,20 @@ function calcCnClosed(p){
 function CnOptionForm({onAdd,onCancel,currentIndex}){
   const [f,setF]=useState({
     underlying:'159922',underlyingName:'嘉实中证500ETF',exchange:'SZSE',contractCode:'',
-    type:'P',side:'SELL',strike:'',qty:'1',multiplier:'10000',openDate:today(),expDate:datePlus(30),
+    type:'P',side:'SELL',strike:'',qty:'1',multiplier:'10000',openDate:today(),expDate:cnOptionExpiry(CN_OPTION_NEXT_MONTH),
     openPrice:'',currentPrice:'',underlyingPrice:'',indexPrice:currentIndex??'',delta:'',iv:'',marginUsed:'',fees:'0',
   });
+  const [advanced,setAdvanced]=useState(false);
   const set=(key,value)=>setF(prev=>({...prev,[key]:value}));
+  const setUnderlying=(value)=>setF(prev=>value==='510500'
+    ?{...prev,underlying:value,underlyingName:'南方中证500ETF',exchange:'SSE'}
+    :{...prev,underlying:'159922',underlyingName:'嘉实中证500ETF',exchange:'SZSE'});
+  const setTrade=(value)=>{const [side,type]=value.split('-');setF(prev=>({...prev,side,type}));};
+  useEffect(()=>{if(currentIndex>0)setF(prev=>prev.indexPrice===''?{...prev,indexPrice:currentIndex}:prev);},[currentIndex]);
   const valid=f.underlying&&f.strike&&f.qty&&f.multiplier&&f.openPrice&&f.expDate;
+  const qty=Math.max(1,num(f.qty,1));
+  const grossPremium=num(f.openPrice)*10000*qty;
+  const nominal=num(f.strike)*10000*qty;
   const submit=()=>{
     if(!valid)return;
     onAdd({...f,id:Date.now(),qty:num(f.qty,1),multiplier:num(f.multiplier,10000),strike:num(f.strike),
@@ -2674,29 +2691,35 @@ function CnOptionForm({onAdd,onCancel,currentIndex}){
   };
   return(
     <div className="cn-account-form anim-in">
-      <div className="cn-form-title"><span>＋ 录入 A 股期权持仓</span><small>合约乘数默认 10,000；手续费按该仓位累计实际值记录</small></div>
-      <div className="cn-form-grid">
-        <Field label="标的代码" value={f.underlying} onChange={v=>set('underlying',v.trim())} placeholder="159922"/>
-        <Field label="标的名称" value={f.underlyingName} onChange={v=>set('underlyingName',v)} placeholder="嘉实中证500ETF"/>
-        <SelectField label="交易所" value={f.exchange} onChange={v=>set('exchange',v)} options={[{value:'SZSE',label:'深交所'},{value:'SSE',label:'上交所'}]}/>
-        <Field label="期权合约代码" value={f.contractCode} onChange={v=>set('contractCode',v.trim())} placeholder="可选"/>
-        <SelectField label="方向" value={f.side} onChange={v=>set('side',v)} options={[{value:'SELL',label:'卖出开仓'},{value:'BUY',label:'买入开仓'}]}/>
-        <SelectField label="类型" value={f.type} onChange={v=>set('type',v)} options={[{value:'P',label:'Put 认沽'},{value:'C',label:'Call 认购'}]}/>
+      <div className="cn-form-title"><span>＋ 添加 A 股期权仓位</span><small>与美股录入一致，只保留交易必填项；乘数固定 10,000，行情与 Greeks 可稍后补充</small></div>
+      <div className="cn-form-grid cn-option-core">
+        <SelectField label="标的" value={f.underlying} onChange={setUnderlying} options={[{value:'159922',label:'159922 · 嘉实中证500ETF'},{value:'510500',label:'510500 · 南方中证500ETF'}]}/>
+        <SelectField label="交易" value={`${f.side}-${f.type}`} onChange={setTrade} options={[{value:'SELL-P',label:'卖 Put'},{value:'SELL-C',label:'卖 Call'},{value:'BUY-C',label:'买 Call'},{value:'BUY-P',label:'买 Put'}]}/>
         <NumField label="行权价" prefix="¥" value={f.strike} onChange={v=>set('strike',v)} placeholder="5.000"/>
         <NumField label="张数" value={f.qty} onChange={v=>set('qty',v)} suffix="张"/>
-        <NumField label="合约乘数" value={f.multiplier} onChange={v=>set('multiplier',v)} suffix="份"/>
-        <NumField label="开仓价" prefix="¥" value={f.openPrice} onChange={v=>set('openPrice',v)} placeholder="0.1200"/>
+        <DateField label="开仓日期" value={f.openDate} onChange={v=>set('openDate',v)}/>
+        <DateField label="到期日期" value={f.expDate} onChange={v=>set('expDate',v)}/>
+        <NumField label="开仓权利金" prefix="¥" suffix="/份" value={f.openPrice} onChange={v=>set('openPrice',v)} placeholder="0.1200"/>
+        <div className="cn-entry-preview">
+          <span>自动计算</span>
+          <strong>{f.openPrice?cnMoney(grossPremium):'等待权利金'}</strong>
+          <small>{f.strike?`名义本金 ${cnMoney(nominal)}`:'乘数 10,000 份/张'}</small>
+        </div>
+      </div>
+      <button type="button" className={`cn-advanced-toggle${advanced?' open':''}`} onClick={()=>setAdvanced(value=>!value)} aria-expanded={advanced}>
+        <span>高级选项</span><small>合约代码、最新行情、Delta / IV、保证金与手续费</small><b>{advanced?'收起 ↑':'展开 ↓'}</b>
+      </button>
+      {advanced&&<div className="cn-form-grid cn-option-advanced anim-in">
+        <Field label="期权合约代码" value={f.contractCode} onChange={v=>set('contractCode',v.trim())} placeholder="可选"/>
         <NumField label="期权现价" prefix="¥" value={f.currentPrice} onChange={v=>set('currentPrice',v)} placeholder="默认等于开仓价"/>
         <NumField label="标的现价" prefix="¥" value={f.underlyingPrice} onChange={v=>set('underlyingPrice',v)} placeholder="可选"/>
         <NumField label="中证500指数" value={f.indexPrice} onChange={v=>set('indexPrice',v)} suffix="点" placeholder="自动获取"/>
-        <DateField label="开仓日期" value={f.openDate} onChange={v=>set('openDate',v)}/>
-        <DateField label="到期日期" value={f.expDate} onChange={v=>set('expDate',v)}/>
         <NumField label="Delta" value={f.delta} onChange={v=>set('delta',v)} placeholder="-0.18"/>
         <NumField label="IV" value={f.iv} onChange={v=>set('iv',v)} suffix="%" placeholder="25.0"/>
         <NumField label="保证金占用" prefix="¥" value={f.marginUsed} onChange={v=>set('marginUsed',v)} placeholder="卖方选填"/>
         <NumField label="累计手续费" prefix="¥" value={f.fees} onChange={v=>set('fees',v)} placeholder="0"/>
-      </div>
-      <div className="cn-form-actions"><button className="btn btn-primary" disabled={!valid} onClick={submit}>保存持仓</button><button className="btn btn-ghost" onClick={onCancel}>取消</button></div>
+      </div>}
+      <div className="cn-form-actions"><button className="btn btn-primary" disabled={!valid} onClick={submit}>添加仓位</button><button className="btn btn-ghost" onClick={onCancel}>取消</button></div>
     </div>
   );
 }
