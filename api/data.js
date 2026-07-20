@@ -59,7 +59,12 @@ const CN_OPTION_UNDERLYINGS = {
   '159922': { symbol: '159922', quoteSymbol: 'sz159922', name: '嘉实中证500ETF', exchange: 'SZSE', multiplier: 10000 },
 };
 const cnOptionCache = new Map();
+let cnMonthCache = { time: 0, months: [] };
 const SINA_HEADERS = {
+  Accept: '*/*',
+  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+  'Cache-Control': 'no-cache',
+  Pragma: 'no-cache',
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36',
   Referer: 'https://stock.finance.sina.com.cn/',
 };
@@ -69,16 +74,38 @@ function finiteNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchUpstream(url, options = {}, format = 'text') {
+  const { timeoutMs = 8000, ...fetchOptions } = options;
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(url, { ...fetchOptions, signal: AbortSignal.timeout(timeoutMs) });
+      if (!response.ok) {
+        const error = new Error(`${response.status} ${response.statusText}`);
+        if (response.status < 500 && response.status !== 429) throw error;
+        lastError = error;
+      } else if (format === 'json') {
+        return await response.json();
+      } else {
+        return await response.text();
+      }
+    } catch (error) {
+      lastError = error;
+      if (/^4\d\d /.test(error.message) && !error.message.startsWith('429 ')) throw error;
+    }
+    if (attempt < 2) await wait(250 + attempt * 450);
+  }
+  throw lastError || new Error('上游行情暂时不可用');
+}
+
 async function fetchText(url, options = {}) {
-  const response = await fetch(url, { ...options, signal: AbortSignal.timeout(12000) });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  return response.text();
+  return fetchUpstream(url, options, 'text');
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, { ...options, signal: AbortSignal.timeout(12000) });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  return response.json();
+  return fetchUpstream(url, options, 'json');
 }
 
 function parseSinaVariables(text, prefix) {
@@ -213,9 +240,37 @@ async function fetchUnderlying(config) {
   };
 }
 
+function fallbackOptionMonths() {
+  const now = new Date();
+  const result = [];
+  const addMonth = (date) => {
+    const value = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}`;
+    if (!result.includes(value)) result.push(value);
+  };
+  addMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+  addMonth(new Date(now.getFullYear(), now.getMonth() + 1, 1));
+  let cursor = new Date(now.getFullYear(), now.getMonth() + 2, 1);
+  while (result.length < 4) {
+    if ([2, 5, 8, 11].includes(cursor.getMonth())) addMonth(cursor);
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+  }
+  return result;
+}
+
 async function getSseMonths() {
-  const data = await fetchJson('https://stock.finance.sina.com.cn/futures/api/openapi.php/StockOptionService.getStockName?exchange=null&cate=500ETF');
-  return (data?.result?.data?.contractMonth || []).slice(1).map((month) => month.replace('-', ''));
+  if (cnMonthCache.months.length && Date.now() - cnMonthCache.time < 15 * 60 * 1000) return cnMonthCache.months;
+  try {
+    const data = await fetchJson('https://stock.finance.sina.com.cn/futures/api/openapi.php/StockOptionService.getStockName?exchange=null&cate=500ETF');
+    const months = (data?.result?.data?.contractMonth || []).slice(1).map((month) => month.replace('-', '')).filter(Boolean);
+    if (!months.length) throw new Error('合约月份为空');
+    cnMonthCache = { time: Date.now(), months };
+    return months;
+  } catch (error) {
+    if (cnMonthCache.months.length) return cnMonthCache.months;
+    const months = fallbackOptionMonths();
+    cnMonthCache = { time: Date.now(), months };
+    return months;
+  }
 }
 
 async function fetchSseChain(config, requestedMonth) {
@@ -254,42 +309,27 @@ async function fetchSseChain(config, requestedMonth) {
   };
 }
 
-async function getSzseContracts() {
-  const base = 'https://www.szse.cn/api/report/ShowReport/data?SHOWTYPE=JSON&CATALOGID=ysplbrb&TABKEY=tab1&txtQueryKeyAndJC=%E4%B8%AD%E8%AF%81500ETF';
-  const headers = { 'User-Agent': SINA_HEADERS['User-Agent'], Referer: 'https://www.szse.cn/market/product/option/index.html' };
-  const first = await fetchJson(`${base}&PAGENO=1&random=${Date.now()}`, { headers });
-  const pageCount = first?.[0]?.metadata?.pagecount || 1;
-  const pages = await Promise.all(Array.from({ length: Math.max(0, pageCount - 1) }, (_, index) => (
-    fetchJson(`${base}&PAGENO=${index + 2}&random=${Date.now() + index + 1}`, { headers })
-  )));
-  return [first, ...pages].flatMap((page) => page?.[0]?.data || []);
-}
-
 async function fetchSzseChain(config, requestedMonth) {
-  const listed = await getSzseContracts();
-  const normalized = listed.map((row) => ({
-    code: row.hydm,
-    name: row.hymc,
-    type: row.hylx === '认沽' ? 'P' : 'C',
-    strike: finiteNumber(row.xqj),
-    multiplier: finiteNumber(row.hydw) || config.multiplier,
-    expiry: row.xqrq,
-    month: String(row.xqrq || '').slice(0, 7).replace('-', ''),
-    contractStyle: 'M',
-  }));
-  const months = [...new Set(normalized.map((row) => row.month).filter(Boolean))].sort();
+  const months = await getSseMonths();
   const month = months.includes(requestedMonth) ? requestedMonth : months[0];
   if (!month) throw new Error('暂未查询到深交所可用合约月份');
-  const selected = normalized.filter((row) => row.month === month);
+  const upKey = `OP_UP_${config.symbol}${month.slice(-4)}`;
+  const downKey = `OP_DOWN_${config.symbol}${month.slice(-4)}`;
+  const codeRows = await fetchSinaRows([upKey, downKey]);
+  const calls = (codeRows.get(upKey) || []).filter(Boolean).map((item) => item.replace('CON_OP_', ''));
+  const puts = (codeRows.get(downKey) || []).filter(Boolean).map((item) => item.replace('CON_OP_', ''));
+  const types = new Map([...calls.map((code) => [code, 'C']), ...puts.map((code) => [code, 'P'])]);
+  const codes = [...calls, ...puts];
+  if (!codes.length) throw new Error(`${month} 深交所合约列表为空`);
   const [quoteRows, underlying] = await Promise.all([
-    fetchSinaRows(selected.map((row) => row.code), 'CON_OP_'),
+    fetchSinaRows(codes, 'CON_OP_'),
     fetchUnderlying(config),
   ]);
-  const now = new Date();
-  const contracts = selected.map((item) => {
-    const dte = Math.max(0, Math.ceil((new Date(`${item.expiry}T15:00:00+08:00`) - now) / 86400000));
-    return quoteFromSina(item.code, quoteRows.get(item.code), { ...item, dte });
-  }).filter(Boolean).map((contract) => ({ ...contract, dte: contract.dte ?? Math.max(0, Math.ceil((new Date(`${contract.expiry}T15:00:00+08:00`) - now) / 86400000)) }));
+  if (!(underlying.price > 0)) throw new Error('深交所标的行情为空');
+  const contracts = codes.map((code) => quoteFromSina(code, quoteRows.get(code), {
+    type: types.get(code), multiplier: config.multiplier, contractStyle: 'M',
+  })).filter(Boolean);
+  if (!contracts.length) throw new Error(`${month} 深交所期权行情为空`);
   return {
     ...config,
     months,
@@ -307,11 +347,23 @@ async function fetchCnOptionChain(symbol, month) {
   const cacheKey = `${symbol}-${month || 'near'}`;
   const cached = cnOptionCache.get(cacheKey);
   if (cached && Date.now() - cached.time < 60000) return { ...cached.data, cached: true };
-  const data = config.exchange === 'SSE'
-    ? await fetchSseChain(config, month)
-    : await fetchSzseChain(config, month);
-  cnOptionCache.set(cacheKey, { time: Date.now(), data });
-  return { ...data, cached: false };
+  try {
+    const data = config.exchange === 'SSE'
+      ? await fetchSseChain(config, month)
+      : await fetchSzseChain(config, month);
+    cnOptionCache.set(cacheKey, { time: Date.now(), data });
+    return { ...data, cached: false, stale: false };
+  } catch (error) {
+    if (cached) {
+      return {
+        ...cached.data,
+        cached: true,
+        stale: true,
+        warning: `上游行情暂时不可用，已返回最近快照：${error.message}`,
+      };
+    }
+    throw error;
+  }
 }
 
 module.exports = async function handler(req, res) {
