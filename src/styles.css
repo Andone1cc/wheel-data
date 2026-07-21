@@ -864,6 +864,7 @@ select{-webkit-appearance:none;appearance:none}
 }
 .market-account-hero::after{content:'';position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(rgba(79,163,224,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(79,163,224,.025) 1px,transparent 1px);background-size:30px 30px;mask-image:linear-gradient(90deg,#000,transparent)}
 .market-account-hero>div{position:relative;z-index:1}.market-account-hero h2{font-size:29px;line-height:1.05;letter-spacing:-.04em;margin:0 0 9px}.market-account-hero p{font-size:13px;color:var(--dim);line-height:1.65;margin:0}
+.market-account-hero-side{position:relative;z-index:1;display:flex;flex-direction:column;align-items:flex-end;gap:12px;min-width:min(560px,52vw)}
 .market-account-hero-badges{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.market-account-hero-badges span{font:650 9px 'IBM Plex Mono',monospace;letter-spacing:.05em;color:#9fd3ff;background:rgba(79,163,224,.075);border:1px solid rgba(79,163,224,.2);padding:5px 9px;border-radius:999px;white-space:nowrap}
 .market-account-nav{display:flex;align-items:center;justify-content:flex-end;gap:12px;margin:0 0 12px}
 .market-account-bar{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 16px;margin-bottom:14px;border:1px solid rgba(79,163,224,.2);border-radius:16px;background:linear-gradient(135deg,rgba(79,163,224,.075),var(--surface));box-shadow:0 14px 38px rgba(0,0,0,.14)}
@@ -915,14 +916,14 @@ select{-webkit-appearance:none;appearance:none}
   .cn-form-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
 }
 @media(max-width:900px){
-  .market-account-bar{align-items:stretch;flex-direction:column}.market-account-nav{align-items:stretch;justify-content:stretch;flex-direction:column}.market-account-tabs{display:grid;grid-template-columns:repeat(4,1fr)}
+  .market-account-bar{align-items:stretch;flex-direction:column}.market-account-hero-side{align-items:stretch;min-width:0;width:100%}.market-account-nav{align-items:stretch;justify-content:stretch;flex-direction:column}.market-account-tabs{display:grid;grid-template-columns:repeat(4,1fr)}
   .cn-account-nav{align-items:stretch;flex-direction:column}.cn-account-tabs{display:grid;grid-template-columns:repeat(4,1fr)}.cn-account-tabs button{justify-content:center;padding:8px 7px}.cn-account-actions{align-self:flex-end}.cn-account-add{align-self:flex-end}
   .cn-position-main{grid-template-columns:1fr auto}.cn-position-id{grid-column:1}.cn-position-side{grid-column:2;grid-row:1}.cn-position-metrics{grid-column:1 / span 2;grid-row:2}.cn-row-actions{grid-column:1 / span 2;grid-row:3}
   .cn-stock-card{grid-template-columns:1fr auto}.cn-stock-metrics{grid-column:1 / span 2;grid-row:2}.cn-stock-edit{grid-column:1 / span 2}
   .cn-inline-panel.close{grid-template-columns:1fr}.cn-inline-grid.compact{margin-bottom:10px}
 }
 @media(max-width:768px){
-  .market-account-hero{align-items:flex-start;flex-direction:column;padding:18px;border-radius:15px;gap:13px;margin-bottom:9px}.market-account-hero h2{font-size:23px}.market-account-hero p{font-size:11px}.market-account-hero-badges{justify-content:flex-start}
+  .market-account-hero{align-items:flex-start;flex-direction:column;padding:18px;border-radius:15px;gap:13px;margin-bottom:9px}.market-account-hero h2{font-size:23px}.market-account-hero p{font-size:11px}.market-account-hero-badges{justify-content:flex-start}.market-account-hero-side{gap:9px}.market-account-hero-side .market-account-tabs{grid-template-columns:1fr 1fr}
   .market-account-nav{position:sticky;top:104px;z-index:12;background:var(--bg);margin:10px -2px;padding:5px 2px 7px}.market-account-bar{position:sticky;top:104px;z-index:12;padding:10px;margin:0 0 10px;border-radius:13px;background:color-mix(in srgb,var(--surface) 94%,transparent);backdrop-filter:blur(16px)}.market-account-title{display:flex;align-items:baseline;gap:7px}.market-account-title>span{display:none}.market-account-title>strong{font-size:14px}.market-account-tabs{width:100%;grid-template-columns:1fr 1fr;padding:3px}.market-account-tabs button{font-size:10px;padding:7px 5px}
   .cn-account{padding-top:2px}.cn-account-hero{align-items:flex-start;flex-direction:column;padding:18px;border-radius:15px;gap:13px;margin-bottom:9px}.cn-account-hero h2{font-size:23px}.cn-account-hero p{font-size:11px}.cn-account-hero-badges{justify-content:flex-start}
   .cn-account-overview{grid-template-columns:1fr 1fr;border-radius:13px}.cn-account-overview>div{padding:11px 12px}.cn-account-overview>div:nth-child(5){grid-column:1 / span 2}.cn-account-overview strong{font-size:15px}.cn-account-overview small{font-size:8px}
