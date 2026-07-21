@@ -1304,8 +1304,8 @@ function CnOptionsPanel({embedded=false}){
   const indexPrice=indexQuote?.price??data?.indexPrice??null;
   const indexQuoteTime=indexQuote?.quoteTime??data?.indexQuoteTime??null;
   const dataNotice=data?.warning||(!data?.stale&&data?.notice)||'';
-  const isOfficialCloseNotice=data?.staleReason==='official-close-lag'||(!data?.warning&&data?.exchange==='SZSE'&&data?.notice);
-  const noticeKind=isOfficialCloseNotice?'info':'warning';
+  const isOfficialCloseNotice=data?.staleReason==='official-close-lag'||(!data?.warning&&data?.source==='szse-official-close'&&data?.notice);
+  const noticeKind=isOfficialCloseNotice||data?.source==='sina-realtime'?'info':'warning';
   const atmStrike=data?.underlyingPrice&&data?.contracts?.length
     ? data.contracts.reduce((best,item)=>Math.abs(item.strike-data.underlyingPrice)<Math.abs(best-data.underlyingPrice)?item.strike:best,data.contracts[0].strike)
     : null;
@@ -1346,12 +1346,12 @@ function CnOptionsPanel({embedded=false}){
         <>
           {dataNotice&&<div className={`cnopt-stale ${noticeKind}`}>{noticeKind==='info'?'i':'⚠'} {dataNotice}</div>}
           <div className="cnopt-snapshot">
-            <div><span>标的现价</span><strong>¥ {fmt(data.underlyingPrice,3)}</strong><small>{data.underlyingSource==='tencent-etf-realtime'?'腾讯实时':'官方收盘'} · {data.underlyingQuoteTime||data.quoteTime||symbol}</small></div>
+            <div><span>标的现价</span><strong>¥ {fmt(data.underlyingPrice,3)}</strong><small>{data.underlyingSource==='tencent-etf-realtime'?'腾讯实时':data.underlyingSource==='sina-etf-realtime'?'新浪实时':'官方收盘'} · {data.underlyingQuoteTime||data.quoteTime||symbol}</small></div>
             <div className="cnopt-index"><span>中证500指数</span><strong>{indexPrice==null?'—':fmt(indexPrice,2)}</strong><small>{indexQuoteTime||(indexPrice?'本机最近快照':'独立同步中，不阻塞期权链')}</small></div>
             <div><span>合约月份</span><strong>{cnMonthLabel(data.selectedMonth)}</strong><small>{data.contracts?.[0]?.expiry||'—'} 到期</small></div>
             <div><span>合约数量</span><strong>{data.contracts?.length||0}</strong><small>Call + Put</small></div>
             <div><span>当前筛选成交量</span><strong>{fmt(totalVolume,0)}</strong><small>{contracts.length} 条结果</small></div>
-            <div className="cnopt-source"><span>行情 / Greeks</span><strong>期权链·交易所官方</strong><small>{data.exchange==='SZSE'?(data.underlyingSource==='tencent-etf-realtime'?'ETF腾讯实时 · 期权官方收盘 · BS 反推':'官方收盘价 · BS 反推'):'官方实时价 · BS 反推'}</small></div>
+            <div className="cnopt-source"><span>行情 / Greeks</span><strong>{data.source==='sina-realtime'?'新浪盘中期权':'期权链·交易所官方'}</strong><small>{data.exchange==='SZSE'?(data.source==='sina-realtime'?(data.underlyingSource==='sina-etf-realtime'?'ETF新浪实时 · 期权新浪实时 · BS 反推': 'ETF腾讯实时 · 期权新浪实时 · BS 反推'):(data.underlyingSource==='tencent-etf-realtime'?'ETF腾讯实时 · 期权官方收盘 · BS 反推':data.underlyingSource==='sina-etf-realtime'?'ETF新浪实时 · 期权官方收盘 · BS 反推':'官方收盘价 · BS 反推')):'官方实时价 · BS 反推'}</small></div>
           </div>
 
           <div className="cnopt-toolbar">
@@ -2955,6 +2955,7 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
   const [indexQuote,setIndexQuote]=useState(()=>readCsi500Cache());
   const [refreshingStock,setRefreshingStock]=useState(null);
   const [refreshingOptions,setRefreshingOptions]=useState(false);
+  const initialOptionSync=React.useRef(false);
   const [stockMarketFilter,setStockMarketFilter]=useState('ALL');
   const [stockQuery,setStockQuery]=useState('');
   const [hkdCnyQuote,setHkdCnyQuote]=useState(()=>readHkdCnyCache(30*24*60*60*1000)||{rate:DEFAULT_HKD_CNY_RATE,source:'fallback'});
@@ -3047,6 +3048,11 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
     else showToast('暂未匹配到持仓合约，请检查行权价和到期日',ACC.loss);
     setRefreshingOptions(false);
   };
+  useEffect(()=>{
+    if(!positions.length||initialOptionSync.current)return;
+    initialOptionSync.current=true;
+    refreshOptionPositions();
+  },[positions.length]);
   const refreshStock=async(stock)=>{
     setRefreshingStock(stock.id);
     const quote=await fetchCnStockQuote(stock.market,stock.ticker);
