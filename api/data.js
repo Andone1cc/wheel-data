@@ -593,10 +593,30 @@ async function fetchSzseChain(config, requestedMonth, realtime = false) {
   return fetchSzseOfficialCloseChain(config, month, months, realtime);
 }
 
-async function fetchCnOptionChain(symbol, month, force = false, realtime = false) {
+function focusContractsAroundAtm(data, windowSize = 5) {
+  const contracts = Array.isArray(data?.contracts) ? data.contracts : [];
+  const strikes = [...new Set(contracts.map((contract) => Number(contract.strike)).filter((strike) => strike > 0))].sort((a, b) => a - b);
+  if (!strikes.length || !(data?.underlyingPrice > 0)) return data;
+  const atmIndex = strikes.reduce((best, strike, index) => (
+    Math.abs(strike - data.underlyingPrice) < Math.abs(strikes[best] - data.underlyingPrice) ? index : best
+  ), 0);
+  const size = Math.max(0, Math.min(10, Number(windowSize) || 5));
+  const selected = new Set(strikes.slice(Math.max(0, atmIndex - size), atmIndex + size + 1));
+  const focused = contracts.filter((contract) => selected.has(Number(contract.strike)));
+  return {
+    ...data,
+    contracts: focused,
+    atmStrike: strikes[atmIndex],
+    strikeWindow: size,
+    strikeCount: selected.size,
+  };
+}
+
+async function fetchCnOptionChain(symbol, month, force = false, realtime = false, focus = '', strikeWindow = 5) {
   const config = CN_OPTION_UNDERLYINGS[symbol];
   if (!config) throw new Error('仅支持 510500、159922');
-  const cacheKey = `${symbol}-${month || 'near'}-${realtime ? 'realtime' : 'official'}`;
+  const focusKey = focus === 'atm' ? `-atm${Math.max(0, Math.min(10, Number(strikeWindow) || 5))}` : '';
+  const cacheKey = `${symbol}-${month || 'near'}-${realtime ? 'realtime' : 'official'}${focusKey}`;
   const cached = cnOptionCache.get(cacheKey);
   if (!force && cached && Date.now() - cached.time < 60000) return { ...cached.data, cached: true };
   try {
@@ -616,7 +636,8 @@ async function fetchCnOptionChain(symbol, month, force = false, realtime = false
         indexStrike: contract.strike > 0 ? (contract.strike / data.underlyingPrice) * index.price : null,
       })),
     } : data;
-    const snapshot = { ...enriched, snapshotSavedAt: Date.now() };
+    const focused = focus === 'atm' ? focusContractsAroundAtm(enriched, strikeWindow) : enriched;
+    const snapshot = { ...focused, snapshotSavedAt: Date.now() };
     cnOptionCache.set(cacheKey, { time: Date.now(), data: snapshot });
     const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
     const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -900,7 +921,9 @@ module.exports = async function handler(req, res) {
     try {
       const force = url.searchParams.get('refresh') === '1';
       const realtime = url.searchParams.get('realtime') === '1';
-      const data = await fetchCnOptionChain(symbol, month, force, realtime);
+      const focus = url.searchParams.get('focus') === 'atm' ? 'atm' : '';
+      const strikeWindow = Math.max(0, Math.min(10, Number(url.searchParams.get('window')) || 5));
+      const data = await fetchCnOptionChain(symbol, month, force, realtime, focus, strikeWindow);
       // 深交所期权链本身仍是官方收盘口径，但标的 ETF 使用腾讯盘中价，
       // 因此不能再让 CDN 长时间复用旧的标的价格。刷新请求同时绕过进程缓存。
       res.setHeader('Cache-Control', data.exchange === 'SZSE'

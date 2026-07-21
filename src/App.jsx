@@ -80,11 +80,13 @@ async function futuFetch(path, opts={}){
 
 async function cnOptionFetch(symbol,month='',opts={}){
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
-  const {refresh=false,realtime=false,...fetchOpts}=opts;
+  const {refresh=false,realtime=false,focus='',strikeWindow=0,...fetchOpts}=opts;
   const params=new URLSearchParams({symbol});
   if(month)params.set('month',month);
   if(refresh)params.set('refresh','1');
   if(realtime)params.set('realtime','1');
+  if(focus)params.set('focus',focus);
+  if(strikeWindow)params.set('window',String(strikeWindow));
   return fetch(`${proxyBase}/api/cn-options?${params.toString()}`,{
     ...fetchOpts,
     signal:fetchOpts.signal||AbortSignal.timeout(12000),
@@ -1244,7 +1246,8 @@ function CnOptionsPanel({embedded=false}){
   },[]);
 
   const load=useCallback(async(nextSymbol,nextMonth='',force=false)=>{
-    const key=`${nextSymbol}-${nextMonth||'near'}`;
+    const focus='atm',strikeWindow=5;
+    const key=`${nextSymbol}-${nextMonth||'near'}-${focus}${strikeWindow}`;
     const storageKey=`whl-cnopt-cache-${key}`;
     if(!force&&cacheRef.current.has(key)){
       setData(cacheRef.current.get(key));setError('');return;
@@ -1265,7 +1268,7 @@ function CnOptionsPanel({embedded=false}){
       let payload=null,lastError=null;
       for(let attempt=0;attempt<2;attempt+=1){
         try{
-          payload=await fetchCnOptionSnapshot(nextSymbol,nextMonth,force,true);
+          payload=await fetchCnOptionSnapshot(nextSymbol,nextMonth,force,true,focus,strikeWindow);
           break;
         }catch(fetchError){
           lastError=fetchError;
@@ -1274,7 +1277,7 @@ function CnOptionsPanel({embedded=false}){
       }
       if(!payload)throw lastError||new Error('行情拉取失败');
       cacheRef.current.set(key,payload);
-      cacheRef.current.set(`${nextSymbol}-${payload.selectedMonth}`,payload);
+      cacheRef.current.set(`${nextSymbol}-${payload.selectedMonth}-${focus}${strikeWindow}`,payload);
       try{localStorage.setItem(storageKey,JSON.stringify({savedAt:Date.now(),payload}));}catch{}
       setData(payload);setLastLoaded(new Date());
     }catch(e){
@@ -1324,7 +1327,7 @@ function CnOptionsPanel({embedded=false}){
         <div>
           <div className="cnopt-kicker">CN OPTIONS · LIVE QUERY</div>
           <h2>A股期权数据台</h2>
-        <p>中证500 ETF 近月合约 · 上交所官方实时、深交所官方收盘 · 腾讯 ETF 行情 · IV 与 Delta 一屏查询</p>
+        <p>中证500 ETF 次月 ATM±5档 · 上交所官方实时、深交所官方收盘 · 腾讯 ETF 行情 · IV 与 Delta 一屏查询</p>
         </div>
         <button className="btn cnopt-refresh" onClick={()=>{load(symbol,data?.selectedMonth||'',true);refreshIndex(true);}} disabled={loading}>
           {loading?'同步中…':'↻ 刷新数据'}
@@ -1377,7 +1380,7 @@ function CnOptionsPanel({embedded=false}){
             </div>
           </div>
 
-          <div className="cnopt-note"><span>i</span>{data.greekNote}<b> 预期年化 =（最新权利金 − ¥2/张手续费）÷ 行权价 × 365 ÷ DTE；行权价等效指数 = 行权价 ÷ ETF现价 × 中证500现点，仅作近似参考。</b></div>
+          <div className="cnopt-note"><span>i</span>{data.greekNote}<b> 当前显示 ATM 上下各 {data.strikeWindow??5} 档（{data.strikeCount??'—'} 个行权价）；预期年化 =（最新权利金 − ¥2/张手续费）÷ 行权价 × 365 ÷ DTE；行权价等效指数 = 行权价 ÷ ETF现价 × 中证500现点，仅作近似参考。</b></div>
 
           <div className={`cnopt-chain${loading?' loading':''}`}>
             <div className="cnopt-chain-head">
@@ -2737,8 +2740,8 @@ const cnOptionMark=(contract)=>{
   const settlement=num(contract?.settlement,NaN);
   return Number.isFinite(settlement)&&settlement>=0?settlement:null;
 };
-async function fetchCnOptionSnapshot(symbol,month,force=false,realtime=false){
-  const response=await cnOptionFetch(symbol,month,{refresh:force,realtime});
+async function fetchCnOptionSnapshot(symbol,month,force=false,realtime=false,focus='',strikeWindow=0){
+  const response=await cnOptionFetch(symbol,month,{refresh:force,realtime,focus,strikeWindow});
   const raw=await response.text();
   let payload;
   try{payload=JSON.parse(raw);}catch{throw new Error('期权行情返回格式异常');}
