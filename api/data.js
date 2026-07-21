@@ -448,7 +448,7 @@ async function fetchSzseOfficialCloseChain(config, month, months) {
         contracts: enrichLocalGreeks(contracts, underlyingPrice),
         delayed: true,
         source: 'szse-official-close',
-        notice: `深交所官方收盘行情（${quoteDate}），不含实时买卖盘。`,
+        notice: `深交所期权链为日终口径，最新官方发布日为 ${quoteDate}；交易日盘中显示上一交易日属于正常情况，不含实时买卖盘。`,
         greekNote: 'IV/Delta 由深交所官方收盘价按 Black-Scholes 反推，仅供研究。',
       };
     } catch (error) {
@@ -614,7 +614,7 @@ async function fetchCnOptionChain(symbol, month) {
         cacheScope: cached ? 'memory' : 'shared',
         staleReason: isSzseClose ? 'official-close-lag' : 'upstream-unavailable',
         warning: isSzseClose
-          ? `深交所官方收盘数据最新可用日为 ${snapshotTime}；今日收盘数据未发布前，暂展示该日官方数据。`
+          ? `深交所期权链为日终口径，最新官方发布日为 ${snapshotTime}；交易日盘中显示上一交易日属于正常情况。当前为云端保存的官方快照。`
           : `官方行情暂时不可用，已返回云端最近快照（${snapshotTime}）。`,
       };
     }
