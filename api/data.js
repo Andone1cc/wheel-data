@@ -76,11 +76,6 @@ const SSE_HEADERS = {
   'User-Agent': BROWSER_USER_AGENT,
   Referer: 'https://www.sse.com.cn/assortment/options/price/',
 };
-const SINA_HEADERS = {
-  Accept: '*/*',
-  'User-Agent': BROWSER_USER_AGENT,
-  Referer: 'https://finance.sina.com.cn/',
-};
 
 function finiteNumber(value) {
   const n = Number(value);
@@ -285,36 +280,12 @@ function formatTencentQuoteTime(value) {
   return `${time.slice(0, 4)}-${time.slice(4, 6)}-${time.slice(6, 8)} ${time.slice(8, 10)}:${time.slice(10, 12)}:${time.slice(12, 14)}`;
 }
 
-function formatSinaQuoteTime(dateValue, timeValue) {
-  const date = String(dateValue || '');
-  const time = String(timeValue || '');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return '';
-  return `${date}${/^\d{2}:\d{2}:\d{2}$/.test(time) ? ` ${time}` : ''}`;
-}
-
 function pickLatestQuote(quotes) {
   return quotes.filter(Boolean).sort((a, b) => {
     const aTime = Date.parse(a.quoteTime || '') || 0;
     const bTime = Date.parse(b.quoteTime || '') || 0;
     return bTime - aTime;
   })[0] || null;
-}
-
-async function fetchSinaQuoteText(symbols, timeoutMs = 3000) {
-  const list = symbols.join(',');
-  const urls = [
-    `https://hq.sinajs.cn/?rn=${Date.now()}&list=${list}`,
-    `https://hq.sinajs.cn/rn=${Date.now()}&list=${list}`,
-    `https://hq.sinajs.cn/list=${list}`,
-  ];
-  const results = await Promise.allSettled(urls.map((url) => fetchText(url, {
-    headers: SINA_HEADERS,
-    timeoutMs: Math.min(timeoutMs, 1200),
-    attempts: 1,
-  })));
-  const success = results.find((result) => result.status === 'fulfilled' && result.value);
-  if (success) return success.value;
-  throw results.find((result) => result.status === 'rejected')?.reason || new Error('新浪行情接口暂时不可用');
 }
 
 async function fetchTencentCsi500Index() {
@@ -365,89 +336,8 @@ async function fetchTencentEtfQuote(config) {
   };
 }
 
-async function fetchSinaEtfQuote(config) {
-  const text = await fetchSinaQuoteText([config.quoteSymbol], 2200);
-  const quoted = /="([\s\S]*?)";/.exec(text)?.[1];
-  const fields = quoted?.split(',') || [];
-  const price = marketNumber(fields[3]);
-  if (!(price > 0)) throw new Error(`${config.symbol} 新浪 ETF 盘中行情为空`);
-  const previousClose = marketNumber(fields[2]);
-  return {
-    price,
-    previousClose,
-    change: previousClose == null ? null : price - previousClose,
-    changePct: previousClose > 0 ? ((price / previousClose) - 1) * 100 : null,
-    quoteTime: formatSinaQuoteTime(fields[30], fields[31]) || shanghaiDate(),
-    source: 'sina-etf-realtime',
-  };
-}
-
 async function fetchLiveEtfQuote(config) {
-  const results = await Promise.allSettled([fetchTencentEtfQuote(config), fetchSinaEtfQuote(config)]);
-  const quote = pickLatestQuote(results.map((result) => result.status === 'fulfilled' ? result.value : null));
-  if (!quote) throw new Error(`${config.symbol} 盘中 ETF 行情暂时不可用`);
-  return quote;
-}
-
-async function fetchSinaOptionQuotes(contracts, config) {
-  const codes = contracts.map((contract) => String(contract.code || '').trim()).filter(Boolean);
-  if (!codes.length) throw new Error('深交所期权合约代码为空');
-  const prefix = config.exchange === 'SZSE' ? 'sz' : 'sh';
-  const quotes = new Map();
-  const batches = [];
-  for (let i = 0; i < codes.length; i += 8) batches.push(codes.slice(i, i + 8));
-  await Promise.all(batches.map(async (batch) => {
-    try {
-      const text = await fetchSinaQuoteText(batch.map((code) => `${prefix}${code}`), 3500);
-      for (const match of text.matchAll(/var hq_str_(?:sz|sh)(\d+)="([\s\S]*?)";/g)) {
-        const fields = match[2].split(',');
-        const last = marketNumber(fields[3]);
-        if (!Number.isFinite(last) || last < 0) continue;
-        const previousClose = marketNumber(fields[2]);
-        const bid = marketNumber(fields[6]);
-        const ask = marketNumber(fields[7]);
-        quotes.set(match[1], {
-          last,
-          bid: bid > 0 ? bid : null,
-          ask: ask > 0 ? ask : null,
-          bidSize: marketNumber(fields[10]),
-          askSize: marketNumber(fields[20]),
-          previousClose,
-          changePct: previousClose > 0 ? ((last / previousClose) - 1) * 100 : null,
-          volume: marketNumber(fields[8]),
-          quoteTime: formatSinaQuoteTime(fields[30], fields[31]),
-        });
-      }
-    } catch {}
-  }));
-  if (!quotes.size) throw new Error('新浪深交所期权盘中报价为空');
-  return contracts.map((contract) => {
-    const quote = quotes.get(String(contract.code));
-    if (!quote) return contract;
-    return {
-      ...contract,
-      ...quote,
-      priceSource: 'sina-realtime',
-      delayed: false,
-    };
-  });
-}
-
-async function fetchSinaCsi500Index() {
-  const text = await fetchSinaQuoteText(['sh000905'], 2200);
-  const quoted = /="([\s\S]*?)";/.exec(text)?.[1];
-  const fields = quoted?.split(',') || [];
-  const price = marketNumber(fields[3]);
-  if (!(price > 0)) throw new Error('新浪中证500指数行情为空');
-  const previousClose = marketNumber(fields[2]);
-  return {
-    code: '000905', name: '中证500指数', price,
-    change: previousClose == null ? null : price - previousClose,
-    changePct: previousClose > 0 ? ((price / previousClose) - 1) * 100 : null,
-    previousClose,
-    quoteTime: formatSinaQuoteTime(fields[30], fields[31]) || shanghaiDate(),
-    source: 'sina-quote-index',
-  };
+  return fetchTencentEtfQuote(config);
 }
 
 async function fetchCsi500Index() {
@@ -457,9 +347,7 @@ async function fetchCsi500Index() {
   try {
     let data;
     try {
-      const realtimeResults = await Promise.allSettled([fetchTencentCsi500Index(), fetchSinaCsi500Index()]);
-      data = pickLatestQuote(realtimeResults.map((result) => result.status === 'fulfilled' ? result.value : null));
-      if (!data) throw new Error('腾讯与新浪中证500行情均不可用');
+      data = await fetchTencentCsi500Index();
     } catch (realtimeError) {
       const payload = await fetchJson(sseHqUrl('v1/sh1/list/self/000905', {
         select: 'code,cpxxextendname,last,change,chg_rate,amp_rate,volume,amount,prev_close',
@@ -596,7 +484,6 @@ async function fetchSzseOfficialCloseChain(config, month, months, realtime = fal
       const officialUnderlyingPrice = marketNumber(underlyingRow.ss);
       const underlyingPrice = realtimeUnderlying?.price || officialUnderlyingPrice;
       const underlyingQuoteTime = realtimeUnderlying?.quoteTime || quoteDate;
-      const realtimeLabel = realtimeUnderlying?.source === 'sina-etf-realtime' ? '新浪' : '腾讯';
       return {
         ...config,
         months,
@@ -609,10 +496,10 @@ async function fetchSzseOfficialCloseChain(config, month, months, realtime = fal
         delayed: true,
         source: 'szse-official-close',
         notice: realtimeUnderlying
-          ? `159922 标的使用${realtimeLabel}盘中行情（${underlyingQuoteTime}）；期权链仍为深交所官方收盘口径（${quoteDate}），不含实时买卖盘。`
+          ? `159922 标的使用腾讯盘中行情（${underlyingQuoteTime}）；期权链为深交所官方收盘口径（${quoteDate}），不含实时买卖盘。`
           : `深交所期权链为日终口径，最新官方发布日为 ${quoteDate}；交易日盘中显示上一交易日属于正常情况，不含实时买卖盘。`,
         greekNote: realtimeUnderlying
-          ? `IV/Delta 由深交所官方收盘期权价与${realtimeLabel}盘中 ETF 现价按 Black-Scholes 反推，仅供研究。`
+          ? 'IV/Delta 由深交所官方收盘期权价与腾讯盘中 ETF 现价按 Black-Scholes 反推，仅供研究。'
           : 'IV/Delta 由深交所官方收盘价按 Black-Scholes 反推，仅供研究。',
       };
     } catch (error) {
@@ -717,30 +604,7 @@ async function fetchSzseChain(config, requestedMonth, realtime = false) {
   const month = requested || months[0];
   if (requested && !months.includes(requested)) months.unshift(requested);
   if (!month) throw new Error('暂未查询到深交所可用合约月份');
-  const official = await fetchSzseOfficialCloseChain(config, month, months, realtime);
-  if (!realtime) return official;
-  try {
-    const contracts = await fetchSinaOptionQuotes(official.contracts, config);
-    const realtimeCount = contracts.filter((contract) => contract.priceSource === 'sina-realtime').length;
-    if (!realtimeCount) throw new Error('新浪深交所期权盘中报价为空');
-    const quoteTime = contracts.map((contract) => contract.quoteTime).filter(Boolean).sort().pop() || official.quoteTime;
-    const underlyingLabel = official.underlyingSource === 'sina-etf-realtime' ? '新浪' : '腾讯';
-    return {
-      ...official,
-      contracts: enrichLocalGreeks(contracts, official.underlyingPrice),
-      quoteTime,
-      source: 'sina-realtime',
-      delayed: false,
-      notice: `期权链使用新浪盘中报价（${quoteTime}），标的 ETF 使用${underlyingLabel}盘中行情；新浪不可用的合约保留深交所官方收盘值。`,
-      greekNote: `IV/Delta 由新浪盘中期权价与${underlyingLabel}盘中 ETF 现价按 Black-Scholes 反推，仅供研究。`,
-    };
-  } catch (realtimeError) {
-    return {
-      ...official,
-      realtimeError: realtimeError.message,
-      notice: `${official.notice} 新浪盘中期权流暂不可用，已保留深交所官方收盘快照。`,
-    };
-  }
+  return fetchSzseOfficialCloseChain(config, month, months, realtime);
 }
 
 async function fetchCnOptionChain(symbol, month, force = false, realtime = false) {
