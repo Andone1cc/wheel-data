@@ -298,8 +298,33 @@ async function fetchTencentCsi500Index() {
     code: '000905', name: '中证500指数', price,
     change: marketNumber(fields[31]), changePct: marketNumber(fields[32]),
     previousClose: marketNumber(fields[4]),
-    quoteTime: formatTencentQuoteTime(fields[30]),
+    quoteTime: formatTencentQuoteTime(fields[30]) || shanghaiDate(),
     source: 'tencent-quote-index',
+  };
+}
+
+async function fetchTencentEtfQuote(config) {
+  const exchangePrefix = config.exchange === 'SZSE' ? 'sz' : 'sh';
+  const text = await fetchText(`https://qt.gtimg.cn/q=${exchangePrefix}${config.symbol}`, {
+    headers: {
+      Accept: '*/*',
+      'User-Agent': BROWSER_USER_AGENT,
+      Referer: 'https://gu.qq.com/',
+    },
+    timeoutMs: 2200,
+    attempts: 1,
+  });
+  const quoted = /="([^"]+)"/.exec(text)?.[1];
+  const fields = quoted?.split('~') || [];
+  const price = marketNumber(fields[3]);
+  if (!(price > 0)) throw new Error(`${config.symbol} ETF 盘中行情为空`);
+  return {
+    price,
+    previousClose: marketNumber(fields[4]),
+    change: marketNumber(fields[31]),
+    changePct: marketNumber(fields[32]),
+    quoteTime: formatTencentQuoteTime(fields[30]) || shanghaiDate(),
+    source: 'tencent-etf-realtime',
   };
 }
 
@@ -375,6 +400,10 @@ async function fetchSzseReportPages(params, firstReport) {
 async function fetchSzseOfficialCloseChain(config, month, months) {
   const monthLabel = `${Number(month.slice(-2))}月`;
   const optionQueries = [`中证500ETF购${monthLabel}`, `中证500ETF沽${monthLabel}`];
+  let realtimeUnderlying = null;
+  try {
+    realtimeUnderlying = await fetchTencentEtfQuote(config);
+  } catch {}
   let latestError;
 
   for (let offset = 0; offset >= -7; offset -= 1) {
@@ -438,18 +467,26 @@ async function fetchSzseOfficialCloseChain(config, month, months) {
       }).filter((contract) => contract.code && contract.strike > 0);
       if (!contracts.length) continue;
 
-      const underlyingPrice = marketNumber(underlyingRow.ss);
+      const officialUnderlyingPrice = marketNumber(underlyingRow.ss);
+      const underlyingPrice = realtimeUnderlying?.price || officialUnderlyingPrice;
+      const underlyingQuoteTime = realtimeUnderlying?.quoteTime || quoteDate;
       return {
         ...config,
         months,
         selectedMonth: month,
         underlyingPrice,
+        underlyingQuoteTime,
+        underlyingSource: realtimeUnderlying?.source || 'szse-official-close',
         quoteTime: quoteDate,
         contracts: enrichLocalGreeks(contracts, underlyingPrice),
         delayed: true,
         source: 'szse-official-close',
-        notice: `深交所期权链为日终口径，最新官方发布日为 ${quoteDate}；交易日盘中显示上一交易日属于正常情况，不含实时买卖盘。`,
-        greekNote: 'IV/Delta 由深交所官方收盘价按 Black-Scholes 反推，仅供研究。',
+        notice: realtimeUnderlying
+          ? `159922 标的使用腾讯盘中行情（${underlyingQuoteTime}）；期权链仍为深交所官方收盘口径（${quoteDate}），不含实时买卖盘。`
+          : `深交所期权链为日终口径，最新官方发布日为 ${quoteDate}；交易日盘中显示上一交易日属于正常情况，不含实时买卖盘。`,
+        greekNote: realtimeUnderlying
+          ? 'IV/Delta 由深交所官方收盘期权价与腾讯盘中 ETF 现价按 Black-Scholes 反推，仅供研究。'
+          : 'IV/Delta 由深交所官方收盘价按 Black-Scholes 反推，仅供研究。',
       };
     } catch (error) {
       // 网络层错误与交易日无关，继续扫描前 7 天只会重复等待同一个故障源。
@@ -556,12 +593,12 @@ async function fetchSzseChain(config, requestedMonth) {
   return fetchSzseOfficialCloseChain(config, month, months);
 }
 
-async function fetchCnOptionChain(symbol, month) {
+async function fetchCnOptionChain(symbol, month, force = false) {
   const config = CN_OPTION_UNDERLYINGS[symbol];
   if (!config) throw new Error('仅支持 510500、159922');
   const cacheKey = `${symbol}-${month || 'near'}`;
   const cached = cnOptionCache.get(cacheKey);
-  if (cached && Date.now() - cached.time < 60000) return { ...cached.data, cached: true };
+  if (!force && cached && Date.now() - cached.time < 60000) return { ...cached.data, cached: true };
   try {
     // 指数仅用于换算展示，不能阻塞期权链主请求。若进程中已有缓存则顺手带回，
     // 否则由前端独立请求 /api/cn-options?indexOnly=1。
@@ -862,11 +899,12 @@ module.exports = async function handler(req, res) {
     const symbol = url.searchParams.get('symbol') || '510500';
     const month = url.searchParams.get('month') || '';
     try {
-      const data = await fetchCnOptionChain(symbol, month);
-      // 深交所提供的是日终收盘数据，允许 CDN 较长复用；上交所为实时行情，
-      // 只做短缓存。stale-while-revalidate 可在上游抖动时继续返回成功版本。
+      const force = url.searchParams.get('refresh') === '1';
+      const data = await fetchCnOptionChain(symbol, month, force);
+      // 深交所期权链本身仍是官方收盘口径，但标的 ETF 使用腾讯盘中价，
+      // 因此不能再让 CDN 长时间复用旧的标的价格。刷新请求同时绕过进程缓存。
       res.setHeader('Cache-Control', data.exchange === 'SZSE'
-        ? 'public, s-maxage=900, stale-while-revalidate=86400'
+        ? 'public, s-maxage=30, stale-while-revalidate=120'
         : 'public, s-maxage=30, stale-while-revalidate=600');
       return res.status(200).json(data);
     } catch (e) {

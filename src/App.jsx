@@ -80,11 +80,13 @@ async function futuFetch(path, opts={}){
 
 async function cnOptionFetch(symbol,month='',opts={}){
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
+  const {refresh=false,...fetchOpts}=opts;
   const params=new URLSearchParams({symbol});
   if(month)params.set('month',month);
+  if(refresh)params.set('refresh','1');
   return fetch(`${proxyBase}/api/cn-options?${params.toString()}`,{
-    ...opts,
-    signal:opts.signal||AbortSignal.timeout(20000),
+    ...fetchOpts,
+    signal:fetchOpts.signal||AbortSignal.timeout(20000),
   });
 }
 
@@ -1251,7 +1253,7 @@ function CnOptionsPanel({embedded=false}){
       let payload=null,lastError=null;
       for(let attempt=0;attempt<2;attempt+=1){
         try{
-          const response=await cnOptionFetch(nextSymbol,nextMonth);
+          const response=await cnOptionFetch(nextSymbol,nextMonth,{refresh:force});
           const raw=await response.text();
           let parsed;
           try{parsed=JSON.parse(raw);}catch{throw new Error('行情接口返回格式异常');}
@@ -1344,12 +1346,12 @@ function CnOptionsPanel({embedded=false}){
         <>
           {dataNotice&&<div className={`cnopt-stale ${noticeKind}`}>{noticeKind==='info'?'i':'⚠'} {dataNotice}</div>}
           <div className="cnopt-snapshot">
-            <div><span>标的现价</span><strong>¥ {fmt(data.underlyingPrice,3)}</strong><small>{selectedTarget.exchange} · {symbol}</small></div>
+            <div><span>标的现价</span><strong>¥ {fmt(data.underlyingPrice,3)}</strong><small>{data.underlyingSource==='tencent-etf-realtime'?'腾讯实时':'官方收盘'} · {data.underlyingQuoteTime||data.quoteTime||symbol}</small></div>
             <div className="cnopt-index"><span>中证500指数</span><strong>{indexPrice==null?'—':fmt(indexPrice,2)}</strong><small>{indexQuoteTime||(indexPrice?'本机最近快照':'独立同步中，不阻塞期权链')}</small></div>
             <div><span>合约月份</span><strong>{cnMonthLabel(data.selectedMonth)}</strong><small>{data.contracts?.[0]?.expiry||'—'} 到期</small></div>
             <div><span>合约数量</span><strong>{data.contracts?.length||0}</strong><small>Call + Put</small></div>
             <div><span>当前筛选成交量</span><strong>{fmt(totalVolume,0)}</strong><small>{contracts.length} 条结果</small></div>
-            <div className="cnopt-source"><span>行情 / Greeks</span><strong>交易所官方</strong><small>{data.exchange==='SZSE'?'官方收盘价 · BS 反推':'官方实时价 · BS 反推'}</small></div>
+            <div className="cnopt-source"><span>行情 / Greeks</span><strong>期权链·交易所官方</strong><small>{data.exchange==='SZSE'?(data.underlyingSource==='tencent-etf-realtime'?'ETF腾讯实时 · 期权官方收盘 · BS 反推':'官方收盘价 · BS 反推'):'官方实时价 · BS 反推'}</small></div>
           </div>
 
           <div className="cnopt-toolbar">
@@ -2727,8 +2729,8 @@ const cnOptionMark=(contract)=>{
   const settlement=num(contract?.settlement,NaN);
   return Number.isFinite(settlement)&&settlement>=0?settlement:null;
 };
-async function fetchCnOptionSnapshot(symbol,month){
-  const response=await cnOptionFetch(symbol,month);
+async function fetchCnOptionSnapshot(symbol,month,force=false){
+  const response=await cnOptionFetch(symbol,month,{refresh:force});
   const raw=await response.text();
   let payload;
   try{payload=JSON.parse(raw);}catch{throw new Error('期权行情返回格式异常');}
@@ -3012,7 +3014,7 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
     const [freshIndex,results]=await Promise.all([
       loadCsi500Index(true),
       Promise.all(groups.map(async group=>{
-        try{return{...group,payload:await fetchCnOptionSnapshot(group.symbol,group.month)};}
+        try{return{...group,payload:await fetchCnOptionSnapshot(group.symbol,group.month,true)};}
         catch(error){return{...group,error};}
       })),
     ]);
