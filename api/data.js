@@ -76,6 +76,11 @@ const SSE_HEADERS = {
   'User-Agent': BROWSER_USER_AGENT,
   Referer: 'https://www.sse.com.cn/assortment/options/price/',
 };
+const SINA_HEADERS = {
+  Accept: '*/*',
+  'User-Agent': BROWSER_USER_AGENT,
+  Referer: 'https://finance.sina.com.cn/',
+};
 
 function finiteNumber(value) {
   const n = Number(value);
@@ -295,6 +300,23 @@ function pickLatestQuote(quotes) {
   })[0] || null;
 }
 
+async function fetchSinaQuoteText(symbols, timeoutMs = 3000) {
+  const list = symbols.join(',');
+  let lastError;
+  for (const url of [
+    `https://hq.sinajs.cn/?rn=${Date.now()}&list=${list}`,
+    `https://hq.sinajs.cn/rn=${Date.now()}&list=${list}`,
+    `https://hq.sinajs.cn/list=${list}`,
+  ]) {
+    try {
+      return await fetchText(url, { headers: SINA_HEADERS, timeoutMs, attempts: 1 });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error('新浪行情接口暂时不可用');
+}
+
 async function fetchTencentCsi500Index() {
   const text = await fetchText('https://qt.gtimg.cn/q=sh000905', {
     headers: {
@@ -344,15 +366,7 @@ async function fetchTencentEtfQuote(config) {
 }
 
 async function fetchSinaEtfQuote(config) {
-  const text = await fetchText(`https://hq.sinajs.cn/list=${config.quoteSymbol}`, {
-    headers: {
-      Accept: '*/*',
-      'User-Agent': BROWSER_USER_AGENT,
-      Referer: 'https://finance.sina.com.cn/',
-    },
-    timeoutMs: 2200,
-    attempts: 1,
-  });
+  const text = await fetchSinaQuoteText([config.quoteSymbol], 2200);
   const quoted = /="([\s\S]*?)";/.exec(text)?.[1];
   const fields = quoted?.split(',') || [];
   const price = marketNumber(fields[3]);
@@ -379,35 +393,33 @@ async function fetchSinaOptionQuotes(contracts, config) {
   const codes = contracts.map((contract) => String(contract.code || '').trim()).filter(Boolean);
   if (!codes.length) throw new Error('深交所期权合约代码为空');
   const prefix = config.exchange === 'SZSE' ? 'sz' : 'sh';
-  const text = await fetchText(`https://hq.sinajs.cn/list=${codes.map((code) => `${prefix}${code}`).join(',')}`, {
-    headers: {
-      Accept: '*/*',
-      'User-Agent': BROWSER_USER_AGENT,
-      Referer: 'https://finance.sina.com.cn/',
-    },
-    timeoutMs: 5000,
-    attempts: 1,
-  });
   const quotes = new Map();
-  for (const match of text.matchAll(/var hq_str_(?:sz|sh)(\d+)="([\s\S]*?)";/g)) {
-    const fields = match[2].split(',');
-    const last = marketNumber(fields[3]);
-    if (!Number.isFinite(last) || last < 0) continue;
-    const previousClose = marketNumber(fields[2]);
-    const bid = marketNumber(fields[6]);
-    const ask = marketNumber(fields[7]);
-    quotes.set(match[1], {
-      last,
-      bid: bid > 0 ? bid : null,
-      ask: ask > 0 ? ask : null,
-      bidSize: marketNumber(fields[10]),
-      askSize: marketNumber(fields[20]),
-      previousClose,
-      changePct: previousClose > 0 ? ((last / previousClose) - 1) * 100 : null,
-      volume: marketNumber(fields[8]),
-      quoteTime: formatSinaQuoteTime(fields[30], fields[31]),
-    });
-  }
+  const batches = [];
+  for (let i = 0; i < codes.length; i += 8) batches.push(codes.slice(i, i + 8));
+  await Promise.all(batches.map(async (batch) => {
+    try {
+      const text = await fetchSinaQuoteText(batch.map((code) => `${prefix}${code}`), 3500);
+      for (const match of text.matchAll(/var hq_str_(?:sz|sh)(\d+)="([\s\S]*?)";/g)) {
+        const fields = match[2].split(',');
+        const last = marketNumber(fields[3]);
+        if (!Number.isFinite(last) || last < 0) continue;
+        const previousClose = marketNumber(fields[2]);
+        const bid = marketNumber(fields[6]);
+        const ask = marketNumber(fields[7]);
+        quotes.set(match[1], {
+          last,
+          bid: bid > 0 ? bid : null,
+          ask: ask > 0 ? ask : null,
+          bidSize: marketNumber(fields[10]),
+          askSize: marketNumber(fields[20]),
+          previousClose,
+          changePct: previousClose > 0 ? ((last / previousClose) - 1) * 100 : null,
+          volume: marketNumber(fields[8]),
+          quoteTime: formatSinaQuoteTime(fields[30], fields[31]),
+        });
+      }
+    } catch {}
+  }));
   if (!quotes.size) throw new Error('新浪深交所期权盘中报价为空');
   return contracts.map((contract) => {
     const quote = quotes.get(String(contract.code));
@@ -422,15 +434,7 @@ async function fetchSinaOptionQuotes(contracts, config) {
 }
 
 async function fetchSinaCsi500Index() {
-  const text = await fetchText('https://hq.sinajs.cn/list=sh000905', {
-    headers: {
-      Accept: '*/*',
-      'User-Agent': BROWSER_USER_AGENT,
-      Referer: 'https://finance.sina.com.cn/',
-    },
-    timeoutMs: 2200,
-    attempts: 1,
-  });
+  const text = await fetchSinaQuoteText(['sh000905'], 2200);
   const quoted = /="([\s\S]*?)";/.exec(text)?.[1];
   const fields = quoted?.split(',') || [];
   const price = marketNumber(fields[3]);
