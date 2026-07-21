@@ -851,7 +851,21 @@ select{-webkit-appearance:none;appearance:none}
 .login-error{color:#f46a5a;font-size:12px;font-family:'IBM Plex Mono',monospace;margin-top:8px;height:16px}
 .login-cursor{display:inline-block;width:2px;height:14px;background:#f5b731;margin-left:2px;animation:termBlink 1s step-end infinite;vertical-align:text-bottom}
 
-/* ── 美股账户页内导航 ── */
+/* ── 美股账户页头与页内导航 ── */
+.market-account-shell{max-width:100%;padding:2px 0 0}
+.market-account-hero{
+  display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:24px 26px;margin-bottom:12px;
+  border:1px solid rgba(79,163,224,.2);border-radius:20px;position:relative;overflow:hidden;
+  background:
+    radial-gradient(circle at 82% 15%,rgba(79,163,224,.15),transparent 27%),
+    radial-gradient(circle at 5% 120%,rgba(45,212,191,.11),transparent 33%),
+    linear-gradient(135deg,rgba(18,28,39,.96),rgba(8,15,22,.88));
+  box-shadow:0 22px 65px rgba(0,0,0,.23),inset 0 1px 0 rgba(255,255,255,.04);
+}
+.market-account-hero::after{content:'';position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(rgba(79,163,224,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(79,163,224,.025) 1px,transparent 1px);background-size:30px 30px;mask-image:linear-gradient(90deg,#000,transparent)}
+.market-account-hero>div{position:relative;z-index:1}.market-account-hero h2{font-size:29px;line-height:1.05;letter-spacing:-.04em;margin:0 0 9px}.market-account-hero p{font-size:13px;color:var(--dim);line-height:1.65;margin:0}
+.market-account-hero-badges{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.market-account-hero-badges span{font:650 9px 'IBM Plex Mono',monospace;letter-spacing:.05em;color:#9fd3ff;background:rgba(79,163,224,.075);border:1px solid rgba(79,163,224,.2);padding:5px 9px;border-radius:999px;white-space:nowrap}
+.market-account-nav{display:flex;align-items:center;justify-content:flex-end;gap:12px;margin:0 0 12px}
 .market-account-bar{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 16px;margin-bottom:14px;border:1px solid rgba(79,163,224,.2);border-radius:16px;background:linear-gradient(135deg,rgba(79,163,224,.075),var(--surface));box-shadow:0 14px 38px rgba(0,0,0,.14)}
 .market-account-title{display:grid;grid-template-columns:auto auto;gap:2px 10px;align-items:baseline;white-space:nowrap}.market-account-title>span{grid-column:1 / span 2;font:700 8px 'IBM Plex Mono',monospace;letter-spacing:.18em;color:#4fa3e0}.market-account-title>strong{font-size:16px;letter-spacing:-.02em}.market-account-title>b{font:700 9px 'IBM Plex Mono',monospace;color:#74b9ea}
 .market-account-tabs{display:flex;gap:7px;padding:5px;border:1px solid var(--line);border-radius:14px;background:rgba(4,9,14,.22)}.market-account-tabs button{display:flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:10px;background:transparent;color:var(--dim);padding:11px 17px;font-size:13px;font-weight:680;cursor:pointer;white-space:nowrap}.market-account-tabs button:hover{color:var(--ink)}.market-account-tabs button.active{color:#74b9ea;background:rgba(79,163,224,.12);box-shadow:inset 0 0 0 1px rgba(79,163,224,.2)}.market-account-tabs b{font:700 9px 'IBM Plex Mono',monospace;padding:2px 6px;border-radius:99px;background:rgba(255,255,255,.055)}
@@ -901,14 +915,15 @@ select{-webkit-appearance:none;appearance:none}
   .cn-form-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
 }
 @media(max-width:900px){
-  .market-account-bar{align-items:stretch;flex-direction:column}.market-account-tabs{display:grid;grid-template-columns:repeat(4,1fr)}
+  .market-account-bar{align-items:stretch;flex-direction:column}.market-account-nav{align-items:stretch;justify-content:stretch;flex-direction:column}.market-account-tabs{display:grid;grid-template-columns:repeat(4,1fr)}
   .cn-account-nav{align-items:stretch;flex-direction:column}.cn-account-tabs{display:grid;grid-template-columns:repeat(4,1fr)}.cn-account-tabs button{justify-content:center;padding:8px 7px}.cn-account-actions{align-self:flex-end}.cn-account-add{align-self:flex-end}
   .cn-position-main{grid-template-columns:1fr auto}.cn-position-id{grid-column:1}.cn-position-side{grid-column:2;grid-row:1}.cn-position-metrics{grid-column:1 / span 2;grid-row:2}.cn-row-actions{grid-column:1 / span 2;grid-row:3}
   .cn-stock-card{grid-template-columns:1fr auto}.cn-stock-metrics{grid-column:1 / span 2;grid-row:2}.cn-stock-edit{grid-column:1 / span 2}
   .cn-inline-panel.close{grid-template-columns:1fr}.cn-inline-grid.compact{margin-bottom:10px}
 }
 @media(max-width:768px){
-  .market-account-bar{position:sticky;top:104px;z-index:12;padding:10px;margin:0 0 10px;border-radius:13px;background:color-mix(in srgb,var(--surface) 94%,transparent);backdrop-filter:blur(16px)}.market-account-title{display:flex;align-items:baseline;gap:7px}.market-account-title>span{display:none}.market-account-title>strong{font-size:14px}.market-account-tabs{grid-template-columns:1fr 1fr;padding:3px}.market-account-tabs button{font-size:10px;padding:7px 5px}
+  .market-account-hero{align-items:flex-start;flex-direction:column;padding:18px;border-radius:15px;gap:13px;margin-bottom:9px}.market-account-hero h2{font-size:23px}.market-account-hero p{font-size:11px}.market-account-hero-badges{justify-content:flex-start}
+  .market-account-nav{position:sticky;top:104px;z-index:12;background:var(--bg);margin:10px -2px;padding:5px 2px 7px}.market-account-bar{position:sticky;top:104px;z-index:12;padding:10px;margin:0 0 10px;border-radius:13px;background:color-mix(in srgb,var(--surface) 94%,transparent);backdrop-filter:blur(16px)}.market-account-title{display:flex;align-items:baseline;gap:7px}.market-account-title>span{display:none}.market-account-title>strong{font-size:14px}.market-account-tabs{width:100%;grid-template-columns:1fr 1fr;padding:3px}.market-account-tabs button{font-size:10px;padding:7px 5px}
   .cn-account{padding-top:2px}.cn-account-hero{align-items:flex-start;flex-direction:column;padding:18px;border-radius:15px;gap:13px;margin-bottom:9px}.cn-account-hero h2{font-size:23px}.cn-account-hero p{font-size:11px}.cn-account-hero-badges{justify-content:flex-start}
   .cn-account-overview{grid-template-columns:1fr 1fr;border-radius:13px}.cn-account-overview>div{padding:11px 12px}.cn-account-overview>div:nth-child(5){grid-column:1 / span 2}.cn-account-overview strong{font-size:15px}.cn-account-overview small{font-size:8px}
   .cn-account-nav{position:sticky;top:104px;z-index:12;background:var(--bg);margin:10px -2px;padding:5px 2px 7px}.cn-account-tabs{width:100%;grid-template-columns:1fr 1fr;padding:3px}.cn-account-tabs button{font-size:10px;padding:7px 5px}.cn-account-actions{width:100%;display:grid;grid-template-columns:1fr 1fr}.cn-account-actions>.btn:only-child{grid-column:1 / span 2}.cn-account-refresh,.cn-account-add{width:100%;justify-content:center}

@@ -3495,13 +3495,18 @@ cloudLoaded.current=true;
         {/* 右侧内容 */}
         <div className="main-area">
           {US_ACCOUNT_TABS.includes(tab)&&(
-            <div className="market-account-bar us-market">
-              <div className="market-account-title"><span>US PORTFOLIO</span><strong>美股账户</strong><b>$ · USD</b></div>
-              <div className="market-account-tabs">
-                {[
-                  ['active','活跃期权',positions.length],['stocks','股票持仓',stocks.length],
-                  ['closed','期权已平仓',closed.length],['sgov','SGOV 底仓',null],
-                ].map(([key,label,count])=><button key={key} className={tab===key?'active':''} onClick={()=>setTab(key)}><span>{label}</span>{count!=null&&<b>{count}</b>}</button>)}
+            <div className="market-account-shell us-market">
+              <div className="market-account-hero">
+                <div><div className="cnopt-kicker">US WHEEL · PORTFOLIO</div><h2>美股账户</h2><p>美股期权、股票持仓与 SGOV 底仓统一管理；CBOE 延迟行情刷新，收益和保证金按美元口径汇总。</p></div>
+                <div className="market-account-hero-badges"><span>美元账户</span><span>CBOE 延迟</span><span>SGOV 底仓</span></div>
+              </div>
+              <div className="market-account-nav">
+                <div className="market-account-tabs">
+                  {[
+                    ['active','活跃期权',positions.length],['stocks','股票持仓',stocks.length],
+                    ['closed','期权已平仓',closed.length],['sgov','SGOV 底仓',null],
+                  ].map(([key,label,count])=><button key={key} className={tab===key?'active':''} onClick={()=>setTab(key)}><span>{label}</span>{count!=null&&<b>{count}</b>}</button>)}
+                </div>
               </div>
             </div>
           )}
