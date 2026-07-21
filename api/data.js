@@ -581,12 +581,16 @@ async function fetchCnOptionChain(symbol, month) {
       const snapshotTime = fallback.quoteTime || (fallback.snapshotSavedAt
         ? new Date(fallback.snapshotSavedAt).toISOString()
         : '时间未知');
+      const isSzseClose = config.exchange === 'SZSE' || fallback.source === 'szse-official-close';
       return {
         ...fallback,
         cached: true,
         stale: true,
         cacheScope: cached ? 'memory' : 'shared',
-        warning: `官方行情暂时不可用，已返回云端最近快照（${snapshotTime}）。`,
+        staleReason: isSzseClose ? 'official-close-lag' : 'upstream-unavailable',
+        warning: isSzseClose
+          ? `深交所官方收盘数据最新可用日为 ${snapshotTime}；今日收盘数据未发布前，暂展示该日官方数据。`
+          : `官方行情暂时不可用，已返回云端最近快照（${snapshotTime}）。`,
       };
     }
     throw error;

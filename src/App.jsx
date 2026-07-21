@@ -1211,7 +1211,12 @@ function CnOptionsPanel({embedded=false}){
       let saved=null;
       try{saved=JSON.parse(localStorage.getItem(storageKey)||'null');}catch{}
       if(saved?.payload&&Date.now()-(saved.savedAt||0)<7*24*60*60*1000){
-        const fallback={...saved.payload,clientStale:true,warning:'行情源暂时不稳定，正在展示本设备最近一次成功快照。'};
+        const isSzseClose=saved.payload?.exchange==='SZSE'||saved.payload?.source==='szse-official-close';
+        const quoteDate=saved.payload?.quoteTime||'最近官方收盘日';
+        const fallback={...saved.payload,clientStale:true,staleReason:isSzseClose?'official-close-lag':'client-cache',
+          warning:isSzseClose
+            ?`深交所官方收盘数据最新可用日为 ${quoteDate}；今日收盘数据未发布前，暂展示本设备保存的该日官方数据。`
+            :'行情源暂时不稳定，正在展示本设备最近一次成功快照。'};
         cacheRef.current.set(key,fallback);setData(fallback);setError('');setLastLoaded(new Date(saved.savedAt));
       }else{
         const message=/fetch failed|network|timeout|timed out|aborted/i.test(e.message||'')
@@ -1236,6 +1241,9 @@ function CnOptionsPanel({embedded=false}){
   const totalVolume=contracts.reduce((sum,item)=>sum+(item.volume||0),0);
   const indexPrice=indexQuote?.price??data?.indexPrice??null;
   const indexQuoteTime=indexQuote?.quoteTime??data?.indexQuoteTime??null;
+  const dataNotice=data?.warning||(!data?.stale&&data?.notice)||'';
+  const isOfficialCloseNotice=data?.staleReason==='official-close-lag'||(!data?.warning&&data?.exchange==='SZSE'&&data?.notice);
+  const noticeKind=isOfficialCloseNotice?'info':'warning';
   const atmStrike=data?.underlyingPrice&&data?.contracts?.length
     ? data.contracts.reduce((best,item)=>Math.abs(item.strike-data.underlyingPrice)<Math.abs(best-data.underlyingPrice)?item.strike:best,data.contracts[0].strike)
     : null;
@@ -1274,7 +1282,7 @@ function CnOptionsPanel({embedded=false}){
 
       {!error&&data&&(
         <>
-          {(data.stale||data.clientStale||data.warning)&&<div className="cnopt-stale">⚠ {data.warning||'上游行情暂时不可用，正在展示最近一次成功快照。'}</div>}
+          {dataNotice&&<div className={`cnopt-stale ${noticeKind}`}>{noticeKind==='info'?'i':'⚠'} {dataNotice}</div>}
           <div className="cnopt-snapshot">
             <div><span>标的现价</span><strong>¥ {fmt(data.underlyingPrice,3)}</strong><small>{selectedTarget.exchange} · {symbol}</small></div>
             <div className="cnopt-index"><span>中证500指数</span><strong>{indexPrice==null?'—':fmt(indexPrice,2)}</strong><small>{indexQuoteTime||(indexPrice?'本机最近快照':'独立同步中，不阻塞期权链')}</small></div>

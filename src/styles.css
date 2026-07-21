@@ -390,6 +390,8 @@ select{-webkit-appearance:none;appearance:none}
 .cnopt-loading span{width:25px;height:25px;border:2px solid var(--line);border-top-color:#2dd4bf;border-radius:50%;animation:cnopt-spin .8s linear infinite}.cnopt-loading strong{color:var(--dim);font-size:13px}.cnopt-loading small{font-size:11px}
 .cnopt-error{display:flex;align-items:center;gap:10px;border:1px solid rgba(244,106,90,.25);background:rgba(244,106,90,.06);padding:14px 16px;border-radius:13px;color:#f46a5a;margin:12px 0}.cnopt-error strong{color:var(--dim);font-size:11px;font-weight:500}.cnopt-error button{margin-left:auto;border:1px solid rgba(244,106,90,.3);background:transparent;color:#f46a5a;border-radius:8px;padding:6px 10px;cursor:pointer}
 .cnopt-stale{margin:0 0 10px;padding:9px 12px;border:1px solid rgba(245,183,49,.25);border-radius:10px;background:rgba(245,183,49,.07);color:#e5bd62;font:10px/1.55 'IBM Plex Mono',monospace}
+.cnopt-stale.info{border-color:rgba(45,212,191,.24);background:rgba(45,212,191,.07);color:#82dcca}
+.cnopt-stale.warning{border-color:rgba(245,183,49,.25);background:rgba(245,183,49,.07);color:#e5bd62}
 .cnopt-foot{text-align:right;color:var(--faint);font:9px 'IBM Plex Mono',monospace;margin-top:8px}
 @keyframes cnopt-spin{to{transform:rotate(360deg)}}
 
