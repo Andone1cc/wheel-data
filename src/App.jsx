@@ -2811,6 +2811,19 @@ function calcCnClosed(p){
   return{...r,pnl,totalFees:r.fees+closeFees,daysHeld,annual:calcAnnual(pnl,capital,daysHeld)};
 }
 
+function calcCnStockClosed(p,hkdCnyRate){
+  const shares=Math.max(1,num(p.closeShares??p.shares,1));
+  const costPerShare=num(p.costPerShare);
+  const closePrice=num(p.closePrice);
+  const fees=num(p.closeFees);
+  const gross=(closePrice-costPerShare)*shares;
+  const pnlRaw=gross-fees;
+  const capital=cnStockCny(p,costPerShare*shares,hkdCnyRate);
+  const pnl=cnStockCny(p,pnlRaw,hkdCnyRate);
+  const daysHeld=Math.max(1,daysBetween(p.acquireDate||today(),p.closeDate||today()));
+  return{shares,costPerShare,closePrice,gross:cnStockCny(p,gross,hkdCnyRate),fees:cnStockCny(p,fees,hkdCnyRate),pnl,capital,daysHeld,annual:calcAnnual(pnl,capital,daysHeld)};
+}
+
 function CnOptionForm({onAdd,onCancel,currentIndex}){
   const [f,setF]=useState({
     underlying:'159922',underlyingName:'嘉实中证500ETF',exchange:'SZSE',contractCode:'',
@@ -2933,7 +2946,9 @@ function CnStockForm({onAdd,onCancel}){
   );
 }
 
-function CnStockRow({stock,hkdCnyRate,onRefresh,onDelete,refreshing}){
+function CnStockRow({stock,hkdCnyRate,onRefresh,onClose,onDelete,refreshing}){
+  const [mode,setMode]=useState('');
+  const [close,setClose]=useState({closePrice:stock.currentPrice==null?'':String(stock.currentPrice),closeShares:String(stock.shares),closeDate:today()});
   const currency=stock.currency||((stock.market==='HK')?'HKD':'CNY');
   const cost=num(stock.shares)*num(stock.costPerShare);
   const value=stock.currentPrice==null?null:num(stock.shares)*num(stock.currentPrice);
@@ -2948,11 +2963,14 @@ function CnStockRow({stock,hkdCnyRate,onRefresh,onDelete,refreshing}){
   const valueSub=stock.market==='HK'
     ?(value==null?'自动行情':`${cnMoney(stock.currentPrice,currency)} × ${fmt(cnStockRate(stock,hkdCnyRate),4)} · 市值 ${cnMoney(valueCny)}`)
     :(value==null?'自动行情':`市值 ${cnMoney(valueCny)}`);
+  const closeShares=num(close.closeShares,0);
+  const closeValid=close.closePrice!==''&&close.closeDate&&closeShares>0&&closeShares<=num(stock.shares);
   return(
     <article className="cn-stock-card">
       <div className="cn-stock-id"><b>{stock.ticker}</b><strong>{stock.name||'未命名证券'}</strong><span className={stock.market==='HK'?'hk':''}>{exchange}</span></div>
-      <div className="cn-stock-metrics"><Stat label="持仓" value={`${fmt(stock.shares,0)} 股`} sub={stock.acquireDate}/><Stat label="成本价" value={cnMoney(costPerShareCny)} sub={costSub}/><Stat label="当前价" value={stock.currentPrice==null?'同步中':cnMoney(currentPriceCny)} sub={valueSub}/><Stat label="浮动盈亏" value={pnl==null?'—':cnMoney(pnlCny,'CNY',true)} sub={pnl==null?'行情同步后计算':fmtA(cost?100*pnl/cost:null)} color={pnl==null?V('dim'):pnl>=0?ACC.profit:ACC.loss}/></div>
-      <div className="cn-row-actions"><button onClick={()=>onRefresh(stock)} disabled={refreshing}>{refreshing?'同步中…':'刷新行情'}</button><button className="danger" onClick={()=>{if(window.confirm(`确认删除 ${stock.ticker}？`))onDelete(stock.id);}}>删除</button></div>
+      <div className="cn-stock-metrics"><Stat label="持仓" value={`${fmt(stock.shares,0)} 股`} sub={stock.acquireDate}/><Stat label="成本价" value={cnMoney(stock.market==='HK'?stock.costPerShare:costPerShareCny,currency)} sub={costSub}/><Stat label="当前价" value={stock.currentPrice==null?'同步中':cnMoney(stock.market==='HK'?stock.currentPrice:currentPriceCny,currency)} sub={valueSub}/><Stat label="浮动盈亏" value={pnl==null?'—':cnMoney(pnlCny,'CNY',true)} sub={pnl==null?'行情同步后计算':fmtA(cost?100*pnl/cost:null)} color={pnl==null?V('dim'):pnl>=0?ACC.profit:ACC.loss}/></div>
+      <div className="cn-row-actions"><button onClick={()=>onRefresh(stock)} disabled={refreshing}>{refreshing?'同步中…':'刷新行情'}</button><button className="profit" onClick={()=>setMode(mode==='close'?'':'close')}>{mode==='close'?'取消平仓':'平仓'}</button><button className="danger" onClick={()=>{if(window.confirm(`确认删除 ${stock.ticker}？`))onDelete(stock.id);}}>删除</button></div>
+      {mode==='close'&&<div className="cn-inline-panel close"><div><strong>确认股票平仓</strong><p>按原币种记录卖出价，部分平仓会保留剩余股数。</p></div><div className="cn-inline-grid compact"><NumField label="平仓价" prefix={stock.market==='HK'?'HK$':'¥'} value={close.closePrice} onChange={v=>setClose(prev=>({...prev,closePrice:v}))}/><NumField label="平仓股数" value={close.closeShares} onChange={v=>setClose(prev=>({...prev,closeShares:v}))} suffix="股"/><DateField label="平仓日期" value={close.closeDate} onChange={v=>setClose(prev=>({...prev,closeDate:v}))}/></div><div className="cn-form-actions"><button className="btn btn-primary" disabled={!closeValid} onClick={()=>{onClose(stock,{closeShares,closePrice:num(close.closePrice),closeDate:close.closeDate,closeFees:0});setMode('');}}>计入已平仓</button><button className="btn btn-ghost" onClick={()=>setMode('')}>取消</button></div></div>}
     </article>
   );
 }
@@ -2985,7 +3003,9 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
   const expiryPnl=expiryYields.reduce((sum,item)=>sum+item.pnl,0);
   const expiryDays=expiryCapital>0?expiryYields.reduce((sum,item)=>sum+item.days*item.capital,0)/expiryCapital:0;
   const expiryAnnual=expiryCapital>0?calcAnnual(expiryPnl,expiryCapital,expiryDays):null;
-  const closedPnl=closed.reduce((sum,p)=>sum+calcCnClosed(p).pnl,0);
+  const optionClosed=closed.filter(item=>item?.assetType!=='stock');
+  const stockClosed=closed.filter(item=>item?.assetType==='stock');
+  const closedPnl=optionClosed.reduce((sum,p)=>sum+calcCnClosed(p).pnl,0)+stockClosed.reduce((sum,p)=>sum+calcCnStockClosed(p,hkdCnyRate).pnl,0);
   const scores=positions.map(p=>scoreCnOption(p,calcCnOption(p),totalMargin).score);
   const avgScore=scores.length?Math.round(scores.reduce((a,b)=>a+b,0)/scores.length):null;
   const cnStocks=stocks.filter(s=>s.market!=='HK'),hkStocks=stocks.filter(s=>s.market==='HK');
@@ -3085,6 +3105,16 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
     showToast(`HKD/CNY 已修正为 ${fmt(rate,4)}`,ACC.teal);
   };
   const closePosition=(p,data)=>{const record={...p,...data,closedAt:Date.now()};onAccountChange(positions.filter(item=>item.id!==p.id),[record,...closed],stocks);showToast(`${p.underlying} 已平仓 · ${cnMoney(calcCnClosed(record).pnl,'CNY',true)}`);};
+  const closeStockPosition=(stock,data)=>{
+    const closeShares=Math.min(num(data.closeShares,stock.shares),num(stock.shares));
+    if(!(closeShares>0))return;
+    const record={...stock,...data,assetType:'stock',closeShares,closedAt:Date.now()};
+    const remainingShares=num(stock.shares)-closeShares;
+    const nextStocks=remainingShares>0?stocks.map(item=>item.id===stock.id?{...item,shares:remainingShares}:item):stocks.filter(item=>item.id!==stock.id);
+    const result=calcCnStockClosed(record,hkdCnyRate);
+    onAccountChange(positions,[record,...closed],nextStocks);
+    showToast(`${stock.ticker} 已平仓 · ${cnMoney(result.pnl,'CNY',true)}`);
+  };
   return(
     <section className="cn-account">
       <div className="cn-account-hero">
@@ -3100,12 +3130,12 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
         <div><span>期权保证金</span><strong>{cnMoney(totalMargin)}</strong><small>未填则按仓位估算</small></div>
         <div><span>股票持仓</span><strong>{stocks.length}</strong><small>A 股 {cnStocks.length} · 港股通 {hkStocks.length}</small></div>
         <div><span>到期年化</span><strong className={(expiryAnnual??0)>=0?'pos':'neg'}>{fmtA(expiryAnnual)}</strong><small>{positions.length?`预计 ${cnMoney(expiryPnl,'CNY',true)} · ${fmt(expiryDays,0)}天`:'暂无仓位'}</small></div>
-        <div><span>期权已实现</span><strong className={closedPnl>=0?'pos':'neg'}>{cnMoney(closedPnl,'CNY',true)}</strong><small>{closed.length} 笔记录</small></div>
+        <div><span>已实现收益</span><strong className={closedPnl>=0?'pos':'neg'}>{cnMoney(closedPnl,'CNY',true)}</strong><small>{closed.length} 笔期权/股票记录</small></div>
         <div><span>期权健康分</span><strong style={{color:avgScore==null?V('dim'):scoreColor(avgScore)}}>{avgScore??'—'}</strong><small>{avgScore==null?'暂无仓位':scoreLabel(avgScore)}</small></div>
       </div>
       <div className="cn-account-nav">
         <div className="cn-account-tabs">
-          {[['options','活跃期权',positions.length],['stocks','股票持仓',stocks.length],['closed','期权已平仓',closed.length],['chain','期权数据',null]].map(([key,label,count])=><button key={key} className={view===key?'active':''} onClick={()=>{setView(key);setShowForm(false);}}><span>{label}</span>{count!=null&&<b>{count}</b>}</button>)}
+          {[['options','活跃期权',positions.length],['stocks','股票持仓',stocks.length],['closed','已平仓',closed.length],['chain','期权数据',null]].map(([key,label,count])=><button key={key} className={view===key?'active':''} onClick={()=>{setView(key);setShowForm(false);}}><span>{label}</span>{count!=null&&<b>{count}</b>}</button>)}
         </div>
         <div className="cn-account-actions">
           {view==='options'&&<button className="btn cn-account-refresh" onClick={refreshOptionPositions} disabled={refreshingOptions||!positions.length}>{refreshingOptions?'同步行情中…':'↻ 获取最新数据'}</button>}
@@ -3128,14 +3158,19 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
           <input value={stockQuery} onChange={e=>setStockQuery(e.target.value)} placeholder="代码 / 名称筛选"/>
           <span>{filteredStocks.length}/{stocks.length}</span>
         </div>}
-        {!stocks.length&&!showForm?<div className="cn-account-empty"><span>沪港</span><strong>还没有股票持仓</strong><p>支持 A 股和港股通；页面会统一折成人民币展示。</p><button className="btn btn-primary" onClick={()=>setShowForm(true)}>＋ 录入第一笔</button></div>:(
-          filteredStocks.length?<div className="cn-stock-list">{filteredStocks.map(s=><CnStockRow key={s.id} stock={s} hkdCnyRate={hkdCnyRate} onRefresh={refreshStock} refreshing={refreshingStock===s.id} onDelete={id=>onStocks(stocks.filter(item=>item.id!==id))}/>)}</div>
+        {!stocks.length&&!showForm?<div className="cn-account-empty"><span>沪港</span><strong>还没有股票持仓</strong><p>支持 A 股和港股通；成本价、当前价按原币种显示，汇总统一折成人民币。</p><button className="btn btn-primary" onClick={()=>setShowForm(true)}>＋ 录入第一笔</button></div>:(
+          filteredStocks.length?<div className="cn-stock-list">{filteredStocks.map(s=><CnStockRow key={s.id} stock={s} hkdCnyRate={hkdCnyRate} onRefresh={refreshStock} onClose={closeStockPosition} refreshing={refreshingStock===s.id} onDelete={id=>onStocks(stocks.filter(item=>item.id!==id))}/>)}</div>
           :<div className="cn-account-empty compact"><span>筛选</span><strong>没有匹配的股票持仓</strong><p>换一个市场、代码或名称试试。</p></div>
         )}
       </>}
 
       {view==='closed'&&<>
-        {!closed.length?<div className="cn-account-empty"><span>✓</span><strong>暂无 A 股期权平仓记录</strong><p>在活跃期权中点击「平仓」，记录会自动转入这里。</p></div>:<div className="cn-closed-list">{closed.map(c=>{const r=calcCnClosed(c);return <article className="cn-closed-card" key={`${c.id}-${c.closedAt||c.closeDate}`}><div className="cn-closed-id"><strong>{c.underlying}</strong><span>{c.side==='SELL'?'卖出':'买入'} {c.type==='P'?'PUT':'CALL'} · ¥{fmt(c.strike,3)}</span><small>{c.openDate} → {c.closeDate}</small></div><div className="cn-closed-metrics"><Stat label="开 / 平仓价" value={`${fmt(c.openPrice,4)} / ${fmt(c.closePrice,4)}`} sub={`${r.qty}张 × ${fmt(r.multiplier,0)}`}/><Stat label="总手续费" value={cnMoney(r.totalFees)} sub={`持有 ${r.daysHeld} 天`}/><Stat label="实现收益" value={cnMoney(r.pnl,'CNY',true)} sub={r.annual==null?'—':`年化 ${fmtA(r.annual)}`} color={r.pnl>=0?ACC.profit:ACC.loss}/></div><button className="cn-delete-icon" title="删除记录" onClick={()=>{if(window.confirm('确认删除这条平仓记录？'))onClosed(closed.filter(item=>item!==c));}}>×</button></article>;})}</div>}
+        {!closed.length?<div className="cn-account-empty"><span>✓</span><strong>暂无平仓记录</strong><p>在活跃期权或股票持仓中点击「平仓」，记录会自动转入这里。</p></div>:<div className="cn-closed-list">{closed.map(c=>{
+          const isStock=c.assetType==='stock';
+          const r=isStock?calcCnStockClosed(c,hkdCnyRate):calcCnClosed(c);
+          const currency=c.currency||(c.market==='HK'?'HKD':'CNY');
+          return <article className="cn-closed-card" key={`${c.id}-${c.closedAt||c.closeDate}`}><div className="cn-closed-id"><strong>{isStock?`${c.ticker} ${c.name||'未命名证券'}`:c.underlying}</strong><span>{isStock?`${c.market==='HK'?'港股通':'A股'} · 股票`: `${c.side==='SELL'?'卖出':'买入'} ${c.type==='P'?'PUT':'CALL'} · ¥${fmt(c.strike,3)}`}</span><small>{isStock?`${c.acquireDate||'—'} → ${c.closeDate}`:`${c.openDate} → ${c.closeDate}`}</small></div><div className="cn-closed-metrics"><Stat label="开 / 平仓价" value={isStock?`${cnMoney(c.costPerShare,currency)} / ${cnMoney(c.closePrice,currency)}`:`${fmt(c.openPrice,4)} / ${fmt(c.closePrice,4)}`} sub={isStock?`${fmt(r.shares,0)} 股`:`${r.qty}张 × ${fmt(r.multiplier,0)}`}/><Stat label="持有 / 手续费" value={isStock?`${r.daysHeld} 天`:`${cnMoney(r.totalFees)}`} sub={isStock?'原币种平仓':`持有 ${r.daysHeld} 天`}/><Stat label="实现收益" value={cnMoney(r.pnl,'CNY',true)} sub={r.annual==null?'—':`年化 ${fmtA(r.annual)}`} color={r.pnl>=0?ACC.profit:ACC.loss}/></div><button className="cn-delete-icon" title="删除记录" onClick={()=>{if(window.confirm('确认删除这条平仓记录？'))onClosed(closed.filter(item=>item!==c));}}>×</button></article>;
+        })}</div>}
       </>}
 
       {view==='chain'&&<div className="cn-account-chain"><CnOptionsPanel embedded/></div>}
