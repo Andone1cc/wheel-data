@@ -91,8 +91,8 @@ async function cnOptionFetch(symbol,month='',opts={}){
   });
 }
 
-// Vercel 等云端运行环境偶尔无法访问新浪行情；活跃持仓刷新时，
-// 允许浏览器直接加载新浪 JSONP 作为最后一级备用源。期权数据查询页不使用此路径。
+// Vercel 等云端运行环境偶尔无法访问新浪行情；浏览器直接加载新浪 JSONP
+// 作为深沪期权和活跃持仓的最后一级备用源，服务端官方快照仍作为降级。
 function parseSinaBrowserOptionText(text){
   const quotes=new Map();
   for(const match of String(text||'').matchAll(/var hq_str_(?:sz|sh)(\d+)="([\s\S]*?)";/g)){
@@ -143,29 +143,37 @@ function fetchSinaBrowserOptionBatch(symbols){
   });
 }
 
-async function enrichActiveCnSnapshotFromBrowserSina(payload){
-  if(payload?.exchange!=='SZSE'||!payload?.contracts?.length)return payload;
+async function enrichCnSnapshotFromBrowserSina(payload){
+  if(!['SZSE','SSE'].includes(payload?.exchange)||!payload?.contracts?.length)return payload;
+  const prefix=payload.exchange==='SZSE'?'sz':'sh';
   const codes=payload.contracts.map(contract=>String(contract.code||'')).filter(Boolean);
   const batches=[];
-  for(let i=0;i<codes.length;i+=8)batches.push(codes.slice(i,i+8).map(code=>`sz${code}`));
+  for(let i=0;i<codes.length;i+=7)batches.push(codes.slice(i,i+7).map(code=>`${prefix}${code}`));
+  if(payload.symbol)batches.push([`${prefix}${payload.symbol}`]);
   const results=await Promise.allSettled(batches.map(batch=>fetchSinaBrowserOptionBatch(batch)));
   const quotes=new Map();
-  results.forEach(result=>{if(result.status==='fulfilled')result.value.forEach((quote,code)=>quotes.set(code.replace(/^sz/,''),quote));});
+  results.forEach(result=>{if(result.status==='fulfilled')result.value.forEach((quote,code)=>quotes.set(code,quote));});
   if(!quotes.size)return payload;
   const contracts=payload.contracts.map(contract=>{
     const quote=quotes.get(String(contract.code));
     return quote?{...contract,...quote,priceSource:'sina-browser-realtime',delayed:false}:contract;
   });
   const quoteTime=contracts.map(contract=>contract.quoteTime).filter(Boolean).sort().pop()||payload.quoteTime;
+  const underlyingQuote=quotes.get(String(payload.symbol));
+  const underlyingPrice=underlyingQuote?.last>0?underlyingQuote.last:payload.underlyingPrice;
+  const underlyingQuoteTime=underlyingQuote?.quoteTime||payload.underlyingQuoteTime;
   return {
     ...payload,
     contracts,
+    underlyingPrice,
+    underlyingQuoteTime,
+    underlyingSource:underlyingQuote?'sina-browser-realtime':payload.underlyingSource,
     quoteTime,
     source:'sina-browser-realtime',
     delayed:false,
     stale:false,
     warning:null,
-    notice:`活跃持仓使用浏览器直连新浪盘中期权报价（${quoteTime}）；未返回的合约保留官方收盘值。`,
+    notice:`浏览器直连新浪盘中期权报价（${quoteTime}）；未返回的合约保留官方收盘值。`,
   };
 }
 
@@ -1332,12 +1340,8 @@ function CnOptionsPanel({embedded=false}){
       let payload=null,lastError=null;
       for(let attempt=0;attempt<2;attempt+=1){
         try{
-          const response=await cnOptionFetch(nextSymbol,nextMonth,{refresh:force});
-          const raw=await response.text();
-          let parsed;
-          try{parsed=JSON.parse(raw);}catch{throw new Error('行情接口返回格式异常');}
-          if(!response.ok)throw new Error(parsed.detail||parsed.error||`HTTP ${response.status}`);
-          payload=parsed;break;
+          payload=await fetchCnOptionSnapshot(nextSymbol,nextMonth,force,true,true);
+          break;
         }catch(fetchError){
           lastError=fetchError;
           if(attempt===0)await new Promise(resolve=>setTimeout(resolve,450));
@@ -1395,7 +1399,7 @@ function CnOptionsPanel({embedded=false}){
         <div>
           <div className="cnopt-kicker">CN OPTIONS · LIVE QUERY</div>
           <h2>A股期权数据台</h2>
-          <p>中证500 ETF 近月合约 · 上交所实时、深交所官方日终 · IV 与 Delta 一屏查询</p>
+        <p>中证500 ETF 近月合约 · 深沪实时优先、官方快照降级 · IV 与 Delta 一屏查询</p>
         </div>
         <button className="btn cnopt-refresh" onClick={()=>{load(symbol,data?.selectedMonth||'',true);refreshIndex(true);}} disabled={loading}>
           {loading?'同步中…':'↻ 刷新数据'}
@@ -1425,12 +1429,12 @@ function CnOptionsPanel({embedded=false}){
         <>
           {dataNotice&&<div className={`cnopt-stale ${noticeKind}`}>{noticeKind==='info'?'i':'⚠'} {dataNotice}</div>}
           <div className="cnopt-snapshot">
-            <div><span>标的现价</span><strong>¥ {fmt(data.underlyingPrice,3)}</strong><small>{data.underlyingSource==='tencent-etf-realtime'?'腾讯实时':data.underlyingSource==='sina-etf-realtime'?'新浪实时':'官方收盘'} · {data.underlyingQuoteTime||data.quoteTime||symbol}</small></div>
+            <div><span>标的现价</span><strong>¥ {fmt(data.underlyingPrice,3)}</strong><small>{data.underlyingSource==='tencent-etf-realtime'?'腾讯实时':(data.underlyingSource==='sina-etf-realtime'||data.underlyingSource==='sina-browser-realtime')?'新浪实时':'官方收盘'} · {data.underlyingQuoteTime||data.quoteTime||symbol}</small></div>
             <div className="cnopt-index"><span>中证500指数</span><strong>{indexPrice==null?'—':fmt(indexPrice,2)}</strong><small>{indexQuoteTime||(indexPrice?'本机最近快照':'独立同步中，不阻塞期权链')}</small></div>
             <div><span>合约月份</span><strong>{cnMonthLabel(data.selectedMonth)}</strong><small>{data.contracts?.[0]?.expiry||'—'} 到期</small></div>
             <div><span>合约数量</span><strong>{data.contracts?.length||0}</strong><small>Call + Put</small></div>
             <div><span>当前筛选成交量</span><strong>{fmt(totalVolume,0)}</strong><small>{contracts.length} 条结果</small></div>
-            <div className="cnopt-source"><span>行情 / Greeks</span><strong>期权链·交易所官方</strong><small>{data.exchange==='SZSE'?'官方收盘价 · BS 反推':'官方实时价 · BS 反推'}</small></div>
+            <div className="cnopt-source"><span>行情 / Greeks</span><strong>{data.source==='sina-browser-realtime'?'新浪盘中价 · BS 反推':'期权链·交易所官方'}</strong><small>{data.source==='sina-browser-realtime'?'浏览器直连 · 实时优先':'官方收盘口径 · BS 反推'}</small></div>
           </div>
 
           <div className="cnopt-toolbar">
@@ -2814,8 +2818,8 @@ async function fetchCnOptionSnapshot(symbol,month,force=false,realtime=false,bro
   let payload;
   try{payload=JSON.parse(raw);}catch{throw new Error('期权行情返回格式异常');}
   if(!response.ok)throw new Error(payload?.detail||payload?.error||`HTTP ${response.status}`);
-  if(browserFallback&&realtime&&payload?.exchange==='SZSE'&&payload?.source!=='sina-realtime'){
-    try{return await enrichActiveCnSnapshotFromBrowserSina(payload);}catch{}
+  if(browserFallback&&realtime&&['SZSE','SSE'].includes(payload?.exchange)&&payload?.source!=='sina-realtime'){
+    try{return await enrichCnSnapshotFromBrowserSina(payload);}catch{}
   }
   return payload;
 }
