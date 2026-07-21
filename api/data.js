@@ -121,6 +121,17 @@ async function fetchJson(url, options = {}) {
   return fetchUpstream(url, options, 'json');
 }
 
+async function fetchCboeStockQuote(ticker) {
+  const data = await fetchJson(
+    `https://cdn.cboe.com/api/global/delayed_quotes/options/${encodeURIComponent(ticker)}.json`,
+    { headers: { 'User-Agent': BROWSER_USER_AGENT }, timeoutMs: 6500, attempts: 1 }
+  );
+  const quote = data?.data || {};
+  const price = finiteNumber(quote.current_price) ?? finiteNumber(quote.close) ?? finiteNumber(quote.prev_day_close);
+  if (!(price > 0)) return null;
+  return { name: quote.company_name || quote.symbol_name || null, price };
+}
+
 function normalCdf(x) {
   const sign = x < 0 ? -1 : 1;
   const z = Math.abs(x) / Math.sqrt(2);
@@ -673,6 +684,7 @@ module.exports = async function handler(req, res) {
       const isHk = upperTicker.endsWith('.HK');
       const isSse = upperTicker.endsWith('.SS');
       const isSzse = upperTicker.endsWith('.SZ');
+      const isCnOrHk = isHk || isSse || isSzse;
       const code = upperTicker.split('.')[0];
       const tencentSymbol = isHk ? `hk${code.padStart(5, '0')}` : isSse ? `sh${code}` : isSzse ? `sz${code}` : '';
       const locale = isHk ? '&lang=zh-Hant-HK&region=HK' : (isSse || isSzse) ? '&lang=zh-CN&region=CN' : '';
@@ -693,15 +705,19 @@ module.exports = async function handler(req, res) {
         const cnPrice = Number(fields[3]);
         return fields.length > 3 ? { name: fields[1] || null, price: Number.isFinite(cnPrice) ? cnPrice : null } : null;
       }).catch(() => null) : Promise.resolve(null);
-      const [yahooResult, cnQuoteResult] = await Promise.allSettled([yahooRequest, cnQuoteRequest]);
+      const cboeQuoteRequest = !isCnOrHk && !upperTicker.includes('=')
+        ? fetchCboeStockQuote(upperTicker).catch(() => null)
+        : Promise.resolve(null);
+      const [yahooResult, cnQuoteResult, cboeQuoteResult] = await Promise.allSettled([yahooRequest, cnQuoteRequest, cboeQuoteRequest]);
       const data = yahooResult.status === 'fulfilled' ? yahooResult.value : null;
       const cnQuote = cnQuoteResult.status === 'fulfilled' ? cnQuoteResult.value : null;
+      const cboeQuote = cboeQuoteResult.status === 'fulfilled' ? cboeQuoteResult.value : null;
       const meta = data?.chart?.result?.[0]?.meta || {};
-      const price = meta.regularMarketPrice ?? cnQuote?.price ?? null;
-      const name = cnQuote?.name || meta.shortName || meta.longName || null;
+      const price = meta.regularMarketPrice ?? cnQuote?.price ?? cboeQuote?.price ?? null;
+      const name = cnQuote?.name || meta.shortName || meta.longName || cboeQuote?.name || null;
       if (price == null && !name) throw new Error('股票行情源暂时不可用');
       res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
-      return res.status(200).json({ ticker, price, name, source: meta.regularMarketPrice != null ? 'Yahoo' : 'Tencent' });
+      return res.status(200).json({ ticker, price, name, source: meta.regularMarketPrice != null ? 'Yahoo' : cnQuote?.price != null ? 'Tencent' : 'CBOE' });
     } catch (e) {
       return res.status(502).json({ ticker, price: null, name: null, error: e.message });
     }
