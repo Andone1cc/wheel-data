@@ -3079,8 +3079,9 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
     });
     onPositions(next);
     const failed=results.filter(result=>result.error).length;
-    if(matched)showToast(`已更新 ${matched}/${positions.length} 笔期权行情${failed?' · 部分行情源失败':''}`,failed?ACC.amber:ACC.profit);
-    else showToast('暂未匹配到持仓合约，请检查行权价和到期日',ACC.loss);
+    // 正常刷新不弹成功提示，避免每次进入页面或手动同步都遮挡内容；仅保留异常提醒。
+    if(!matched)showToast('暂未匹配到持仓合约，请检查行权价和到期日',ACC.loss);
+    else if(failed)showToast('部分期权行情源失败，已保留可用数据',ACC.amber);
     setRefreshingOptions(false);
   };
   useEffect(()=>{
