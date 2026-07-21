@@ -91,6 +91,80 @@ async function cnOptionFetch(symbol,month='',opts={}){
   });
 }
 
+function parseSinaOptionText(text){
+  const quotes=new Map();
+  for(const match of String(text||'').matchAll(/var hq_str_(?:sz|sh)(\d+)="([\s\S]*?)";/g)){
+    const fields=match[2].split(',');
+    const last=num(fields[3],NaN);
+    if(!Number.isFinite(last)||last<0)continue;
+    const previousClose=num(fields[2],NaN);
+    quotes.set(match[1],{
+      last,
+      bid:num(fields[6],NaN)>0?num(fields[6]):null,
+      ask:num(fields[7],NaN)>0?num(fields[7]):null,
+      bidSize:num(fields[10],null),
+      askSize:num(fields[20],null),
+      previousClose:Number.isFinite(previousClose)?previousClose:null,
+      changePct:previousClose>0?((last/previousClose)-1)*100:null,
+      volume:num(fields[8],null),
+      quoteTime:/^\d{4}-\d{2}-\d{2}$/.test(fields[30]||'')?`${fields[30]} ${fields[31]||''}`:'',
+    });
+  }
+  return quotes;
+}
+
+function fetchSinaBrowserBatch(symbols){
+  return new Promise((resolve,reject)=>{
+    if(typeof document==='undefined'){reject(new Error('浏览器行情备用源不可用'));return;}
+    const script=document.createElement('script');
+    const url=`https://hq.sinajs.cn/?rn=${Date.now()}&list=${symbols.join(',')}`;
+    let settled=false;
+    const finish=(error)=>{
+      if(settled)return;
+      settled=true;
+      window.clearTimeout(timer);
+      script.remove();
+      if(error){reject(error);return;}
+      const text=symbols.map(symbol=>{
+        const value=window[`hq_str_${symbol}`];
+        return value==null?'':`var hq_str_${symbol}="${String(value).replaceAll('"','\\"')}";`;
+      }).join('\n');
+      const quotes=parseSinaOptionText(text);
+      quotes.size?resolve(quotes):reject(new Error('浏览器新浪期权报价为空'));
+    };
+    const timer=window.setTimeout(()=>finish(new Error('浏览器新浪期权行情超时')),4000);
+    script.async=true;
+    script.src=url;
+    script.onload=()=>finish();
+    script.onerror=()=>finish(new Error('浏览器新浪期权行情连接失败'));
+    document.head.appendChild(script);
+  });
+}
+
+async function enrichCnSnapshotFromBrowserSina(payload){
+  if(payload?.exchange!=='SZSE'||!payload?.contracts?.length)return payload;
+  const codes=payload.contracts.map(contract=>String(contract.code||'')).filter(Boolean);
+  const batches=[];
+  for(let i=0;i<codes.length;i+=8)batches.push(codes.slice(i,i+8).map(code=>`sz${code}`));
+  const results=await Promise.allSettled(batches.map(batch=>fetchSinaBrowserBatch(batch)));
+  const quotes=new Map();
+  results.forEach(result=>{if(result.status==='fulfilled')result.value.forEach((quote,code)=>quotes.set(code.replace(/^sz/,''),quote));});
+  if(!quotes.size)return payload;
+  const contracts=payload.contracts.map(contract=>{
+    const quote=quotes.get(String(contract.code));
+    return quote?{...contract,...quote,priceSource:'sina-browser-realtime',delayed:false}:contract;
+  });
+  const quoteTime=contracts.map(contract=>contract.quoteTime).filter(Boolean).sort().pop()||payload.quoteTime;
+  return {
+    ...payload,
+    contracts,
+    quoteTime,
+    source:'sina-browser-realtime',
+    delayed:false,
+    notice:`活跃持仓使用浏览器直连新浪盘中期权报价（${quoteTime}）；未返回的合约保留官方收盘值。`,
+  };
+}
+
 async function cnIndexFetch(opts={}){
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
   return fetch(`${proxyBase}/api/cn-options?indexOnly=1`,{
@@ -2736,6 +2810,9 @@ async function fetchCnOptionSnapshot(symbol,month,force=false,realtime=false){
   let payload;
   try{payload=JSON.parse(raw);}catch{throw new Error('期权行情返回格式异常');}
   if(!response.ok)throw new Error(payload?.detail||payload?.error||`HTTP ${response.status}`);
+  if(realtime&&payload?.exchange==='SZSE'&&payload?.source!=='sina-realtime'){
+    try{return await enrichCnSnapshotFromBrowserSina(payload);}catch{}
+  }
   return payload;
 }
 
