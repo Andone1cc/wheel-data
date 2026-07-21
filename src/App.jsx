@@ -87,7 +87,7 @@ async function cnOptionFetch(symbol,month='',opts={}){
   if(realtime)params.set('realtime','1');
   return fetch(`${proxyBase}/api/cn-options?${params.toString()}`,{
     ...fetchOpts,
-    signal:fetchOpts.signal||AbortSignal.timeout(20000),
+    signal:fetchOpts.signal||AbortSignal.timeout(12000),
   });
 }
 
@@ -1248,6 +1248,17 @@ function CnOptionsPanel({embedded=false}){
     const storageKey=`whl-cnopt-cache-${key}`;
     if(!force&&cacheRef.current.has(key)){
       setData(cacheRef.current.get(key));setError('');return;
+    }
+    // 先展示本机最近快照，再后台刷新，避免首屏被交易所接口阻塞。
+    if(!force){
+      try{
+        const saved=JSON.parse(localStorage.getItem(storageKey)||'null');
+        if(saved?.payload&&Date.now()-(saved.savedAt||0)<7*24*60*60*1000){
+          cacheRef.current.set(key,saved.payload);
+          setData(saved.payload);
+          setLastLoaded(new Date(saved.savedAt));
+        }
+      }catch{}
     }
     setLoading(true);setError('');
     try{

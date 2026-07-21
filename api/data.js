@@ -392,8 +392,8 @@ async function fetchSzseReport(params) {
   // 避免 Vercel 因一个上游请求反复重试而耗尽整次函数执行时间。
   const payload = await fetchJson(szseReportUrl(params), {
     headers: SZSE_HEADERS,
-    timeoutMs: 4500,
-    attempts: 2,
+    timeoutMs: 3000,
+    attempts: 1,
   });
   const report = Array.isArray(payload) ? payload[0] : payload;
   if (!report || report.error) throw new Error(report?.error || '深交所官方数据为空');
@@ -429,18 +429,18 @@ async function fetchSzseOfficialCloseChain(config, month, months, realtime = fal
     const catalogParams = optionQueries.map((query) => ({
       CATALOGID: 'ysplbrb', TABKEY: 'tab1', txtQueryKeyAndJC: query, PAGENO: 1,
     }));
-    const underlyingParams = {
-      CATALOGID: '1815_stock_snapshot', TABKEY: 'tab2', txtDMorJC: config.symbol,
-      txtBeginDate: quoteDate, txtEndDate: quoteDate, PAGENO: 1,
-    };
-
     try {
       const [callQuotesFirst, putQuotesFirst, callCatalog, putCatalog, underlyingReport] = await Promise.all([
         fetchSzseReport(quoteParams[0]),
         fetchSzseReport(quoteParams[1]),
         fetchSzseReport(catalogParams[0]),
         fetchSzseReport(catalogParams[1]),
-        fetchSzseReport(underlyingParams),
+        realtimeUnderlying
+          ? Promise.resolve({ data: [{ ss: realtimeUnderlying.price }] })
+          : fetchSzseReport({
+            CATALOGID: '1815_stock_snapshot', TABKEY: 'tab2', txtDMorJC: config.symbol,
+            txtBeginDate: quoteDate, txtEndDate: quoteDate, PAGENO: 1,
+          }),
       ]);
       const underlyingRow = (underlyingReport.data || [])[0];
       if (!(underlyingRow && marketNumber(underlyingRow.ss) > 0)) continue;
@@ -514,23 +514,9 @@ async function fetchSzseOfficialCloseChain(config, month, months, realtime = fal
 
 async function getSseMonths() {
   if (cnMonthCache.months.length && Date.now() - cnMonthCache.time < 15 * 60 * 1000) return cnMonthCache.months;
-  try {
-    const data = await fetchJson(sseHqUrl('v1/sho/list/exchange/stockexpire', {
-      select: 'stockid,expiremonth',
-    }), { headers: SSE_HEADERS, timeoutMs: 3500, attempts: 1 });
-    const months = (data?.list || [])
-      .filter((row) => String(row?.[0]) === '510500')
-      .map((row) => String(row[1]))
-      .filter((month) => /^\d{6}$/.test(month));
-    if (!months.length) throw new Error('合约月份为空');
-    cnMonthCache = { time: Date.now(), months };
-    return months;
-  } catch (error) {
-    if (cnMonthCache.months.length) return cnMonthCache.months;
-    const months = fallbackOptionMonths();
-    cnMonthCache = { time: Date.now(), months };
-    return months;
-  }
+  const months = fallbackOptionMonths();
+  cnMonthCache = { time: Date.now(), months };
+  return months;
 }
 
 async function fetchSseOfficialChain(config, month, months) {
@@ -635,9 +621,8 @@ async function fetchCnOptionChain(symbol, month, force = false, realtime = false
     const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
     const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
     if (redisUrl && redisToken) {
-      try {
-        await redisSet(redisUrl, redisToken, `wheel_cn_option_${cacheKey}`, JSON.stringify(snapshot));
-      } catch {}
+      // Redis 只用于故障兜底，不阻塞行情响应。
+      redisSet(redisUrl, redisToken, `wheel_cn_option_${cacheKey}`, JSON.stringify(snapshot)).catch(() => {});
     }
     return { ...snapshot, cached: false, stale: false };
   } catch (error) {
