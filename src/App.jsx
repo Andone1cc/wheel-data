@@ -1319,7 +1319,7 @@ function CnOptionsPanel({embedded=false}){
                 <div className={`cnopt-row ${contract.type==='C'?'call':'put'}${isAtm?' atm':''}`} key={contract.code}>
                   <div className="cnopt-contract-type"><strong>{contract.type==='C'?'CALL':'PUT'}</strong><small>{contract.contractStyle==='A'?'调整合约':'标准合约'}</small></div>
                   <div data-label="ETF行权价"><strong>¥ {fmt(contract.strike,3)}</strong>{isAtm&&<em>ATM</em>}</div>
-                  <div data-label="指数等效"><strong>{data.underlyingPrice&&indexPrice?fmt(contract.strike/data.underlyingPrice*indexPrice,0):fmt(contract.indexStrike,0)}</strong><small>点</small></div>
+                  <div data-label="指数等效"><strong>{data.underlyingPrice&&indexPrice?fmt(contract.strike/data.underlyingPrice*indexPrice,0):fmt(contract.indexStrike,0)}</strong></div>
                   <div data-label="最新"><strong>{fmt(contract.last,4)}</strong></div>
                   <div data-label="Bid / Ask"><span>{fmt(contract.bid,4)}</span><i>/</i><span>{fmt(contract.ask,4)}</span></div>
                   <div data-label="涨跌" className={(contract.changePct||0)>=0?'pos':'neg'}>{contract.changePct==null?'—':`${contract.changePct>=0?'+':''}${fmt(contract.changePct,2)}%`}</div>
@@ -2629,6 +2629,11 @@ const datePlus=(days)=>{const d=new Date();d.setDate(d.getDate()+days);return d.
 const num=(value,fallback=0)=>{const n=Number(value);return Number.isFinite(n)?n:fallback;};
 const CN_OPTION_FEE_PER_CONTRACT=2;
 const cnOptionFee=(value,qty,manual=false)=>manual?num(value):(num(value)>0?num(value):Math.max(1,num(qty,1))*CN_OPTION_FEE_PER_CONTRACT);
+const estimateCnOptionMargin=(p,nominal,openCash)=>{
+  const manual=num(p.marginUsed);
+  if(manual>0)return manual;
+  return p.side==='SELL'?nominal:openCash;
+};
 const cnIndexEquivalent=(strike,etfPrice,indexPrice)=>num(strike)>0&&num(etfPrice)>0&&num(indexPrice)>0
   ?num(strike)/num(etfPrice)*num(indexPrice):null;
 const cnOptionExpiry=(month)=>{
@@ -2678,7 +2683,7 @@ function calcCnOption(p,markPrice=p.currentPrice){
   const pnl=gross-fees;
   const openCash=openPrice*multiplier*qty;
   const nominal=num(p.strike)*multiplier*qty;
-  const margin=num(p.marginUsed);
+  const margin=estimateCnOptionMargin(p,nominal,openCash);
   const daysLeft=Math.max(0,daysBetween(today(),p.expDate||today()));
   const daysHeld=Math.max(1,daysBetween(p.openDate||today(),today()));
   let buffer=null;
@@ -2865,17 +2870,26 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
   const [indexQuote,setIndexQuote]=useState(()=>readCsi500Cache());
   const [refreshingStock,setRefreshingStock]=useState(null);
   const [refreshingOptions,setRefreshingOptions]=useState(false);
+  const [stockMarketFilter,setStockMarketFilter]=useState('ALL');
+  const [stockQuery,setStockQuery]=useState('');
   useEffect(()=>{
     let alive=true;
     loadCsi500Index().then(payload=>{if(alive&&payload?.price>0)setIndexQuote(payload);});
     return()=>{alive=false;};
   },[]);
-  const totalMargin=positions.reduce((sum,p)=>sum+num(p.marginUsed),0);
+  const totalMargin=positions.reduce((sum,p)=>sum+calcCnOption(p).margin,0);
   const optionPnl=positions.reduce((sum,p)=>sum+calcCnOption(p).pnl,0);
   const closedPnl=closed.reduce((sum,p)=>sum+calcCnClosed(p).pnl,0);
   const scores=positions.map(p=>scoreCnOption(p,calcCnOption(p),totalMargin).score);
   const avgScore=scores.length?Math.round(scores.reduce((a,b)=>a+b,0)/scores.length):null;
   const cnStocks=stocks.filter(s=>s.market!=='HK'),hkStocks=stocks.filter(s=>s.market==='HK');
+  const normalizedStockQuery=stockQuery.trim().toLowerCase();
+  const filteredStocks=stocks.filter(stock=>{
+    if(stockMarketFilter==='CN'&&stock.market==='HK')return false;
+    if(stockMarketFilter==='HK'&&stock.market!=='HK')return false;
+    if(!normalizedStockQuery)return true;
+    return [stock.ticker,stock.name,stock.quoteSymbol].some(value=>String(value||'').toLowerCase().includes(normalizedStockQuery));
+  });
   const totals=(items)=>items.reduce((acc,s)=>{const cost=num(s.shares)*num(s.costPerShare);const value=s.currentPrice==null?null:num(s.shares)*num(s.currentPrice);return{cost:acc.cost+cost,value:acc.value+(value??0),priced:acc.priced+(value==null?0:1)};},{cost:0,value:0,priced:0});
   const cnTotal=totals(cnStocks),hkTotal=totals(hkStocks);
   const stockQuoteKey=stocks.map(stock=>`${stock.id}:${stock.market}:${stock.ticker}`).join('|');
@@ -2952,7 +2966,7 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
       </div>
       <div className="cn-account-overview">
         <div><span>活跃期权</span><strong>{positions.length}</strong><small>浮盈 {cnMoney(optionPnl,'CNY',true)}</small></div>
-        <div><span>期权保证金</span><strong>{cnMoney(totalMargin)}</strong><small>不与底仓绑定</small></div>
+        <div><span>期权保证金</span><strong>{cnMoney(totalMargin)}</strong><small>未填则按仓位估算</small></div>
         <div><span>股票持仓</span><strong>{stocks.length}</strong><small>A 股 {cnStocks.length} · 港股通 {hkStocks.length}</small></div>
         <div><span>期权已实现</span><strong className={closedPnl>=0?'pos':'neg'}>{cnMoney(closedPnl,'CNY',true)}</strong><small>{closed.length} 笔记录</small></div>
         <div><span>期权健康分</span><strong style={{color:avgScore==null?V('dim'):scoreColor(avgScore)}}>{avgScore??'—'}</strong><small>{avgScore==null?'暂无仓位':scoreLabel(avgScore)}</small></div>
@@ -2975,7 +2989,17 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
       {view==='stocks'&&<>
         {showForm&&<CnStockForm onAdd={s=>{onStocks([...stocks,s]);setShowForm(false);showToast(`已添加 ${s.market==='HK'?'港股通':'A股'} ${s.ticker}${s.currentPrice==null?' · 行情稍后自动重试':` · 当前价 ${cnMoney(s.currentPrice,s.currency)}`}`);}} onCancel={()=>setShowForm(false)}/>}
         {!!stocks.length&&<div className="cn-stock-summary"><div><span>A 股 · CNY</span><strong>{cnMoney(cnTotal.value,'CNY')}</strong><small>成本 {cnMoney(cnTotal.cost,'CNY')} · {cnTotal.priced}/{cnStocks.length} 已录价</small></div><div className="hk"><span>港股通 · HKD</span><strong>{cnMoney(hkTotal.value,'HKD')}</strong><small>成本 {cnMoney(hkTotal.cost,'HKD')} · {hkTotal.priced}/{hkStocks.length} 已录价</small></div></div>}
-        {!stocks.length&&!showForm?<div className="cn-account-empty"><span>沪港</span><strong>还没有股票持仓</strong><p>支持 A 股和港股通；人民币与港币市值会分开呈现。</p><button className="btn btn-primary" onClick={()=>setShowForm(true)}>＋ 录入第一笔</button></div>:<div className="cn-stock-list">{stocks.map(s=><CnStockRow key={s.id} stock={s} onRefresh={refreshStock} refreshing={refreshingStock===s.id} onDelete={id=>onStocks(stocks.filter(item=>item.id!==id))}/>)}</div>}
+        {!!stocks.length&&<div className="cn-stock-toolbar">
+          <div className="cnopt-segmented">
+            {[['ALL','全部'],['CN','A 股'],['HK','港股通']].map(([value,label])=><button key={value} className={stockMarketFilter===value?'active':''} onClick={()=>setStockMarketFilter(value)}>{label}</button>)}
+          </div>
+          <input value={stockQuery} onChange={e=>setStockQuery(e.target.value)} placeholder="代码 / 名称筛选"/>
+          <span>{filteredStocks.length}/{stocks.length}</span>
+        </div>}
+        {!stocks.length&&!showForm?<div className="cn-account-empty"><span>沪港</span><strong>还没有股票持仓</strong><p>支持 A 股和港股通；人民币与港币市值会分开呈现。</p><button className="btn btn-primary" onClick={()=>setShowForm(true)}>＋ 录入第一笔</button></div>:(
+          filteredStocks.length?<div className="cn-stock-list">{filteredStocks.map(s=><CnStockRow key={s.id} stock={s} onRefresh={refreshStock} refreshing={refreshingStock===s.id} onDelete={id=>onStocks(stocks.filter(item=>item.id!==id))}/>)}</div>
+          :<div className="cn-account-empty compact"><span>筛选</span><strong>没有匹配的股票持仓</strong><p>换一个市场、代码或名称试试。</p></div>
+        )}
       </>}
 
       {view==='closed'&&<>
