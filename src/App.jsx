@@ -96,6 +96,8 @@ async function cnIndexFetch(opts={}){
 }
 
 const CSI500_LOCAL_CACHE='whl-csi500-index-v1';
+const HKD_CNY_LOCAL_CACHE='whl-hkd-cny-v1';
+const DEFAULT_HKD_CNY_RATE=.92;
 function readCsi500Cache(maxAge=24*60*60*1000){
   try{
     const saved=JSON.parse(localStorage.getItem(CSI500_LOCAL_CACHE)||'null');
@@ -121,6 +123,35 @@ async function loadCsi500Index(force=false){
     return readCsi500Cache();
   })().finally(()=>{csi500IndexPending=null;});
   return csi500IndexPending;
+}
+function readHkdCnyCache(maxAge=24*60*60*1000){
+  try{
+    const saved=JSON.parse(localStorage.getItem(HKD_CNY_LOCAL_CACHE)||'null');
+    return saved?.payload?.rate>0&&Date.now()-(saved.savedAt||0)<maxAge?saved.payload:null;
+  }catch{return null;}
+}
+function saveHkdCnyCache(payload){
+  if(!(payload?.rate>0))return;
+  try{localStorage.setItem(HKD_CNY_LOCAL_CACHE,JSON.stringify({savedAt:Date.now(),payload}));}catch{}
+}
+let hkdCnyPending=null;
+async function loadHkdCnyRate(force=false){
+  const fresh=readHkdCnyCache(6*60*60*1000);
+  if(!force&&fresh)return fresh;
+  if(hkdCnyPending)return hkdCnyPending;
+  hkdCnyPending=(async()=>{
+    const fallback=readHkdCnyCache(30*24*60*60*1000)||{rate:DEFAULT_HKD_CNY_RATE,source:'fallback'};
+    try{
+      const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
+      const response=await fetch(`${proxyBase}/api/quote/${encodeURIComponent('HKDCNY=X')}`,{signal:AbortSignal.timeout(6000)});
+      if(!response.ok)return fallback;
+      const payload=await response.json();
+      const rate=Number(payload?.price);
+      if(rate>0){const next={rate,source:payload?.source||'Yahoo',updatedAt:Date.now()};saveHkdCnyCache(next);return next;}
+    }catch{}
+    return fallback;
+  })().finally(()=>{hkdCnyPending=null;});
+  return hkdCnyPending;
 }
 
 async function cloudPut(data, password) {
@@ -2625,6 +2656,8 @@ const cnMoney=(n,currency='CNY',signed=false,d=2)=>{
   const value=Number(n),mark=currency==='HKD'?'HK$':'¥';
   return `${signed&&value>=0?'+':''}${value<0?'-':''}${mark}${fmt(Math.abs(value),d)}`;
 };
+const cnStockRate=(stock,hkdCnyRate)=>stock?.market==='HK'?num(hkdCnyRate,DEFAULT_HKD_CNY_RATE):1;
+const cnStockCny=(stock,value,hkdCnyRate)=>value==null?null:num(value)*cnStockRate(stock,hkdCnyRate);
 const datePlus=(days)=>{const d=new Date();d.setDate(d.getDate()+days);return d.toISOString().slice(0,10);};
 const num=(value,fallback=0)=>{const n=Number(value);return Number.isFinite(n)?n:fallback;};
 const CN_OPTION_FEE_PER_CONTRACT=2;
@@ -2834,7 +2867,7 @@ function CnStockForm({onAdd,onCancel}){
   };
   return(
     <div className="cn-account-form anim-in">
-      <div className="cn-form-title"><span>＋ 录入股票持仓</span><small>只填写建仓信息；当前价格保存时自动获取，港股通使用 HKD 单独统计</small></div>
+      <div className="cn-form-title"><span>＋ 录入股票持仓</span><small>港股通成本仍按港币录入，持仓页会按 HKD/CNY 折成人民币汇总</small></div>
       <div className="cn-form-grid stock">
         <SelectField label="市场" value={f.market} onChange={v=>set('market',v)} options={[{value:'CN',label:'A 股'},{value:'HK',label:'港股通'}]}/>
         <Field label="证券代码" value={f.ticker} onChange={v=>set('ticker',v.trim())} placeholder={f.market==='HK'?'00700':'600519'}/>
@@ -2849,16 +2882,25 @@ function CnStockForm({onAdd,onCancel}){
   );
 }
 
-function CnStockRow({stock,onRefresh,onDelete,refreshing}){
+function CnStockRow({stock,hkdCnyRate,onRefresh,onDelete,refreshing}){
   const currency=stock.currency||((stock.market==='HK')?'HKD':'CNY');
   const cost=num(stock.shares)*num(stock.costPerShare);
   const value=stock.currentPrice==null?null:num(stock.shares)*num(stock.currentPrice);
   const pnl=value==null?null:value-cost;
+  const costCny=cnStockCny(stock,cost,hkdCnyRate);
+  const valueCny=cnStockCny(stock,value,hkdCnyRate);
+  const pnlCny=cnStockCny(stock,pnl,hkdCnyRate);
+  const costPerShareCny=cnStockCny(stock,stock.costPerShare,hkdCnyRate);
+  const currentPriceCny=cnStockCny(stock,stock.currentPrice,hkdCnyRate);
   const exchange=stock.market==='HK'?'港股通':String(stock.ticker).startsWith('6')?'沪市':'深市';
+  const costSub=stock.market==='HK'?`${cnMoney(stock.costPerShare,currency)} × ${fmt(cnStockRate(stock,hkdCnyRate),4)} · 成本 ${cnMoney(costCny)}`:`成本 ${cnMoney(costCny)}`;
+  const valueSub=stock.market==='HK'
+    ?(value==null?'自动行情':`${cnMoney(stock.currentPrice,currency)} × ${fmt(cnStockRate(stock,hkdCnyRate),4)} · 市值 ${cnMoney(valueCny)}`)
+    :(value==null?'自动行情':`市值 ${cnMoney(valueCny)}`);
   return(
     <article className="cn-stock-card">
       <div className="cn-stock-id"><b>{stock.ticker}</b><strong>{stock.name||'未命名证券'}</strong><span className={stock.market==='HK'?'hk':''}>{exchange}</span></div>
-      <div className="cn-stock-metrics"><Stat label="持仓" value={`${fmt(stock.shares,0)} 股`} sub={stock.acquireDate}/><Stat label="成本价" value={cnMoney(stock.costPerShare,currency)} sub={`成本 ${cnMoney(cost,currency)}`}/><Stat label="当前价" value={stock.currentPrice==null?'同步中':cnMoney(stock.currentPrice,currency)} sub={value==null?'自动行情':`市值 ${cnMoney(value,currency)}`}/><Stat label="浮动盈亏" value={pnl==null?'—':cnMoney(pnl,currency,true)} sub={pnl==null?'行情同步后计算':fmtA(cost?100*pnl/cost:null)} color={pnl==null?V('dim'):pnl>=0?ACC.profit:ACC.loss}/></div>
+      <div className="cn-stock-metrics"><Stat label="持仓" value={`${fmt(stock.shares,0)} 股`} sub={stock.acquireDate}/><Stat label="成本价" value={cnMoney(costPerShareCny)} sub={costSub}/><Stat label="当前价" value={stock.currentPrice==null?'同步中':cnMoney(currentPriceCny)} sub={valueSub}/><Stat label="浮动盈亏" value={pnl==null?'—':cnMoney(pnlCny,'CNY',true)} sub={pnl==null?'行情同步后计算':fmtA(cost?100*pnl/cost:null)} color={pnl==null?V('dim'):pnl>=0?ACC.profit:ACC.loss}/></div>
       <div className="cn-row-actions"><button onClick={()=>onRefresh(stock)} disabled={refreshing}>{refreshing?'同步中…':'刷新行情'}</button><button className="danger" onClick={()=>{if(window.confirm(`确认删除 ${stock.ticker}？`))onDelete(stock.id);}}>删除</button></div>
     </article>
   );
@@ -2872,11 +2914,18 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
   const [refreshingOptions,setRefreshingOptions]=useState(false);
   const [stockMarketFilter,setStockMarketFilter]=useState('ALL');
   const [stockQuery,setStockQuery]=useState('');
+  const [hkdCnyQuote,setHkdCnyQuote]=useState(()=>readHkdCnyCache(30*24*60*60*1000)||{rate:DEFAULT_HKD_CNY_RATE,source:'fallback'});
   useEffect(()=>{
     let alive=true;
     loadCsi500Index().then(payload=>{if(alive&&payload?.price>0)setIndexQuote(payload);});
     return()=>{alive=false;};
   },[]);
+  useEffect(()=>{
+    let alive=true;
+    loadHkdCnyRate().then(payload=>{if(alive&&payload?.rate>0)setHkdCnyQuote(payload);});
+    return()=>{alive=false;};
+  },[]);
+  const hkdCnyRate=hkdCnyQuote?.rate||DEFAULT_HKD_CNY_RATE;
   const totalMargin=positions.reduce((sum,p)=>sum+calcCnOption(p).margin,0);
   const optionPnl=positions.reduce((sum,p)=>sum+calcCnOption(p).pnl,0);
   const closedPnl=closed.reduce((sum,p)=>sum+calcCnClosed(p).pnl,0);
@@ -2890,7 +2939,7 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
     if(!normalizedStockQuery)return true;
     return [stock.ticker,stock.name,stock.quoteSymbol].some(value=>String(value||'').toLowerCase().includes(normalizedStockQuery));
   });
-  const totals=(items)=>items.reduce((acc,s)=>{const cost=num(s.shares)*num(s.costPerShare);const value=s.currentPrice==null?null:num(s.shares)*num(s.currentPrice);return{cost:acc.cost+cost,value:acc.value+(value??0),priced:acc.priced+(value==null?0:1)};},{cost:0,value:0,priced:0});
+  const totals=(items)=>items.reduce((acc,s)=>{const cost=num(s.shares)*cnStockCny(s,s.costPerShare,hkdCnyRate);const value=s.currentPrice==null?null:num(s.shares)*cnStockCny(s,s.currentPrice,hkdCnyRate);return{cost:acc.cost+cost,value:acc.value+(value??0),priced:acc.priced+(value==null?0:1)};},{cost:0,value:0,priced:0});
   const cnTotal=totals(cnStocks),hkTotal=totals(hkStocks);
   const stockQuoteKey=stocks.map(stock=>`${stock.id}:${stock.market}:${stock.ticker}`).join('|');
   useEffect(()=>{
@@ -2961,7 +3010,7 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
   return(
     <section className="cn-account">
       <div className="cn-account-hero">
-        <div><div className="cnopt-kicker">CN / HK CONNECT · PORTFOLIO</div><h2>A/H 股账户</h2><p>A 股期权、A 股与港股通股票统一管理；币种独立汇总，风险口径不依赖 SGOV。</p></div>
+        <div><div className="cnopt-kicker">CN / HK CONNECT · PORTFOLIO</div><h2>A/H 股账户</h2><p>A 股期权、A 股与港股通股票统一管理；港股通按汇率折人民币汇总，风险口径不依赖 SGOV。</p></div>
         <div className="cn-account-hero-badges"><span>人民币账户</span><span>港股通</span><span>{indexQuote?.price?`中证500 ${fmt(indexQuote.price,0)}点`:'指数同步中'}</span></div>
       </div>
       <div className="cn-account-overview">
@@ -2987,8 +3036,8 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
       </>}
 
       {view==='stocks'&&<>
-        {showForm&&<CnStockForm onAdd={s=>{onStocks([...stocks,s]);setShowForm(false);showToast(`已添加 ${s.market==='HK'?'港股通':'A股'} ${s.ticker}${s.currentPrice==null?' · 行情稍后自动重试':` · 当前价 ${cnMoney(s.currentPrice,s.currency)}`}`);}} onCancel={()=>setShowForm(false)}/>}
-        {!!stocks.length&&<div className="cn-stock-summary"><div><span>A 股 · CNY</span><strong>{cnMoney(cnTotal.value,'CNY')}</strong><small>成本 {cnMoney(cnTotal.cost,'CNY')} · {cnTotal.priced}/{cnStocks.length} 已录价</small></div><div className="hk"><span>港股通 · HKD</span><strong>{cnMoney(hkTotal.value,'HKD')}</strong><small>成本 {cnMoney(hkTotal.cost,'HKD')} · {hkTotal.priced}/{hkStocks.length} 已录价</small></div></div>}
+        {showForm&&<CnStockForm onAdd={s=>{onStocks([...stocks,s]);setShowForm(false);showToast(`已添加 ${s.market==='HK'?'港股通':'A股'} ${s.ticker}${s.currentPrice==null?' · 行情稍后自动重试':` · 当前价 ${cnMoney(cnStockCny(s,s.currentPrice,hkdCnyRate))}`}`);}} onCancel={()=>setShowForm(false)}/>}
+        {!!stocks.length&&<div className="cn-stock-summary"><div><span>A 股 · 人民币</span><strong>{cnMoney(cnTotal.value)}</strong><small>成本 {cnMoney(cnTotal.cost)} · {cnTotal.priced}/{cnStocks.length} 已录价</small></div><div className="hk"><span>港股通 · 折人民币</span><strong>{cnMoney(hkTotal.value)}</strong><small>成本 {cnMoney(hkTotal.cost)} · HKD/CNY {fmt(hkdCnyRate,4)} · {hkTotal.priced}/{hkStocks.length} 已录价</small></div></div>}
         {!!stocks.length&&<div className="cn-stock-toolbar">
           <div className="cnopt-segmented">
             {[['ALL','全部'],['CN','A 股'],['HK','港股通']].map(([value,label])=><button key={value} className={stockMarketFilter===value?'active':''} onClick={()=>setStockMarketFilter(value)}>{label}</button>)}
@@ -2996,8 +3045,8 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
           <input value={stockQuery} onChange={e=>setStockQuery(e.target.value)} placeholder="代码 / 名称筛选"/>
           <span>{filteredStocks.length}/{stocks.length}</span>
         </div>}
-        {!stocks.length&&!showForm?<div className="cn-account-empty"><span>沪港</span><strong>还没有股票持仓</strong><p>支持 A 股和港股通；人民币与港币市值会分开呈现。</p><button className="btn btn-primary" onClick={()=>setShowForm(true)}>＋ 录入第一笔</button></div>:(
-          filteredStocks.length?<div className="cn-stock-list">{filteredStocks.map(s=><CnStockRow key={s.id} stock={s} onRefresh={refreshStock} refreshing={refreshingStock===s.id} onDelete={id=>onStocks(stocks.filter(item=>item.id!==id))}/>)}</div>
+        {!stocks.length&&!showForm?<div className="cn-account-empty"><span>沪港</span><strong>还没有股票持仓</strong><p>支持 A 股和港股通；页面会统一折成人民币展示。</p><button className="btn btn-primary" onClick={()=>setShowForm(true)}>＋ 录入第一笔</button></div>:(
+          filteredStocks.length?<div className="cn-stock-list">{filteredStocks.map(s=><CnStockRow key={s.id} stock={s} hkdCnyRate={hkdCnyRate} onRefresh={refreshStock} refreshing={refreshingStock===s.id} onDelete={id=>onStocks(stocks.filter(item=>item.id!==id))}/>)}</div>
           :<div className="cn-account-empty compact"><span>筛选</span><strong>没有匹配的股票持仓</strong><p>换一个市场、代码或名称试试。</p></div>
         )}
       </>}
