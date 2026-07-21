@@ -24,6 +24,7 @@ const DEFAULT_COMM=0.65;
 const SK={
   POS:'whl-pos-v2',CLOSED:'whl-closed-v1',STOCKS:'whl-stocks-v1',SGOV:'whl-sgov-v3',CFG:'whl-cfg-v2',
   CN_POS:'whl-cn-pos-v1',CN_CLOSED:'whl-cn-closed-v1',CN_STOCKS:'whl-cn-stocks-v1',
+  CN_RECOVERY:'whl-cn-pos-recovery-v1',
   KEY:'whl-api-key',FH_KEY:'whl-finnhub-key',THEME:'whl-theme',
 };
 const US_ACCOUNT_TABS=['active','stocks','closed','sgov'];
@@ -78,14 +79,12 @@ async function futuFetch(path, opts={}){
 }
 
 async function cnOptionFetch(symbol,month='',opts={}){
-  const {refresh=false,...fetchOpts}=opts;
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
   const params=new URLSearchParams({symbol});
   if(month)params.set('month',month);
-  if(refresh)params.set('refresh','1');
   return fetch(`${proxyBase}/api/cn-options?${params.toString()}`,{
-    ...fetchOpts,
-    signal:fetchOpts.signal||AbortSignal.timeout(20000),
+    ...opts,
+    signal:opts.signal||AbortSignal.timeout(20000),
   });
 }
 
@@ -98,6 +97,9 @@ async function cnIndexFetch(opts={}){
 }
 
 const CSI500_LOCAL_CACHE='whl-csi500-index-v1';
+const HKD_CNY_LOCAL_CACHE='whl-hkd-cny-v1';
+const HKD_CNY_MANUAL_CACHE='whl-hkd-cny-manual-v1';
+const DEFAULT_HKD_CNY_RATE=.92;
 function readCsi500Cache(maxAge=24*60*60*1000){
   try{
     const saved=JSON.parse(localStorage.getItem(CSI500_LOCAL_CACHE)||'null');
@@ -123,6 +125,50 @@ async function loadCsi500Index(force=false){
     return readCsi500Cache();
   })().finally(()=>{csi500IndexPending=null;});
   return csi500IndexPending;
+}
+function readHkdCnyCache(maxAge=24*60*60*1000){
+  try{
+    const saved=JSON.parse(localStorage.getItem(HKD_CNY_LOCAL_CACHE)||'null');
+    return saved?.payload?.rate>0&&Date.now()-(saved.savedAt||0)<maxAge?saved.payload:null;
+  }catch{return null;}
+}
+function saveHkdCnyCache(payload){
+  if(!(payload?.rate>0))return;
+  try{localStorage.setItem(HKD_CNY_LOCAL_CACHE,JSON.stringify({savedAt:Date.now(),payload}));}catch{}
+}
+function readHkdCnyManual(){
+  try{
+    const saved=JSON.parse(localStorage.getItem(HKD_CNY_MANUAL_CACHE)||'null');
+    return saved?.rate>0?{...saved,source:'manual',manual:true}:null;
+  }catch{return null;}
+}
+function saveHkdCnyManual(payload){
+  if(!(payload?.rate>0))return;
+  try{localStorage.setItem(HKD_CNY_MANUAL_CACHE,JSON.stringify({rate:payload.rate,updatedAt:payload.updatedAt||Date.now()}));}catch{}
+}
+function clearHkdCnyManual(){
+  try{localStorage.removeItem(HKD_CNY_MANUAL_CACHE);}catch{}
+}
+let hkdCnyPending=null;
+async function loadHkdCnyRate(force=false){
+  const manual=readHkdCnyManual();
+  if(manual&&!force)return manual;
+  const fresh=readHkdCnyCache(6*60*60*1000);
+  if(!force&&fresh)return fresh;
+  if(hkdCnyPending)return hkdCnyPending;
+  hkdCnyPending=(async()=>{
+    const fallback=readHkdCnyCache(30*24*60*60*1000)||{rate:DEFAULT_HKD_CNY_RATE,source:'fallback'};
+    try{
+      const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
+      const response=await fetch(`${proxyBase}/api/quote/${encodeURIComponent('HKDCNY=X')}`,{signal:AbortSignal.timeout(6000)});
+      if(!response.ok)return fallback;
+      const payload=await response.json();
+      const rate=Number(payload?.price);
+      if(rate>0){const next={rate,source:payload?.source||'Yahoo',updatedAt:Date.now()};saveHkdCnyCache(next);return next;}
+    }catch{}
+    return fallback;
+  })().finally(()=>{hkdCnyPending=null;});
+  return hkdCnyPending;
 }
 
 async function cloudPut(data, password) {
@@ -1205,7 +1251,7 @@ function CnOptionsPanel({embedded=false}){
       let payload=null,lastError=null;
       for(let attempt=0;attempt<2;attempt+=1){
         try{
-          const response=await cnOptionFetch(nextSymbol,nextMonth,{refresh:force});
+          const response=await cnOptionFetch(nextSymbol,nextMonth);
           const raw=await response.text();
           let parsed;
           try{parsed=JSON.parse(raw);}catch{throw new Error('行情接口返回格式异常');}
@@ -1224,11 +1270,16 @@ function CnOptionsPanel({embedded=false}){
     }catch(e){
       let saved=null;
       try{saved=JSON.parse(localStorage.getItem(storageKey)||'null');}catch{}
-      if(saved?.payload&&Date.now()-(saved.savedAt||0)<12*60*60*1000){
-        const fallback={...saved.payload,clientStale:true,warning:'行情源暂时不稳定，正在展示本设备最近一次成功快照。'};
+      if(saved?.payload&&Date.now()-(saved.savedAt||0)<7*24*60*60*1000){
+        const isSzseClose=saved.payload?.exchange==='SZSE'||saved.payload?.source==='szse-official-close';
+        const quoteDate=saved.payload?.quoteTime||'最近官方收盘日';
+        const fallback={...saved.payload,clientStale:true,staleReason:isSzseClose?'official-close-lag':'client-cache',
+          warning:isSzseClose
+            ?`深交所期权链为日终口径，最新官方发布日为 ${quoteDate}；交易日盘中显示上一交易日属于正常情况。当前为本设备保存的官方快照。`
+            :'行情源暂时不稳定，正在展示本设备最近一次成功快照。'};
         cacheRef.current.set(key,fallback);setData(fallback);setError('');setLastLoaded(new Date(saved.savedAt));
       }else{
-        const message=/fetch failed|network|timeout|aborted/i.test(e.message||'')
+        const message=/fetch failed|network|timeout|timed out|aborted/i.test(e.message||'')
           ?'行情源连接超时，系统已自动重试，请稍后再刷新'
           :(e.message||'行情拉取失败');
         setError(message);
@@ -1250,8 +1301,9 @@ function CnOptionsPanel({embedded=false}){
   const totalVolume=contracts.reduce((sum,item)=>sum+(item.volume||0),0);
   const indexPrice=indexQuote?.price??data?.indexPrice??null;
   const indexQuoteTime=indexQuote?.quoteTime??data?.indexQuoteTime??null;
-  const sourceLabel=data?.source==='eastmoney-realtime'?'东方财富·盘中实时':data?.source==='sse-official-realtime'?'上交所·官方实时':'深交所·官方收盘快照';
-  const sourceDetail=data?.source==='eastmoney-realtime'?'实时快照 · 非交易所直连':data?.source==='sse-official-realtime'?'实时最新价 · BS 反推':'收盘价 · BS 反推';
+  const dataNotice=data?.warning||(!data?.stale&&data?.notice)||'';
+  const isOfficialCloseNotice=data?.staleReason==='official-close-lag'||(!data?.warning&&data?.exchange==='SZSE'&&data?.notice);
+  const noticeKind=isOfficialCloseNotice?'info':'warning';
   const atmStrike=data?.underlyingPrice&&data?.contracts?.length
     ? data.contracts.reduce((best,item)=>Math.abs(item.strike-data.underlyingPrice)<Math.abs(best-data.underlyingPrice)?item.strike:best,data.contracts[0].strike)
     : null;
@@ -1262,7 +1314,7 @@ function CnOptionsPanel({embedded=false}){
         <div>
           <div className="cnopt-kicker">CN OPTIONS · LIVE QUERY</div>
           <h2>A股期权数据台</h2>
-          <p>中证500 ETF 近月合约 · 实时盘口、成交持仓、IV 与 Delta 一屏查询</p>
+          <p>中证500 ETF 近月合约 · 上交所实时、深交所官方日终 · IV 与 Delta 一屏查询</p>
         </div>
         <button className="btn cnopt-refresh" onClick={()=>{load(symbol,data?.selectedMonth||'',true);refreshIndex(true);}} disabled={loading}>
           {loading?'同步中…':'↻ 刷新数据'}
@@ -1290,14 +1342,14 @@ function CnOptionsPanel({embedded=false}){
 
       {!error&&data&&(
         <>
-          {(data.stale||data.clientStale||data.warning)&&<div className="cnopt-stale">⚠ {data.warning||'上游行情暂时不可用，正在展示最近一次成功快照。'}</div>}
+          {dataNotice&&<div className={`cnopt-stale ${noticeKind}`}>{noticeKind==='info'?'i':'⚠'} {dataNotice}</div>}
           <div className="cnopt-snapshot">
             <div><span>标的现价</span><strong>¥ {fmt(data.underlyingPrice,3)}</strong><small>{selectedTarget.exchange} · {symbol}</small></div>
             <div className="cnopt-index"><span>中证500指数</span><strong>{indexPrice==null?'—':fmt(indexPrice,2)}</strong><small>{indexQuoteTime||(indexPrice?'本机最近快照':'独立同步中，不阻塞期权链')}</small></div>
             <div><span>合约月份</span><strong>{cnMonthLabel(data.selectedMonth)}</strong><small>{data.contracts?.[0]?.expiry||'—'} 到期</small></div>
             <div><span>合约数量</span><strong>{data.contracts?.length||0}</strong><small>Call + Put</small></div>
             <div><span>当前筛选成交量</span><strong>{fmt(totalVolume,0)}</strong><small>{contracts.length} 条结果</small></div>
-            <div className="cnopt-source"><span>行情 / Greeks</span><strong>{sourceLabel}</strong><small>{sourceDetail}</small></div>
+            <div className="cnopt-source"><span>行情 / Greeks</span><strong>交易所官方</strong><small>{data.exchange==='SZSE'?'官方收盘价 · BS 反推':'官方实时价 · BS 反推'}</small></div>
           </div>
 
           <div className="cnopt-toolbar">
@@ -1315,7 +1367,7 @@ function CnOptionsPanel({embedded=false}){
             </div>
           </div>
 
-          <div className="cnopt-note"><span>i</span>{data.notice&&<b>{data.notice} </b>}{data.greekNote}<b> 预期年化 =（最新权利金 − ¥2/张手续费）÷ 行权价 × 365 ÷ DTE；指数等效受跟踪误差与分红影响，仅作近似参考。</b></div>
+          <div className="cnopt-note"><span>i</span>{data.greekNote}<b> 预期年化 =（最新权利金 − ¥2/张手续费）÷ 行权价 × 365 ÷ DTE；指数等效受跟踪误差与分红影响，仅作近似参考。</b></div>
 
           <div className={`cnopt-chain${loading?' loading':''}`}>
             <div className="cnopt-chain-head">
@@ -1328,7 +1380,7 @@ function CnOptionsPanel({embedded=false}){
                 <div className={`cnopt-row ${contract.type==='C'?'call':'put'}${isAtm?' atm':''}`} key={contract.code}>
                   <div className="cnopt-contract-type"><strong>{contract.type==='C'?'CALL':'PUT'}</strong><small>{contract.contractStyle==='A'?'调整合约':'标准合约'}</small></div>
                   <div data-label="ETF行权价"><strong>¥ {fmt(contract.strike,3)}</strong>{isAtm&&<em>ATM</em>}</div>
-                  <div data-label="指数等效"><strong>{data.underlyingPrice&&indexPrice?fmt(contract.strike/data.underlyingPrice*indexPrice,0):fmt(contract.indexStrike,0)}</strong><small>点</small></div>
+                  <div data-label="指数等效"><strong>{data.underlyingPrice&&indexPrice?fmt(contract.strike/data.underlyingPrice*indexPrice,0):fmt(contract.indexStrike,0)}</strong></div>
                   <div data-label="最新"><strong>{fmt(contract.last,4)}</strong></div>
                   <div data-label="Bid / Ask"><span>{fmt(contract.bid,4)}</span><i>/</i><span>{fmt(contract.ask,4)}</span></div>
                   <div data-label="涨跌" className={(contract.changePct||0)>=0?'pos':'neg'}>{contract.changePct==null?'—':`${contract.changePct>=0?'+':''}${fmt(contract.changePct,2)}%`}</div>
@@ -1344,7 +1396,7 @@ function CnOptionsPanel({embedded=false}){
             })}
             {!contracts.length&&!loading&&<div className="cnopt-empty">没有匹配的合约，请调整筛选条件。</div>}
           </div>
-          <div className="cnopt-foot">最后刷新：{lastLoaded?lastLoaded.toLocaleTimeString('zh-CN'):'—'} · 行情时间：{data.quoteTime||'—'} · {data.source==='eastmoney-realtime'?'盘中缓存 15 秒':'官方快照降级可缓存 15 分钟'}</div>
+          <div className="cnopt-foot">最后刷新：{lastLoaded?lastLoaded.toLocaleTimeString('zh-CN'):'—'} · 服务端缓存 60 秒</div>
         </>
       )}
 
@@ -2635,10 +2687,17 @@ const cnMoney=(n,currency='CNY',signed=false,d=2)=>{
   const value=Number(n),mark=currency==='HKD'?'HK$':'¥';
   return `${signed&&value>=0?'+':''}${value<0?'-':''}${mark}${fmt(Math.abs(value),d)}`;
 };
+const cnStockRate=(stock,hkdCnyRate)=>stock?.market==='HK'?num(hkdCnyRate,DEFAULT_HKD_CNY_RATE):1;
+const cnStockCny=(stock,value,hkdCnyRate)=>value==null?null:num(value)*cnStockRate(stock,hkdCnyRate);
 const datePlus=(days)=>{const d=new Date();d.setDate(d.getDate()+days);return d.toISOString().slice(0,10);};
 const num=(value,fallback=0)=>{const n=Number(value);return Number.isFinite(n)?n:fallback;};
 const CN_OPTION_FEE_PER_CONTRACT=2;
 const cnOptionFee=(value,qty,manual=false)=>manual?num(value):(num(value)>0?num(value):Math.max(1,num(qty,1))*CN_OPTION_FEE_PER_CONTRACT);
+const estimateCnOptionMargin=(p,nominal,openCash)=>{
+  const manual=num(p.marginUsed);
+  if(manual>0)return manual;
+  return p.side==='SELL'?nominal:openCash;
+};
 const cnIndexEquivalent=(strike,etfPrice,indexPrice)=>num(strike)>0&&num(etfPrice)>0&&num(indexPrice)>0
   ?num(strike)/num(etfPrice)*num(indexPrice):null;
 const cnOptionExpiry=(month)=>{
@@ -2688,16 +2747,24 @@ function calcCnOption(p,markPrice=p.currentPrice){
   const pnl=gross-fees;
   const openCash=openPrice*multiplier*qty;
   const nominal=num(p.strike)*multiplier*qty;
-  const margin=num(p.marginUsed);
+  const margin=estimateCnOptionMargin(p,nominal,openCash);
   const daysLeft=Math.max(0,daysBetween(today(),p.expDate||today()));
   const daysHeld=Math.max(1,daysBetween(p.openDate||today(),today()));
+  const daysTotal=Math.max(1,daysBetween(p.openDate||today(),p.expDate||today()));
   let buffer=null;
   if(num(p.underlyingPrice)>0&&num(p.strike)>0){
     buffer=p.type==='P'
       ?((num(p.underlyingPrice)-num(p.strike))/num(p.underlyingPrice))*100
       :((num(p.strike)-num(p.underlyingPrice))/num(p.underlyingPrice))*100;
   }
-  return{qty,multiplier,gross,fees,pnl,openCash,nominal,margin,daysLeft,daysHeld,buffer};
+  return{qty,multiplier,gross,fees,pnl,openCash,nominal,margin,daysLeft,daysHeld,daysTotal,buffer};
+}
+
+function calcCnExpiryYield(p,r=calcCnOption(p)){
+  const pnl=(p.side==='SELL'?r.openCash:-r.openCash)-r.fees;
+  const capital=r.margin||r.openCash||r.nominal;
+  const annual=calcAnnual(pnl,capital,r.daysTotal);
+  return{pnl,capital,days:r.daysTotal,annual};
 }
 
 function scoreCnOption(p,r,totalMargin=0){
@@ -2799,6 +2866,7 @@ function CnOptionRow({p,totalMargin,currentIndex,onUpdate,onClose,onDelete}){
   const [edit,setEdit]=useState({currentPrice:p.currentPrice??'',underlyingPrice:p.underlyingPrice??'',indexPrice:currentIndex??p.indexPrice??'',delta:p.delta??'',iv:p.iv==null?'':p.iv*100,marginUsed:p.marginUsed??''});
   const [close,setClose]=useState({closePrice:p.currentPrice??'',closeDate:today(),closeFees:String(Math.max(1,num(p.qty,1))*CN_OPTION_FEE_PER_CONTRACT)});
   const r=calcCnOption(p),health=scoreCnOption(p,r,totalMargin);
+  const expiryYield=calcCnExpiryYield(p,r);
   const indexPrice=currentIndex??p.indexPrice;
   const indexStrike=cnIndexEquivalent(p.strike,p.underlyingPrice,indexPrice);
   const setE=(key,value)=>setEdit(prev=>({...prev,[key]:value}));
@@ -2813,6 +2881,7 @@ function CnOptionRow({p,totalMargin,currentIndex,onUpdate,onClose,onDelete}){
           <Stat label="开仓 / 现价" value={`${fmt(p.openPrice,4)} / ${fmt(p.currentPrice,4)}`} sub={p.contractCode||'手动录入'}/>
           <Stat label="ETF / 指数等效" value={p.underlyingPrice==null?'待录入':`¥${fmt(p.underlyingPrice,3)} → ${indexStrike==null?'—':fmt(indexStrike,0)}点`} sub={`${indexPrice?`中证500 ${fmt(indexPrice,0)} · `:''}${r.buffer==null?'未计算缓冲':`缓冲 ${fmt(r.buffer,1)}%`}`}/>
           <Stat label="IV / Delta" value={`${p.iv==null?'—':fmt(p.iv*100,1)+'%'} / ${p.delta==null?'—':fmt(p.delta,3)}`} sub={`保证金 ${cnMoney(r.margin)}`}/>
+          <Stat label="到期年化" value={fmtA(expiryYield.annual)} sub={`到期 ${cnMoney(expiryYield.pnl,'CNY',true)}`} color={expiryYield.pnl>=0?ACC.amber:ACC.loss}/>
           <Stat label="浮动盈亏" value={cnMoney(r.pnl,'CNY',true)} sub={`手续费 ${cnMoney(r.fees)}`} color={r.pnl>=0?ACC.profit:ACC.loss}/>
         </div>
         <div className="cn-position-side"><span className="section-label">健康分</span><strong className="health-pill" style={{'--health-color':health.color}}>{health.score}</strong><small style={{color:health.color}}>{health.label}</small></div>
@@ -2839,7 +2908,7 @@ function CnStockForm({onAdd,onCancel}){
   };
   return(
     <div className="cn-account-form anim-in">
-      <div className="cn-form-title"><span>＋ 录入股票持仓</span><small>只填写建仓信息；当前价格保存时自动获取，港股通使用 HKD 单独统计</small></div>
+      <div className="cn-form-title"><span>＋ 录入股票持仓</span><small>港股通成本仍按港币录入，持仓页会按 HKD/CNY 折成人民币汇总</small></div>
       <div className="cn-form-grid stock">
         <SelectField label="市场" value={f.market} onChange={v=>set('market',v)} options={[{value:'CN',label:'A 股'},{value:'HK',label:'港股通'}]}/>
         <Field label="证券代码" value={f.ticker} onChange={v=>set('ticker',v.trim())} placeholder={f.market==='HK'?'00700':'600519'}/>
@@ -2854,39 +2923,69 @@ function CnStockForm({onAdd,onCancel}){
   );
 }
 
-function CnStockRow({stock,onRefresh,onDelete,refreshing}){
+function CnStockRow({stock,hkdCnyRate,onRefresh,onDelete,refreshing}){
   const currency=stock.currency||((stock.market==='HK')?'HKD':'CNY');
   const cost=num(stock.shares)*num(stock.costPerShare);
   const value=stock.currentPrice==null?null:num(stock.shares)*num(stock.currentPrice);
   const pnl=value==null?null:value-cost;
+  const costCny=cnStockCny(stock,cost,hkdCnyRate);
+  const valueCny=cnStockCny(stock,value,hkdCnyRate);
+  const pnlCny=cnStockCny(stock,pnl,hkdCnyRate);
+  const costPerShareCny=cnStockCny(stock,stock.costPerShare,hkdCnyRate);
+  const currentPriceCny=cnStockCny(stock,stock.currentPrice,hkdCnyRate);
   const exchange=stock.market==='HK'?'港股通':String(stock.ticker).startsWith('6')?'沪市':'深市';
+  const costSub=stock.market==='HK'?`${cnMoney(stock.costPerShare,currency)} × ${fmt(cnStockRate(stock,hkdCnyRate),4)} · 成本 ${cnMoney(costCny)}`:`成本 ${cnMoney(costCny)}`;
+  const valueSub=stock.market==='HK'
+    ?(value==null?'自动行情':`${cnMoney(stock.currentPrice,currency)} × ${fmt(cnStockRate(stock,hkdCnyRate),4)} · 市值 ${cnMoney(valueCny)}`)
+    :(value==null?'自动行情':`市值 ${cnMoney(valueCny)}`);
   return(
     <article className="cn-stock-card">
       <div className="cn-stock-id"><b>{stock.ticker}</b><strong>{stock.name||'未命名证券'}</strong><span className={stock.market==='HK'?'hk':''}>{exchange}</span></div>
-      <div className="cn-stock-metrics"><Stat label="持仓" value={`${fmt(stock.shares,0)} 股`} sub={stock.acquireDate}/><Stat label="成本价" value={cnMoney(stock.costPerShare,currency)} sub={`成本 ${cnMoney(cost,currency)}`}/><Stat label="当前价" value={stock.currentPrice==null?'同步中':cnMoney(stock.currentPrice,currency)} sub={value==null?'自动行情':`市值 ${cnMoney(value,currency)}`}/><Stat label="浮动盈亏" value={pnl==null?'—':cnMoney(pnl,currency,true)} sub={pnl==null?'行情同步后计算':fmtA(cost?100*pnl/cost:null)} color={pnl==null?V('dim'):pnl>=0?ACC.profit:ACC.loss}/></div>
+      <div className="cn-stock-metrics"><Stat label="持仓" value={`${fmt(stock.shares,0)} 股`} sub={stock.acquireDate}/><Stat label="成本价" value={cnMoney(costPerShareCny)} sub={costSub}/><Stat label="当前价" value={stock.currentPrice==null?'同步中':cnMoney(currentPriceCny)} sub={valueSub}/><Stat label="浮动盈亏" value={pnl==null?'—':cnMoney(pnlCny,'CNY',true)} sub={pnl==null?'行情同步后计算':fmtA(cost?100*pnl/cost:null)} color={pnl==null?V('dim'):pnl>=0?ACC.profit:ACC.loss}/></div>
       <div className="cn-row-actions"><button onClick={()=>onRefresh(stock)} disabled={refreshing}>{refreshing?'同步中…':'刷新行情'}</button><button className="danger" onClick={()=>{if(window.confirm(`确认删除 ${stock.ticker}？`))onDelete(stock.id);}}>删除</button></div>
     </article>
   );
 }
 
-function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,onAccountChange,showToast}){
+function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,onClosed,onStocks,onAccountChange,showToast}){
   const [view,setView]=useState('options');
   const [showForm,setShowForm]=useState(false);
   const [indexQuote,setIndexQuote]=useState(()=>readCsi500Cache());
   const [refreshingStock,setRefreshingStock]=useState(null);
   const [refreshingOptions,setRefreshingOptions]=useState(false);
+  const [stockMarketFilter,setStockMarketFilter]=useState('ALL');
+  const [stockQuery,setStockQuery]=useState('');
+  const [hkdCnyQuote,setHkdCnyQuote]=useState(()=>readHkdCnyCache(30*24*60*60*1000)||{rate:DEFAULT_HKD_CNY_RATE,source:'fallback'});
   useEffect(()=>{
     let alive=true;
     loadCsi500Index().then(payload=>{if(alive&&payload?.price>0)setIndexQuote(payload);});
     return()=>{alive=false;};
   },[]);
-  const totalMargin=positions.reduce((sum,p)=>sum+num(p.marginUsed),0);
+  useEffect(()=>{
+    let alive=true;
+    loadHkdCnyRate().then(payload=>{if(alive&&payload?.rate>0)setHkdCnyQuote(payload);});
+    return()=>{alive=false;};
+  },[]);
+  const hkdCnyRate=hkdCnyQuote?.rate||DEFAULT_HKD_CNY_RATE;
+  const totalMargin=positions.reduce((sum,p)=>sum+calcCnOption(p).margin,0);
   const optionPnl=positions.reduce((sum,p)=>sum+calcCnOption(p).pnl,0);
+  const expiryYields=positions.map(p=>calcCnExpiryYield(p,calcCnOption(p)));
+  const expiryCapital=expiryYields.reduce((sum,item)=>sum+item.capital,0);
+  const expiryPnl=expiryYields.reduce((sum,item)=>sum+item.pnl,0);
+  const expiryDays=expiryCapital>0?expiryYields.reduce((sum,item)=>sum+item.days*item.capital,0)/expiryCapital:0;
+  const expiryAnnual=expiryCapital>0?calcAnnual(expiryPnl,expiryCapital,expiryDays):null;
   const closedPnl=closed.reduce((sum,p)=>sum+calcCnClosed(p).pnl,0);
   const scores=positions.map(p=>scoreCnOption(p,calcCnOption(p),totalMargin).score);
   const avgScore=scores.length?Math.round(scores.reduce((a,b)=>a+b,0)/scores.length):null;
   const cnStocks=stocks.filter(s=>s.market!=='HK'),hkStocks=stocks.filter(s=>s.market==='HK');
-  const totals=(items)=>items.reduce((acc,s)=>{const cost=num(s.shares)*num(s.costPerShare);const value=s.currentPrice==null?null:num(s.shares)*num(s.currentPrice);return{cost:acc.cost+cost,value:acc.value+(value??0),priced:acc.priced+(value==null?0:1)};},{cost:0,value:0,priced:0});
+  const normalizedStockQuery=stockQuery.trim().toLowerCase();
+  const filteredStocks=stocks.filter(stock=>{
+    if(stockMarketFilter==='CN'&&stock.market==='HK')return false;
+    if(stockMarketFilter==='HK'&&stock.market!=='HK')return false;
+    if(!normalizedStockQuery)return true;
+    return [stock.ticker,stock.name,stock.quoteSymbol].some(value=>String(value||'').toLowerCase().includes(normalizedStockQuery));
+  });
+  const totals=(items)=>items.reduce((acc,s)=>{const cost=num(s.shares)*cnStockCny(s,s.costPerShare,hkdCnyRate);const value=s.currentPrice==null?null:num(s.shares)*cnStockCny(s,s.currentPrice,hkdCnyRate);return{cost:acc.cost+cost,value:acc.value+(value??0),priced:acc.priced+(value==null?0:1)};},{cost:0,value:0,priced:0});
   const cnTotal=totals(cnStocks),hkTotal=totals(hkStocks);
   const stockQuoteKey=stocks.map(stock=>`${stock.id}:${stock.market}:${stock.ticker}`).join('|');
   useEffect(()=>{
@@ -2953,17 +3052,38 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
     else{onStocks(stocks.map(item=>item.id===stock.id?{...item,name:item.name||quote.name||'',currentPrice:quote.price??item.currentPrice,quoteSymbol:quote.quoteSymbol,priceUpdatedAt:quote.price==null?item.priceUpdatedAt:Date.now()}:item));showToast(`${stock.ticker} 行情与名称已更新`);}
     setRefreshingStock(null);
   };
+  const editHkdCnyRate=()=>{
+    const input=window.prompt('输入 HKD/CNY 汇率；留空确认可恢复自动获取。',fmt(hkdCnyRate,4));
+    if(input==null)return;
+    const value=input.trim();
+    if(!value){
+      clearHkdCnyManual();
+      loadHkdCnyRate(true).then(payload=>{if(payload?.rate>0)setHkdCnyQuote(payload);});
+      showToast('已恢复自动获取 HKD/CNY');
+      return;
+    }
+    const rate=num(value,NaN);
+    if(!(rate>0)){showToast('HKD/CNY 汇率格式不正确',ACC.loss);return;}
+    const next={rate,source:'manual',manual:true,updatedAt:Date.now()};
+    saveHkdCnyManual(next);saveHkdCnyCache(next);setHkdCnyQuote(next);
+    showToast(`HKD/CNY 已修正为 ${fmt(rate,4)}`,ACC.teal);
+  };
   const closePosition=(p,data)=>{const record={...p,...data,closedAt:Date.now()};onAccountChange(positions.filter(item=>item.id!==p.id),[record,...closed],stocks);showToast(`${p.underlying} 已平仓 · ${cnMoney(calcCnClosed(record).pnl,'CNY',true)}`);};
   return(
     <section className="cn-account">
       <div className="cn-account-hero">
-        <div><div className="cnopt-kicker">CN / HK CONNECT · PORTFOLIO</div><h2>A/H 股账户</h2><p>A 股期权、A 股与港股通股票统一管理；币种独立汇总，风险口径不依赖 SGOV。</p></div>
+        <div><div className="cnopt-kicker">CN / HK CONNECT · PORTFOLIO</div><h2>A/H 股账户</h2><p>A 股期权、A 股与港股通股票统一管理；港股通按汇率折人民币汇总，风险口径不依赖 SGOV。</p></div>
         <div className="cn-account-hero-badges"><span>人民币账户</span><span>港股通</span><span>{indexQuote?.price?`中证500 ${fmt(indexQuote.price,0)}点`:'指数同步中'}</span></div>
       </div>
+      {!!recovery?.length&&<div className="cn-account-recovery">
+        <div><strong>检测到 {recovery.length} 笔本机仓位未出现在云端</strong><span>可能由旧版后台刷新覆盖造成；已排除同 ID 的已平仓记录。</span></div>
+        <button onClick={onRecover}>恢复到活跃期权</button>
+      </div>}
       <div className="cn-account-overview">
         <div><span>活跃期权</span><strong>{positions.length}</strong><small>浮盈 {cnMoney(optionPnl,'CNY',true)}</small></div>
-        <div><span>期权保证金</span><strong>{cnMoney(totalMargin)}</strong><small>不与底仓绑定</small></div>
+        <div><span>期权保证金</span><strong>{cnMoney(totalMargin)}</strong><small>未填则按仓位估算</small></div>
         <div><span>股票持仓</span><strong>{stocks.length}</strong><small>A 股 {cnStocks.length} · 港股通 {hkStocks.length}</small></div>
+        <div><span>到期年化</span><strong className={(expiryAnnual??0)>=0?'pos':'neg'}>{fmtA(expiryAnnual)}</strong><small>{positions.length?`预计 ${cnMoney(expiryPnl,'CNY',true)} · ${fmt(expiryDays,0)}天`:'暂无仓位'}</small></div>
         <div><span>期权已实现</span><strong className={closedPnl>=0?'pos':'neg'}>{cnMoney(closedPnl,'CNY',true)}</strong><small>{closed.length} 笔记录</small></div>
         <div><span>期权健康分</span><strong style={{color:avgScore==null?V('dim'):scoreColor(avgScore)}}>{avgScore??'—'}</strong><small>{avgScore==null?'暂无仓位':scoreLabel(avgScore)}</small></div>
       </div>
@@ -2983,9 +3103,19 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
       </>}
 
       {view==='stocks'&&<>
-        {showForm&&<CnStockForm onAdd={s=>{onStocks([...stocks,s]);setShowForm(false);showToast(`已添加 ${s.market==='HK'?'港股通':'A股'} ${s.ticker}${s.currentPrice==null?' · 行情稍后自动重试':` · 当前价 ${cnMoney(s.currentPrice,s.currency)}`}`);}} onCancel={()=>setShowForm(false)}/>}
-        {!!stocks.length&&<div className="cn-stock-summary"><div><span>A 股 · CNY</span><strong>{cnMoney(cnTotal.value,'CNY')}</strong><small>成本 {cnMoney(cnTotal.cost,'CNY')} · {cnTotal.priced}/{cnStocks.length} 已录价</small></div><div className="hk"><span>港股通 · HKD</span><strong>{cnMoney(hkTotal.value,'HKD')}</strong><small>成本 {cnMoney(hkTotal.cost,'HKD')} · {hkTotal.priced}/{hkStocks.length} 已录价</small></div></div>}
-        {!stocks.length&&!showForm?<div className="cn-account-empty"><span>沪港</span><strong>还没有股票持仓</strong><p>支持 A 股和港股通；人民币与港币市值会分开呈现。</p><button className="btn btn-primary" onClick={()=>setShowForm(true)}>＋ 录入第一笔</button></div>:<div className="cn-stock-list">{stocks.map(s=><CnStockRow key={s.id} stock={s} onRefresh={refreshStock} refreshing={refreshingStock===s.id} onDelete={id=>onStocks(stocks.filter(item=>item.id!==id))}/>)}</div>}
+        {showForm&&<CnStockForm onAdd={s=>{onStocks([...stocks,s]);setShowForm(false);showToast(`已添加 ${s.market==='HK'?'港股通':'A股'} ${s.ticker}${s.currentPrice==null?' · 行情稍后自动重试':` · 当前价 ${cnMoney(cnStockCny(s,s.currentPrice,hkdCnyRate))}`}`);}} onCancel={()=>setShowForm(false)}/>}
+        {!!stocks.length&&<div className="cn-stock-summary"><div><span>A 股 · 人民币</span><strong>{cnMoney(cnTotal.value)}</strong><small>成本 {cnMoney(cnTotal.cost)} · {cnTotal.priced}/{cnStocks.length} 已录价</small></div><div className="hk"><span>港股通 · 折人民币</span><strong>{cnMoney(hkTotal.value)}</strong><small>成本 {cnMoney(hkTotal.cost)} · <button className="cn-fx-button" onClick={editHkdCnyRate} title="点击手动修正 HKD/CNY">HKD/CNY {fmt(hkdCnyRate,4)}{hkdCnyQuote?.manual?' 手动':''}</button> · {hkTotal.priced}/{hkStocks.length} 已录价</small></div></div>}
+        {!!stocks.length&&<div className="cn-stock-toolbar">
+          <div className="cnopt-segmented">
+            {[['ALL','全部'],['CN','A 股'],['HK','港股通']].map(([value,label])=><button key={value} className={stockMarketFilter===value?'active':''} onClick={()=>setStockMarketFilter(value)}>{label}</button>)}
+          </div>
+          <input value={stockQuery} onChange={e=>setStockQuery(e.target.value)} placeholder="代码 / 名称筛选"/>
+          <span>{filteredStocks.length}/{stocks.length}</span>
+        </div>}
+        {!stocks.length&&!showForm?<div className="cn-account-empty"><span>沪港</span><strong>还没有股票持仓</strong><p>支持 A 股和港股通；页面会统一折成人民币展示。</p><button className="btn btn-primary" onClick={()=>setShowForm(true)}>＋ 录入第一笔</button></div>:(
+          filteredStocks.length?<div className="cn-stock-list">{filteredStocks.map(s=><CnStockRow key={s.id} stock={s} hkdCnyRate={hkdCnyRate} onRefresh={refreshStock} refreshing={refreshingStock===s.id} onDelete={id=>onStocks(stocks.filter(item=>item.id!==id))}/>)}</div>
+          :<div className="cn-account-empty compact"><span>筛选</span><strong>没有匹配的股票持仓</strong><p>换一个市场、代码或名称试试。</p></div>
+        )}
       </>}
 
       {view==='closed'&&<>
@@ -3077,6 +3207,7 @@ function App(){
   const [cnPositions,setCnPositions]=useState(()=>ls(SK.CN_POS,[]));
   const [cnClosed,setCnClosed]=useState(()=>ls(SK.CN_CLOSED,[]));
   const [cnStocks,setCnStocks]=useState(()=>ls(SK.CN_STOCKS,[]));
+  const [cnRecovery,setCnRecovery]=useState(()=>ls(SK.CN_RECOVERY,[]));
   const [apiKey,setApiKey]=useState(()=>localStorage.getItem(SK.KEY)||'');
   const [finnhubKey,setFinnhubKey]=useState(()=>localStorage.getItem(SK.FH_KEY)||'');
   // 云端同步（已内置默认配置）
@@ -3084,6 +3215,8 @@ function App(){
   const [cloudPwd,setCloudPwd]=useState(()=>localStorage.getItem('whl-cloud-pwd')||'');
   const [cloudStatus,setCloudStatus]=useState('idle');
   const cloudLoaded=React.useRef(false); // 防止初始化期间空数据覆盖云端 // idle | syncing | ok | err
+  const cloudWriteQueue=React.useRef(Promise.resolve(true));
+  const latestData=React.useRef(null);
   const [showCloudModal,setShowCloudModal]=useState(false);
 
   const [tab,setTab]=useState('active');
@@ -3099,67 +3232,97 @@ function App(){
   const [lastRefresh,setLastRefresh]=useState(null);
   const [toast,setToast]=useState(null);
 
+  latestData.current={positions,closed,stocks,sgov,cfg,cnPositions,cnClosed,cnStocks};
+
+  const hasRemoteSchema=(remote)=>['positions','closed','stocks','sgov','cfg','cnPositions','cnClosed','cnStocks']
+    .some(key=>Object.prototype.hasOwnProperty.call(remote||{},key));
+  const buildPayload=(patch={})=>({...latestData.current,...patch,updatedAt:Date.now()});
+  const persistLocal=(data)=>{
+    lss(SK.POS,data.positions);lss(SK.CLOSED,data.closed);lss(SK.STOCKS,data.stocks);lss(SK.SGOV,data.sgov);lss(SK.CFG,data.cfg);
+    lss(SK.CN_POS,data.cnPositions);lss(SK.CN_CLOSED,data.cnClosed);lss(SK.CN_STOCKS,data.cnStocks);
+  };
+  const applyRemote=(remote)=>{
+    const local=latestData.current;
+    const next={
+      positions:Array.isArray(remote.positions)?remote.positions:local.positions,
+      closed:Array.isArray(remote.closed)?remote.closed:local.closed,
+      stocks:Array.isArray(remote.stocks)?remote.stocks:local.stocks,
+      sgov:remote.sgov&&typeof remote.sgov==='object'?remote.sgov:local.sgov,
+      cfg:remote.cfg&&typeof remote.cfg==='object'?remote.cfg:local.cfg,
+      cnPositions:Array.isArray(remote.cnPositions)?remote.cnPositions:local.cnPositions,
+      cnClosed:Array.isArray(remote.cnClosed)?remote.cnClosed:local.cnClosed,
+      cnStocks:Array.isArray(remote.cnStocks)?remote.cnStocks:local.cnStocks,
+    };
+    // 云端某一分类被旧请求意外清空时，不直接丢弃本机副本；保留为可确认恢复项。
+    // 已平仓的 id 会被排除，避免把正常平仓的仓位重新复活。
+    const savedRecovery=ls(SK.CN_RECOVERY,[]);
+    const localCandidates=[...(Array.isArray(local.cnPositions)?local.cnPositions:[]),...(Array.isArray(savedRecovery)?savedRecovery:[])];
+    const closedIds=new Set(next.cnClosed.map(item=>String(item.id)));
+    const remoteIds=new Set(next.cnPositions.map(item=>String(item.id)));
+    const recoveryMap=new Map(localCandidates
+      .filter(item=>item?.id!=null&&!closedIds.has(String(item.id))&&!remoteIds.has(String(item.id)))
+      .map(item=>[String(item.id),item]));
+    const recovery=Array.isArray(remote.cnPositions)&&remote.cnPositions.length===0?[...recoveryMap.values()]:[];
+    setCnRecovery(recovery);lss(SK.CN_RECOVERY,recovery);
+    latestData.current=next;
+    setPositions(next.positions);setClosed(next.closed);setStocks(next.stocks);setSgov(next.sgov);setCfg(next.cfg);
+    setCnPositions(next.cnPositions);setCnClosed(next.cnClosed);setCnStocks(next.cnStocks);
+    persistLocal(next);
+    return next;
+  };
+
   useEffect(()=>{document.documentElement.dataset.theme=theme;localStorage.setItem(SK.THEME,theme);},[theme]);
 
   // 启动时从云端拉数据（有配置时）
   useEffect(()=>{
     if(!cloudUrl||!cloudPwd)return;
+    cloudLoaded.current=false;
     setCloudStatus('syncing');
     cloudGet(cloudPwd).then(remote=>{
       if(remote===null){setCloudStatus('err');return;}
-      // 云端有数据才覆盖本地；云端是空对象{}说明是第一次，把本地数据推上去
-      const hasRemoteData=remote.positions?.length||remote.closed?.length||remote.stocks?.length||remote.sgov?.marketValue||remote.cnPositions?.length||remote.cnClosed?.length||remote.cnStocks?.length;
-      if(hasRemoteData){
-        if(remote.positions)setPositions(remote.positions);
-        if(remote.closed)setClosed(remote.closed);
-        if(remote.stocks)setStocks(remote.stocks);
-        if(remote.sgov)setSgov(remote.sgov);
-        if(remote.cfg)setCfg(remote.cfg);
-        if(remote.cnPositions)setCnPositions(remote.cnPositions);
-        if(remote.cnClosed)setCnClosed(remote.cnClosed);
-        if(remote.cnStocks)setCnStocks(remote.cnStocks);
+      // 只要云端已有完整数据结构，空数组也属于有效状态，不能按“首次使用”处理。
+      if(hasRemoteSchema(remote)){
+        applyRemote(remote);
         setCloudStatus('ok');
         cloudLoaded.current=true;
       }else{
         // 云端是空的，把本地数据推上去初始化
-        const payload=buildPayload(
-          ls(SK.POS,[]),ls(SK.CLOSED,[]),ls(SK.STOCKS,[]),ls(SK.SGOV,{}),ls(SK.CFG,{commPerSide:DEFAULT_COMM}),
-          ls(SK.CN_POS,[]),ls(SK.CN_CLOSED,[]),ls(SK.CN_STOCKS,[])
-        );
-cloudLoaded.current=true;
-                cloudPut(payload,cloudPwd).then(ok=>setCloudStatus(ok?'ok':'err'));
-
+        const payload=buildPayload();
+        cloudLoaded.current=true;
+        cloudPut(payload,cloudPwd).then(ok=>setCloudStatus(ok?'ok':'err'));
       }
     });
   },[cloudUrl,cloudPwd]);
 
   // 把所有业务数据打包推送云端
-  const pushCloud=useCallback(async(data)=>{
+  const pushCloud=useCallback((data)=>{
     if(!cloudUrl||!cloudPwd)return;
     // 云端数据尚未加载完成前，不允许推送（防止空数据覆盖）
     if(!cloudLoaded.current){console.warn('pushCloud blocked: cloud not loaded yet');return;}
     setCloudStatus('syncing');
-    const ok=await cloudPut(data,cloudPwd);
-    setCloudStatus(ok?'ok':'err');
+    const queued=cloudWriteQueue.current.catch(()=>false).then(()=>cloudPut(data,cloudPwd)).then(ok=>{
+      setCloudStatus(ok?'ok':'err');
+      return ok;
+    });
+    cloudWriteQueue.current=queued;
+    return queued;
   },[cloudUrl,cloudPwd]);
 
-  // 带云端同步的 mutate
-  const buildPayload=(pos,cl,st,sg,cf,cnPos=cnPositions,cnCl=cnClosed,cnSt=cnStocks)=>({
-    positions:pos,closed:cl,stocks:st,sgov:sg,cfg:cf,
-    cnPositions:cnPos,cnClosed:cnCl,cnStocks:cnSt,
-    updatedAt:Date.now(),
-  });
+  const persistPatch=(patch)=>{
+    latestData.current={...latestData.current,...patch};
+    pushCloud({...latestData.current,updatedAt:Date.now()});
+  };
 
   const commPerSide=cfg.commPerSide??DEFAULT_COMM;
   const showToast=(msg,color=ACC.profit)=>{setToast({msg,color});setTimeout(()=>setToast(null),2800);};
 
   const mutate=(next)=>{
     setPositions(next);lss(SK.POS,next);
-    pushCloud(buildPayload(next,closed,stocks,sgov,cfg));
+    persistPatch({positions:next});
   };
   const mutateClosed=(next)=>{
     setClosed(next);lss(SK.CLOSED,next);
-    pushCloud(buildPayload(positions,next,stocks,sgov,cfg));
+    persistPatch({closed:next});
   };
   const updateClosedExpiryReview=useCallback((id,data)=>{
     setClosed(prev=>{
@@ -3172,39 +3335,48 @@ cloudLoaded.current=true;
         expiryReviewUpdatedAt:Date.now(),
       }:c);
       lss(SK.CLOSED,next);
-      pushCloud(buildPayload(positions,next,stocks,sgov,cfg));
+      persistPatch({closed:next});
       return next;
     });
     if(!data.silent)showToast('到期价已修正');
   },[positions,stocks,sgov,cfg,pushCloud]);
   const mutateStocks=(next)=>{
     setStocks(next);lss(SK.STOCKS,next);
-    pushCloud(buildPayload(positions,closed,next,sgov,cfg));
+    persistPatch({stocks:next});
   };
   const mutateSgov=(next)=>{
     setSgov(next);lss(SK.SGOV,next);
-    pushCloud(buildPayload(positions,closed,stocks,next,cfg));
+    persistPatch({sgov:next});
   };
   const mutateCfg=(next)=>{
     setCfg(next);lss(SK.CFG,next);
-    pushCloud(buildPayload(positions,closed,stocks,sgov,next));
+    persistPatch({cfg:next});
   };
   const mutateCnPositions=(next)=>{
     setCnPositions(next);lss(SK.CN_POS,next);
-    pushCloud(buildPayload(positions,closed,stocks,sgov,cfg,next,cnClosed,cnStocks));
+    persistPatch({cnPositions:next});
   };
   const mutateCnClosed=(next)=>{
     setCnClosed(next);lss(SK.CN_CLOSED,next);
-    pushCloud(buildPayload(positions,closed,stocks,sgov,cfg,cnPositions,next,cnStocks));
+    persistPatch({cnClosed:next});
   };
   const mutateCnStocks=(next)=>{
     setCnStocks(next);lss(SK.CN_STOCKS,next);
-    pushCloud(buildPayload(positions,closed,stocks,sgov,cfg,cnPositions,cnClosed,next));
+    persistPatch({cnStocks:next});
   };
   const mutateCnAccount=(nextPositions,nextClosed,nextStocks)=>{
     setCnPositions(nextPositions);setCnClosed(nextClosed);setCnStocks(nextStocks);
     lss(SK.CN_POS,nextPositions);lss(SK.CN_CLOSED,nextClosed);lss(SK.CN_STOCKS,nextStocks);
-    pushCloud(buildPayload(positions,closed,stocks,sgov,cfg,nextPositions,nextClosed,nextStocks));
+    persistPatch({cnPositions:nextPositions,cnClosed:nextClosed,cnStocks:nextStocks});
+  };
+  const recoverCnPositions=()=>{
+    const currentIds=new Set(cnPositions.map(item=>String(item.id)));
+    const closedIds=new Set(cnClosed.map(item=>String(item.id)));
+    const recovered=cnRecovery.filter(item=>item?.id!=null&&!currentIds.has(String(item.id))&&!closedIds.has(String(item.id)));
+    if(!recovered.length){setCnRecovery([]);lss(SK.CN_RECOVERY,[]);return;}
+    mutateCnPositions([...cnPositions,...recovered]);
+    setCnRecovery([]);lss(SK.CN_RECOVERY,[]);
+    showToast(`已从本机缓存恢复 ${recovered.length} 笔 A 股期权仓位`,ACC.teal);
   };
 
   const addPosition=(pos)=>{mutate([...positions,pos]);setShowForm(false);setExpanded(pos.id);showToast(`已添加 ${pos.ticker} ${pos.type==='P'?'Put':'Call'} $${pos.strike}`);};
@@ -3323,20 +3495,13 @@ cloudLoaded.current=true;
           setCloudUrl(u);setCloudPwd(p);setShowCloudModal(false);setCloudStatus('syncing');
           cloudGet(p).then(remote=>{
             if(remote===null){setCloudStatus('err');return;}
-            const hasData=remote.positions?.length||remote.closed?.length||remote.stocks?.length||remote.sgov?.marketValue||remote.cnPositions?.length||remote.cnClosed?.length||remote.cnStocks?.length;
-            if(hasData){
-              if(remote.positions)setPositions(remote.positions);
-              if(remote.closed)setClosed(remote.closed);
-              if(remote.stocks)setStocks(remote.stocks);
-              if(remote.sgov)setSgov(remote.sgov);
-              if(remote.cfg)setCfg(remote.cfg);
-              if(remote.cnPositions)setCnPositions(remote.cnPositions);
-              if(remote.cnClosed)setCnClosed(remote.cnClosed);
-              if(remote.cnStocks)setCnStocks(remote.cnStocks);
+            if(hasRemoteSchema(remote)){
+              applyRemote(remote);
               setCloudStatus('ok');cloudLoaded.current=true;showToast('☁ 云端数据已加载',ACC.teal);
             }else{
               // 云端空的，把本地数据推上去
-              const payload=buildPayload(positions,closed,stocks,sgov,cfg);
+              const payload=buildPayload();
+              cloudLoaded.current=true;
               cloudPut(payload,p).then(ok=>{
                 setCloudStatus(ok?'ok':'err');
                 if(ok)showToast('☁ 本地数据已同步到云端',ACC.teal);
@@ -3370,7 +3535,7 @@ cloudLoaded.current=true;
             {lastRefresh&&<span className="header-time" style={{fontSize:11,color:V('faint'),fontFamily:'IBM Plex Mono,monospace'}}>更新 {lastRefresh}</span>}
             {/* 导出备份 */}
             <button onClick={()=>{
-              const payload=buildPayload(positions,closed,stocks,sgov,cfg);
+              const payload=buildPayload();
               const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
               const url=URL.createObjectURL(blob);
               const a=document.createElement('a');
@@ -3432,13 +3597,18 @@ cloudLoaded.current=true;
         {/* 右侧内容 */}
         <div className="main-area">
           {US_ACCOUNT_TABS.includes(tab)&&(
-            <div className="market-account-bar us-market">
-              <div className="market-account-title"><span>US PORTFOLIO</span><strong>美股账户</strong><b>$ · USD</b></div>
-              <div className="market-account-tabs">
-                {[
-                  ['active','活跃期权',positions.length],['stocks','股票持仓',stocks.length],
-                  ['closed','期权已平仓',closed.length],['sgov','SGOV 底仓',null],
-                ].map(([key,label,count])=><button key={key} className={tab===key?'active':''} onClick={()=>setTab(key)}><span>{label}</span>{count!=null&&<b>{count}</b>}</button>)}
+            <div className="market-account-shell us-market">
+              <div className="market-account-hero">
+                <div><div className="cnopt-kicker">US WHEEL · PORTFOLIO</div><h2>美股账户</h2><p>美股期权、股票持仓与 SGOV 底仓统一管理；CBOE 延迟行情刷新，收益和保证金按美元口径汇总。</p></div>
+                <div className="market-account-hero-side">
+                  <div className="market-account-hero-badges"><span>美元账户</span><span>CBOE 延迟</span><span>SGOV 底仓</span></div>
+                  <div className="market-account-tabs">
+                    {[
+                      ['active','活跃期权',positions.length],['stocks','股票持仓',stocks.length],
+                      ['closed','期权已平仓',closed.length],['sgov','SGOV 底仓',null],
+                    ].map(([key,label,count])=><button key={key} className={tab===key?'active':''} onClick={()=>setTab(key)}><span>{label}</span>{count!=null&&<b>{count}</b>}</button>)}
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -3529,7 +3699,7 @@ cloudLoaded.current=true;
 
           {/* A/H 股账户工作台：内部包含活跃期权、股票、已平仓和期权数据 */}
           <div style={{display:tab==='cnaccount'||tab==='cnoptions'?'block':'none'}}>
-            <CnAccountPanel positions={cnPositions} closed={cnClosed} stocks={cnStocks}
+            <CnAccountPanel positions={cnPositions} closed={cnClosed} stocks={cnStocks} recovery={cnRecovery} onRecover={recoverCnPositions}
               onPositions={mutateCnPositions} onClosed={mutateCnClosed} onStocks={mutateCnStocks}
               onAccountChange={mutateCnAccount} showToast={showToast}/>
           </div>

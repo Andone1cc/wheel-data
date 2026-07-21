@@ -76,13 +76,6 @@ const SSE_HEADERS = {
   'User-Agent': BROWSER_USER_AGENT,
   Referer: 'https://www.sse.com.cn/assortment/options/price/',
 };
-const EASTMONEY_HEADERS = {
-  Accept: 'application/json, text/plain, */*',
-  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-  'User-Agent': BROWSER_USER_AGENT,
-  Referer: 'https://quote.eastmoney.com/center/option.html',
-};
-const EASTMONEY_OPTION_URL = 'https://23.push2.eastmoney.com/api/qt/clist/get';
 
 function finiteNumber(value) {
   const n = Number(value);
@@ -126,6 +119,31 @@ async function fetchText(url, options = {}) {
 
 async function fetchJson(url, options = {}) {
   return fetchUpstream(url, options, 'json');
+}
+
+async function fetchCboeStockQuote(ticker) {
+  const data = await fetchJson(
+    `https://cdn.cboe.com/api/global/delayed_quotes/options/${encodeURIComponent(ticker)}.json`,
+    { headers: { 'User-Agent': BROWSER_USER_AGENT }, timeoutMs: 6500, attempts: 1 }
+  );
+  const quote = data?.data || {};
+  const price = finiteNumber(quote.current_price) ?? finiteNumber(quote.close) ?? finiteNumber(quote.prev_day_close);
+  if (!(price > 0)) return null;
+  return { name: quote.company_name || quote.symbol_name || null, price };
+}
+
+async function fetchExchangeRateQuote(ticker) {
+  const match = /^([A-Z]{3})([A-Z]{3})=X$/.exec(String(ticker || '').toUpperCase());
+  if (!match) return null;
+  const [, base, target] = match;
+  const data = await fetchJson(`https://open.er-api.com/v6/latest/${base}`, {
+    headers: { 'User-Agent': BROWSER_USER_AGENT },
+    timeoutMs: 4500,
+    attempts: 1,
+  });
+  const price = finiteNumber(data?.rates?.[target]);
+  if (!(price > 0)) return null;
+  return { name: `${base}/${target}`, price, source: 'ExchangeRate' };
 }
 
 function normalCdf(x) {
@@ -262,15 +280,6 @@ function formatTencentQuoteTime(value) {
   return `${time.slice(0, 4)}-${time.slice(4, 6)}-${time.slice(6, 8)} ${time.slice(8, 10)}:${time.slice(10, 12)}:${time.slice(12, 14)}`;
 }
 
-function shanghaiDateTime() {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-  }).formatToParts(new Date());
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
-}
-
 async function fetchTencentCsi500Index() {
   const text = await fetchText('https://qt.gtimg.cn/q=sh000905', {
     headers: {
@@ -291,30 +300,6 @@ async function fetchTencentCsi500Index() {
     previousClose: marketNumber(fields[4]),
     quoteTime: formatTencentQuoteTime(fields[30]),
     source: 'tencent-quote-index',
-  };
-}
-
-async function fetchTencentEtfQuote(config) {
-  const text = await fetchText(`https://qt.gtimg.cn/q=${config.exchange === 'SZSE' ? 'sz' : 'sh'}${config.symbol}`, {
-    headers: {
-      Accept: '*/*',
-      'User-Agent': BROWSER_USER_AGENT,
-      Referer: 'https://gu.qq.com/',
-    },
-    timeoutMs: 2200,
-    attempts: 1,
-  });
-  const quoted = /="([^\"]+)"/.exec(text)?.[1];
-  const fields = quoted?.split('~') || [];
-  const price = marketNumber(fields[3]);
-  if (!(price > 0)) throw new Error(`${config.symbol} 标的行情为空`);
-  return {
-    price,
-    previousClose: marketNumber(fields[4]),
-    change: marketNumber(fields[31]),
-    changePct: marketNumber(fields[32]),
-    quoteTime: formatTencentQuoteTime(fields[30]) || shanghaiDateTime(),
-    source: 'tencent-quote-underlying',
   };
 }
 
@@ -463,7 +448,7 @@ async function fetchSzseOfficialCloseChain(config, month, months) {
         contracts: enrichLocalGreeks(contracts, underlyingPrice),
         delayed: true,
         source: 'szse-official-close',
-        notice: `深交所官方收盘行情（${quoteDate}），不含实时买卖盘。`,
+        notice: `深交所期权链为日终口径，最新官方发布日为 ${quoteDate}；交易日盘中显示上一交易日属于正常情况，不含实时买卖盘。`,
         greekNote: 'IV/Delta 由深交所官方收盘价按 Black-Scholes 反推，仅供研究。',
       };
     } catch (error) {
@@ -481,7 +466,7 @@ async function getSseMonths() {
   try {
     const data = await fetchJson(sseHqUrl('v1/sho/list/exchange/stockexpire', {
       select: 'stockid,expiremonth',
-    }), { headers: SSE_HEADERS, timeoutMs: 10000 });
+    }), { headers: SSE_HEADERS, timeoutMs: 3500, attempts: 1 });
     const months = (data?.list || [])
       .filter((row) => String(row?.[0]) === '510500')
       .map((row) => String(row[1]))
@@ -503,10 +488,10 @@ async function fetchSseOfficialChain(config, month, months) {
     fetchJson(sseHqUrl(`v1/sho/list/tstyle/${config.symbol}_${month.slice(-2)}`, {
       select: 'contractid,last,chg_rate,presetpx,exepx',
       order: 'contractid,ase',
-    }), { headers: SSE_HEADERS, timeoutMs: 10000 }),
+    }), { headers: SSE_HEADERS, timeoutMs: 5000, attempts: 1 }),
     fetchJson(sseHqUrl(`v1/sh1/list/self/${config.symbol}`, {
       select: 'code,cpxxextendname,last,change,chg_rate,amp_rate,volume,amount,prev_close',
-    }), { headers: SSE_HEADERS, timeoutMs: 10000 }),
+    }), { headers: SSE_HEADERS, timeoutMs: 5000, attempts: 1 }),
   ]);
   const underlyingRow = underlying?.list?.[0];
   const underlyingPrice = marketNumber(underlyingRow?.[2]);
@@ -560,113 +545,6 @@ async function fetchSseChain(config, requestedMonth) {
   return fetchSseOfficialChain(config, month, months);
 }
 
-function eastmoneyRowNumber(row, ...keys) {
-  for (const key of keys) {
-    const value = marketNumber(row?.[key]);
-    if (value != null) return value;
-  }
-  return null;
-}
-
-function eastmoneyContractMonth(code, name) {
-  const codeMatch = String(code || '').match(/[CP](\d{4})/i);
-  if (codeMatch) return `20${codeMatch[1]}`;
-  const nameMatch = String(name || '').match(/(?:购|沽)(\d{1,2})月/);
-  if (!nameMatch) return null;
-  const now = new Date();
-  const month = String(Number(nameMatch[1])).padStart(2, '0');
-  let year = now.getFullYear();
-  if (Number(month) < now.getMonth() + 1 - 6) year += 1;
-  return `${year}${month}`;
-}
-
-function eastmoneyStrike(code, name, row) {
-  // 东方财富期权列表的 f17 是行权价；f23 是剩余天数，不能混用。
-  const rowStrike = eastmoneyRowNumber(row, 'f17');
-  if (rowStrike > 0) return rowStrike;
-  const nameMatch = String(name || '').match(/(?:购|沽)(?:\d{1,2}月)?(?:\d{2,4})?[- ]?(\d+(?:\.\d+)?)/);
-  if (nameMatch && Number(nameMatch[1]) < 1000) return Number(nameMatch[1]);
-  const codeMatch = String(code || '').match(/[CP]\d{4}[AM](\d{4,6})/i);
-  if (codeMatch) {
-    const raw = Number(codeMatch[1]);
-    if (raw > 0) return raw / (raw >= 10000 ? 1000 : 100);
-  }
-  return null;
-}
-
-async function fetchEastmoneyOptionRows() {
-  const params = new URLSearchParams({
-    pn: '1', pz: '500', po: '1', np: '1',
-    ut: 'bd1d9ddb04089700cf9c27f6f7426281', fltt: '2', invt: '2', fid: 'f3',
-    fs: 'm:10,m:12,m:140,m:141,m:151,m:163,m:226',
-    fields: 'f2,f3,f4,f5,f6,f8,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,f25,f26,f37',
-    _: String(Date.now()),
-  });
-  const payload = await fetchJson(`${EASTMONEY_OPTION_URL}?${params.toString()}`, {
-    headers: EASTMONEY_HEADERS,
-    timeoutMs: 5500,
-    attempts: 1,
-  });
-  const rows = payload?.data?.diff;
-  if (!Array.isArray(rows) || !rows.length) throw new Error('东方财富期权实时列表为空');
-  return rows;
-}
-
-async function fetchEastmoneyRealtimeChain(config, requestedMonth, months) {
-  const requested = /^\d{6}$/.test(String(requestedMonth || '')) ? String(requestedMonth) : months[0];
-  const rows = await fetchEastmoneyOptionRows();
-  const targetName = config.name.replace('南方', '').replace('嘉实', '');
-  const contracts = rows.map((row) => {
-    const code = String(row?.f12 || '');
-    const name = String(row?.f14 || '');
-    const text = `${code} ${name}`;
-    if (!text.includes(config.symbol) && !name.includes(targetName)) return null;
-    const rowMonth = eastmoneyContractMonth(code, name);
-    if (rowMonth && rowMonth !== requested) return null;
-    if (!rowMonth && requested && !name.includes(`${Number(requested.slice(-2))}月`)) return null;
-    const type = /沽|PUT|P\d{4}/i.test(name) || /P\d{4}/i.test(code) ? 'P' : 'C';
-    const strike = eastmoneyStrike(code, name, row);
-    if (!code || !(strike > 0)) return null;
-    return {
-      code,
-      name,
-      type,
-      strike,
-      multiplier: config.multiplier,
-      expiry: fourthWednesday(requested),
-      dte: daysUntil(fourthWednesday(requested)),
-      bidSize: null,
-      bid: null,
-      ask: null,
-      askSize: null,
-      last: eastmoneyRowNumber(row, 'f2'),
-      previousSettlement: eastmoneyRowNumber(row, 'f25', 'f20'),
-      change: eastmoneyRowNumber(row, 'f4'),
-      changePct: eastmoneyRowNumber(row, 'f3'),
-      volume: eastmoneyRowNumber(row, 'f5'),
-      openInterest: eastmoneyRowNumber(row, 'f8', 'f21'),
-      quoteTime: shanghaiDateTime(),
-      contractStyle: /[CP]\d{4}A/i.test(code) ? 'A' : 'M',
-      priceSource: 'eastmoney-realtime',
-    };
-  }).filter(Boolean);
-  if (!contracts.length) throw new Error(`${config.symbol} 东方财富实时期权列表中没有 ${requested} 合约`);
-
-  const underlying = await fetchTencentEtfQuote(config);
-  return {
-    ...config,
-    months: months.includes(requested) ? months : [requested, ...months],
-    selectedMonth: requested,
-    underlyingPrice: underlying.price,
-    quoteTime: underlying.quoteTime,
-    contracts: enrichLocalGreeks(contracts, underlying.price),
-    source: 'eastmoney-realtime',
-    delayed: false,
-    notice: '东方财富盘中实时快照；非交易所直连，可能受限流影响。',
-    greekNote: 'IV/Delta 由东方财富实时最新价按 Black-Scholes 反推；该源不提供完整 Bid/Ask，仅供研究。',
-  };
-}
-
 async function fetchSzseChain(config, requestedMonth) {
   // 深交所链路不再调用上交所 32042 端口获取月份。ETF 期权月份规则可在
   // 本地生成；用户明确选择的 YYYYMM 也直接交给深交所官方接口验证。
@@ -675,24 +553,15 @@ async function fetchSzseChain(config, requestedMonth) {
   const month = requested || months[0];
   if (requested && !months.includes(requested)) months.unshift(requested);
   if (!month) throw new Error('暂未查询到深交所可用合约月份');
-  try {
-    return await fetchEastmoneyRealtimeChain(config, month, months);
-  } catch (realtimeError) {
-    const fallback = await fetchSzseOfficialCloseChain(config, month, months);
-    return {
-      ...fallback,
-      realtimeError: realtimeError.message,
-      notice: `深交所盘中实时源暂不可用，已切换为${fallback.quoteTime}官方收盘快照。`,
-    };
-  }
+  return fetchSzseOfficialCloseChain(config, month, months);
 }
 
-async function fetchCnOptionChain(symbol, month, force = false) {
+async function fetchCnOptionChain(symbol, month) {
   const config = CN_OPTION_UNDERLYINGS[symbol];
   if (!config) throw new Error('仅支持 510500、159922');
   const cacheKey = `${symbol}-${month || 'near'}`;
   const cached = cnOptionCache.get(cacheKey);
-  if (!force && cached && Date.now() - cached.time < 60000) return { ...cached.data, cached: true };
+  if (cached && Date.now() - cached.time < 60000) return { ...cached.data, cached: true };
   try {
     // 指数仅用于换算展示，不能阻塞期权链主请求。若进程中已有缓存则顺手带回，
     // 否则由前端独立请求 /api/cn-options?indexOnly=1。
@@ -737,12 +606,16 @@ async function fetchCnOptionChain(symbol, month, force = false) {
       const snapshotTime = fallback.quoteTime || (fallback.snapshotSavedAt
         ? new Date(fallback.snapshotSavedAt).toISOString()
         : '时间未知');
+      const isSzseClose = config.exchange === 'SZSE' || fallback.source === 'szse-official-close';
       return {
         ...fallback,
         cached: true,
         stale: true,
         cacheScope: cached ? 'memory' : 'shared',
-        warning: `官方行情暂时不可用，已返回云端最近快照（${snapshotTime}）。`,
+        staleReason: isSzseClose ? 'official-close-lag' : 'upstream-unavailable',
+        warning: isSzseClose
+          ? `深交所期权链为日终口径，最新官方发布日为 ${snapshotTime}；交易日盘中显示上一交易日属于正常情况。当前为云端保存的官方快照。`
+          : `官方行情暂时不可用，已返回云端最近快照（${snapshotTime}）。`,
       };
     }
     throw error;
@@ -825,6 +698,7 @@ module.exports = async function handler(req, res) {
       const isHk = upperTicker.endsWith('.HK');
       const isSse = upperTicker.endsWith('.SS');
       const isSzse = upperTicker.endsWith('.SZ');
+      const isCnOrHk = isHk || isSse || isSzse;
       const code = upperTicker.split('.')[0];
       const tencentSymbol = isHk ? `hk${code.padStart(5, '0')}` : isSse ? `sh${code}` : isSzse ? `sz${code}` : '';
       const locale = isHk ? '&lang=zh-Hant-HK&region=HK' : (isSse || isSzse) ? '&lang=zh-CN&region=CN' : '';
@@ -845,15 +719,23 @@ module.exports = async function handler(req, res) {
         const cnPrice = Number(fields[3]);
         return fields.length > 3 ? { name: fields[1] || null, price: Number.isFinite(cnPrice) ? cnPrice : null } : null;
       }).catch(() => null) : Promise.resolve(null);
-      const [yahooResult, cnQuoteResult] = await Promise.allSettled([yahooRequest, cnQuoteRequest]);
+      const cboeQuoteRequest = !isCnOrHk && !upperTicker.includes('=')
+        ? fetchCboeStockQuote(upperTicker).catch(() => null)
+        : Promise.resolve(null);
+      const fxQuoteRequest = upperTicker.includes('=')
+        ? fetchExchangeRateQuote(upperTicker).catch(() => null)
+        : Promise.resolve(null);
+      const [yahooResult, cnQuoteResult, cboeQuoteResult, fxQuoteResult] = await Promise.allSettled([yahooRequest, cnQuoteRequest, cboeQuoteRequest, fxQuoteRequest]);
       const data = yahooResult.status === 'fulfilled' ? yahooResult.value : null;
       const cnQuote = cnQuoteResult.status === 'fulfilled' ? cnQuoteResult.value : null;
+      const cboeQuote = cboeQuoteResult.status === 'fulfilled' ? cboeQuoteResult.value : null;
+      const fxQuote = fxQuoteResult.status === 'fulfilled' ? fxQuoteResult.value : null;
       const meta = data?.chart?.result?.[0]?.meta || {};
-      const price = meta.regularMarketPrice ?? cnQuote?.price ?? null;
-      const name = cnQuote?.name || meta.shortName || meta.longName || null;
+      const price = meta.regularMarketPrice ?? cnQuote?.price ?? cboeQuote?.price ?? fxQuote?.price ?? null;
+      const name = cnQuote?.name || meta.shortName || meta.longName || cboeQuote?.name || fxQuote?.name || null;
       if (price == null && !name) throw new Error('股票行情源暂时不可用');
       res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
-      return res.status(200).json({ ticker, price, name, source: meta.regularMarketPrice != null ? 'Yahoo' : 'Tencent' });
+      return res.status(200).json({ ticker, price, name, source: meta.regularMarketPrice != null ? 'Yahoo' : cnQuote?.price != null ? 'Tencent' : cboeQuote?.price != null ? 'CBOE' : fxQuote?.source || 'ExchangeRate' });
     } catch (e) {
       return res.status(502).json({ ticker, price: null, name: null, error: e.message });
     }
@@ -979,16 +861,13 @@ module.exports = async function handler(req, res) {
     }
     const symbol = url.searchParams.get('symbol') || '510500';
     const month = url.searchParams.get('month') || '';
-    const force = url.searchParams.get('refresh') === '1';
     try {
-      const data = await fetchCnOptionChain(symbol, month, force);
-      // 盘中实时源只做短缓存；官方收盘快照允许较长复用，避免深交所上游抖动拖慢页面。
-      const cacheControl = data.source === 'eastmoney-realtime'
-        ? 'public, s-maxage=15, stale-while-revalidate=60'
-        : data.exchange === 'SZSE'
-          ? 'public, s-maxage=900, stale-while-revalidate=86400'
-          : 'public, s-maxage=30, stale-while-revalidate=600';
-      res.setHeader('Cache-Control', cacheControl);
+      const data = await fetchCnOptionChain(symbol, month);
+      // 深交所提供的是日终收盘数据，允许 CDN 较长复用；上交所为实时行情，
+      // 只做短缓存。stale-while-revalidate 可在上游抖动时继续返回成功版本。
+      res.setHeader('Cache-Control', data.exchange === 'SZSE'
+        ? 'public, s-maxage=900, stale-while-revalidate=86400'
+        : 'public, s-maxage=30, stale-while-revalidate=600');
       return res.status(200).json(data);
     } catch (e) {
       return res.status(502).json({ error: 'A 股期权行情拉取失败', detail: e.message });
