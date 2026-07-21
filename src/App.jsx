@@ -1367,11 +1367,11 @@ function CnOptionsPanel({embedded=false}){
             </div>
           </div>
 
-          <div className="cnopt-note"><span>i</span>{data.greekNote}<b> 预期年化 =（最新权利金 − ¥2/张手续费）÷ 行权价 × 365 ÷ DTE；指数等效受跟踪误差与分红影响，仅作近似参考。</b></div>
+          <div className="cnopt-note"><span>i</span>{data.greekNote}<b> 预期年化 =（最新权利金 − ¥2/张手续费）÷ 行权价 × 365 ÷ DTE；行权价等效指数 = 行权价 ÷ ETF现价 × 中证500现点，仅作近似参考。</b></div>
 
           <div className={`cnopt-chain${loading?' loading':''}`}>
             <div className="cnopt-chain-head">
-              {['方向','ETF行权价','指数等效','最新','Bid / Ask','涨跌','成交量','持仓量','IV','Delta','预期年化','到期','合约'].map(label=><span key={label}>{label}</span>)}
+              {['方向','ETF行权价','行权价等效指数','最新','Bid / Ask','涨跌','成交量','持仓量','IV','Delta','预期年化','到期','合约'].map(label=><span key={label}>{label}</span>)}
             </div>
             {contracts.map(contract=>{
               const isAtm=atmStrike!=null&&contract.strike===atmStrike;
@@ -1380,7 +1380,7 @@ function CnOptionsPanel({embedded=false}){
                 <div className={`cnopt-row ${contract.type==='C'?'call':'put'}${isAtm?' atm':''}`} key={contract.code}>
                   <div className="cnopt-contract-type"><strong>{contract.type==='C'?'CALL':'PUT'}</strong><small>{contract.contractStyle==='A'?'调整合约':'标准合约'}</small></div>
                   <div data-label="ETF行权价"><strong>¥ {fmt(contract.strike,3)}</strong>{isAtm&&<em>ATM</em>}</div>
-                  <div data-label="指数等效"><strong>{data.underlyingPrice&&indexPrice?fmt(contract.strike/data.underlyingPrice*indexPrice,0):fmt(contract.indexStrike,0)}</strong></div>
+                  <div data-label="行权价等效指数"><strong>{data.underlyingPrice&&indexPrice?fmt(contract.strike/data.underlyingPrice*indexPrice,0):fmt(contract.indexStrike,0)}</strong></div>
                   <div data-label="最新"><strong>{fmt(contract.last,4)}</strong></div>
                   <div data-label="Bid / Ask"><span>{fmt(contract.bid,4)}</span><i>/</i><span>{fmt(contract.ask,4)}</span></div>
                   <div data-label="涨跌" className={(contract.changePct||0)>=0?'pos':'neg'}>{contract.changePct==null?'—':`${contract.changePct>=0?'+':''}${fmt(contract.changePct,2)}%`}</div>
@@ -2879,7 +2879,7 @@ function CnOptionRow({p,totalMargin,currentIndex,onUpdate,onClose,onDelete}){
           <Stat label="行权价" value={`¥${fmt(p.strike,3)}`} sub={`${r.qty}张 × ${fmt(r.multiplier,0)}`}/>
           <Stat label="到期" value={`${r.daysLeft}天`} sub={p.expDate}/>
           <Stat label="开仓 / 现价" value={`${fmt(p.openPrice,4)} / ${fmt(p.currentPrice,4)}`} sub={p.contractCode||'手动录入'}/>
-          <Stat label="ETF / 指数等效" value={p.underlyingPrice==null?'待录入':`¥${fmt(p.underlyingPrice,3)} → ${indexStrike==null?'—':fmt(indexStrike,0)}点`} sub={`${indexPrice?`中证500 ${fmt(indexPrice,0)} · `:''}${r.buffer==null?'未计算缓冲':`缓冲 ${fmt(r.buffer,1)}%`}`}/>
+          <Stat label="ETF现价 / 行权价等效指数" value={p.underlyingPrice==null?'待录入':`¥${fmt(p.underlyingPrice,3)} → ${indexStrike==null?'—':fmt(indexStrike,0)}点`} sub={`${indexPrice?`现指数 ${fmt(indexPrice,0)} · `:''}${r.buffer==null?'未计算缓冲':`行权价缓冲 ${fmt(r.buffer,1)}%`}`}/>
           <Stat label="IV / Delta" value={`${p.iv==null?'—':fmt(p.iv*100,1)+'%'} / ${p.delta==null?'—':fmt(p.delta,3)}`} sub={`保证金 ${cnMoney(r.margin)}`}/>
           <Stat label="到期年化" value={fmtA(expiryYield.annual)} sub={`到期 ${cnMoney(expiryYield.pnl,'CNY',true)}`} color={expiryYield.pnl>=0?ACC.amber:ACC.loss}/>
           <Stat label="浮动盈亏" value={cnMoney(r.pnl,'CNY',true)} sub={`手续费 ${cnMoney(r.fees)}`} color={r.pnl>=0?ACC.profit:ACC.loss}/>
