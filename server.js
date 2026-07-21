@@ -12,7 +12,7 @@ process.env.NODE_ENV ||= 'development';
 process.env.ACCESS_PASSWORD ||= 'local';
 process.env.LOCAL_DATA_FILE ||= path.join(ROOT, '.local-data', 'wheel_data.json');
 
-const CSP = "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https: http:; img-src 'self' data: https:;";
+const CSP = "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://hq.sinajs.cn; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https: http:; img-src 'self' data: https:;";
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
