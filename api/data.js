@@ -521,13 +521,15 @@ async function fetchSzseReportPages(params, firstReport) {
   return [firstReport, ...remaining].flatMap((report) => report.data || []);
 }
 
-async function fetchSzseOfficialCloseChain(config, month, months) {
+async function fetchSzseOfficialCloseChain(config, month, months, realtime = false) {
   const monthLabel = `${Number(month.slice(-2))}月`;
   const optionQueries = [`中证500ETF购${monthLabel}`, `中证500ETF沽${monthLabel}`];
   let realtimeUnderlying = null;
-  try {
-    realtimeUnderlying = await fetchLiveEtfQuote(config);
-  } catch {}
+  if (realtime) {
+    try {
+      realtimeUnderlying = await fetchLiveEtfQuote(config);
+    } catch {}
+  }
   let latestError;
 
   for (let offset = 0; offset >= -7; offset -= 1) {
@@ -707,7 +709,7 @@ async function fetchSseChain(config, requestedMonth) {
   return fetchSseOfficialChain(config, month, months);
 }
 
-async function fetchSzseChain(config, requestedMonth) {
+async function fetchSzseChain(config, requestedMonth, realtime = false) {
   // 深交所链路不再调用上交所 32042 端口获取月份。ETF 期权月份规则可在
   // 本地生成；用户明确选择的 YYYYMM 也直接交给深交所官方接口验证。
   const months = fallbackOptionMonths();
@@ -715,7 +717,8 @@ async function fetchSzseChain(config, requestedMonth) {
   const month = requested || months[0];
   if (requested && !months.includes(requested)) months.unshift(requested);
   if (!month) throw new Error('暂未查询到深交所可用合约月份');
-  const official = await fetchSzseOfficialCloseChain(config, month, months);
+  const official = await fetchSzseOfficialCloseChain(config, month, months, realtime);
+  if (!realtime) return official;
   try {
     const contracts = await fetchSinaOptionQuotes(official.contracts, config);
     const realtimeCount = contracts.filter((contract) => contract.priceSource === 'sina-realtime').length;
@@ -740,10 +743,10 @@ async function fetchSzseChain(config, requestedMonth) {
   }
 }
 
-async function fetchCnOptionChain(symbol, month, force = false) {
+async function fetchCnOptionChain(symbol, month, force = false, realtime = false) {
   const config = CN_OPTION_UNDERLYINGS[symbol];
   if (!config) throw new Error('仅支持 510500、159922');
-  const cacheKey = `${symbol}-${month || 'near'}`;
+  const cacheKey = `${symbol}-${month || 'near'}-${realtime ? 'realtime' : 'official'}`;
   const cached = cnOptionCache.get(cacheKey);
   if (!force && cached && Date.now() - cached.time < 60000) return { ...cached.data, cached: true };
   try {
@@ -751,7 +754,7 @@ async function fetchCnOptionChain(symbol, month, force = false) {
     // 否则由前端独立请求 /api/cn-options?indexOnly=1。
     const data = config.exchange === 'SSE'
       ? await fetchSseChain(config, month)
-      : await fetchSzseChain(config, month);
+      : await fetchSzseChain(config, month, realtime);
     const index = csi500IndexCache.data;
     const enriched = index && data.underlyingPrice > 0 ? {
       ...data,
@@ -1043,11 +1046,12 @@ module.exports = async function handler(req, res) {
         return res.status(502).json({ error: '中证500指数行情拉取失败', detail: e.message });
       }
     }
-    const symbol = url.searchParams.get('symbol') || '510500';
-    const month = url.searchParams.get('month') || '';
+      const symbol = url.searchParams.get('symbol') || '510500';
+      const month = url.searchParams.get('month') || '';
     try {
       const force = url.searchParams.get('refresh') === '1';
-      const data = await fetchCnOptionChain(symbol, month, force);
+      const realtime = url.searchParams.get('realtime') === '1';
+      const data = await fetchCnOptionChain(symbol, month, force, realtime);
       // 深交所期权链本身仍是官方收盘口径，但标的 ETF 使用腾讯盘中价，
       // 因此不能再让 CDN 长时间复用旧的标的价格。刷新请求同时绕过进程缓存。
       res.setHeader('Cache-Control', data.exchange === 'SZSE'

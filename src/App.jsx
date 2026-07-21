@@ -80,10 +80,11 @@ async function futuFetch(path, opts={}){
 
 async function cnOptionFetch(symbol,month='',opts={}){
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
-  const {refresh=false,...fetchOpts}=opts;
+  const {refresh=false,realtime=false,...fetchOpts}=opts;
   const params=new URLSearchParams({symbol});
   if(month)params.set('month',month);
   if(refresh)params.set('refresh','1');
+  if(realtime)params.set('realtime','1');
   return fetch(`${proxyBase}/api/cn-options?${params.toString()}`,{
     ...fetchOpts,
     signal:fetchOpts.signal||AbortSignal.timeout(20000),
@@ -1305,7 +1306,7 @@ function CnOptionsPanel({embedded=false}){
   const indexQuoteTime=indexQuote?.quoteTime??data?.indexQuoteTime??null;
   const dataNotice=data?.warning||(!data?.stale&&data?.notice)||'';
   const isOfficialCloseNotice=data?.staleReason==='official-close-lag'||(!data?.warning&&data?.source==='szse-official-close'&&data?.notice);
-  const noticeKind=isOfficialCloseNotice||data?.source==='sina-realtime'?'info':'warning';
+  const noticeKind=isOfficialCloseNotice?'info':'warning';
   const atmStrike=data?.underlyingPrice&&data?.contracts?.length
     ? data.contracts.reduce((best,item)=>Math.abs(item.strike-data.underlyingPrice)<Math.abs(best-data.underlyingPrice)?item.strike:best,data.contracts[0].strike)
     : null;
@@ -1351,7 +1352,7 @@ function CnOptionsPanel({embedded=false}){
             <div><span>合约月份</span><strong>{cnMonthLabel(data.selectedMonth)}</strong><small>{data.contracts?.[0]?.expiry||'—'} 到期</small></div>
             <div><span>合约数量</span><strong>{data.contracts?.length||0}</strong><small>Call + Put</small></div>
             <div><span>当前筛选成交量</span><strong>{fmt(totalVolume,0)}</strong><small>{contracts.length} 条结果</small></div>
-            <div className="cnopt-source"><span>行情 / Greeks</span><strong>{data.source==='sina-realtime'?'新浪盘中期权':'期权链·交易所官方'}</strong><small>{data.exchange==='SZSE'?(data.source==='sina-realtime'?(data.underlyingSource==='sina-etf-realtime'?'ETF新浪实时 · 期权新浪实时 · BS 反推': 'ETF腾讯实时 · 期权新浪实时 · BS 反推'):(data.underlyingSource==='tencent-etf-realtime'?'ETF腾讯实时 · 期权官方收盘 · BS 反推':data.underlyingSource==='sina-etf-realtime'?'ETF新浪实时 · 期权官方收盘 · BS 反推':'官方收盘价 · BS 反推')):'官方实时价 · BS 反推'}</small></div>
+            <div className="cnopt-source"><span>行情 / Greeks</span><strong>期权链·交易所官方</strong><small>{data.exchange==='SZSE'?'官方收盘价 · BS 反推':'官方实时价 · BS 反推'}</small></div>
           </div>
 
           <div className="cnopt-toolbar">
@@ -2729,8 +2730,8 @@ const cnOptionMark=(contract)=>{
   const settlement=num(contract?.settlement,NaN);
   return Number.isFinite(settlement)&&settlement>=0?settlement:null;
 };
-async function fetchCnOptionSnapshot(symbol,month,force=false){
-  const response=await cnOptionFetch(symbol,month,{refresh:force});
+async function fetchCnOptionSnapshot(symbol,month,force=false,realtime=false){
+  const response=await cnOptionFetch(symbol,month,{refresh:force,realtime});
   const raw=await response.text();
   let payload;
   try{payload=JSON.parse(raw);}catch{throw new Error('期权行情返回格式异常');}
@@ -3015,7 +3016,7 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
     const [freshIndex,results]=await Promise.all([
       loadCsi500Index(true),
       Promise.all(groups.map(async group=>{
-        try{return{...group,payload:await fetchCnOptionSnapshot(group.symbol,group.month,true)};}
+        try{return{...group,payload:await fetchCnOptionSnapshot(group.symbol,group.month,true,true)};}
         catch(error){return{...group,error};}
       })),
     ]);
