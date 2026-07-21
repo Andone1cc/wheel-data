@@ -302,19 +302,19 @@ function pickLatestQuote(quotes) {
 
 async function fetchSinaQuoteText(symbols, timeoutMs = 3000) {
   const list = symbols.join(',');
-  let lastError;
-  for (const url of [
+  const urls = [
     `https://hq.sinajs.cn/?rn=${Date.now()}&list=${list}`,
     `https://hq.sinajs.cn/rn=${Date.now()}&list=${list}`,
     `https://hq.sinajs.cn/list=${list}`,
-  ]) {
-    try {
-      return await fetchText(url, { headers: SINA_HEADERS, timeoutMs, attempts: 1 });
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError || new Error('新浪行情接口暂时不可用');
+  ];
+  const results = await Promise.allSettled(urls.map((url) => fetchText(url, {
+    headers: SINA_HEADERS,
+    timeoutMs: Math.min(timeoutMs, 1200),
+    attempts: 1,
+  })));
+  const success = results.find((result) => result.status === 'fulfilled' && result.value);
+  if (success) return success.value;
+  throw results.find((result) => result.status === 'rejected')?.reason || new Error('新浪行情接口暂时不可用');
 }
 
 async function fetchTencentCsi500Index() {
