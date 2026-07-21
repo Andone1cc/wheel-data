@@ -97,6 +97,7 @@ async function cnIndexFetch(opts={}){
 
 const CSI500_LOCAL_CACHE='whl-csi500-index-v1';
 const HKD_CNY_LOCAL_CACHE='whl-hkd-cny-v1';
+const HKD_CNY_MANUAL_CACHE='whl-hkd-cny-manual-v1';
 const DEFAULT_HKD_CNY_RATE=.92;
 function readCsi500Cache(maxAge=24*60*60*1000){
   try{
@@ -134,8 +135,23 @@ function saveHkdCnyCache(payload){
   if(!(payload?.rate>0))return;
   try{localStorage.setItem(HKD_CNY_LOCAL_CACHE,JSON.stringify({savedAt:Date.now(),payload}));}catch{}
 }
+function readHkdCnyManual(){
+  try{
+    const saved=JSON.parse(localStorage.getItem(HKD_CNY_MANUAL_CACHE)||'null');
+    return saved?.rate>0?{...saved,source:'manual',manual:true}:null;
+  }catch{return null;}
+}
+function saveHkdCnyManual(payload){
+  if(!(payload?.rate>0))return;
+  try{localStorage.setItem(HKD_CNY_MANUAL_CACHE,JSON.stringify({rate:payload.rate,updatedAt:payload.updatedAt||Date.now()}));}catch{}
+}
+function clearHkdCnyManual(){
+  try{localStorage.removeItem(HKD_CNY_MANUAL_CACHE);}catch{}
+}
 let hkdCnyPending=null;
 async function loadHkdCnyRate(force=false){
+  const manual=readHkdCnyManual();
+  if(manual&&!force)return manual;
   const fresh=readHkdCnyCache(6*60*60*1000);
   if(!force&&fresh)return fresh;
   if(hkdCnyPending)return hkdCnyPending;
@@ -3006,6 +3022,22 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
     else{onStocks(stocks.map(item=>item.id===stock.id?{...item,name:item.name||quote.name||'',currentPrice:quote.price??item.currentPrice,quoteSymbol:quote.quoteSymbol,priceUpdatedAt:quote.price==null?item.priceUpdatedAt:Date.now()}:item));showToast(`${stock.ticker} 行情与名称已更新`);}
     setRefreshingStock(null);
   };
+  const editHkdCnyRate=()=>{
+    const input=window.prompt('输入 HKD/CNY 汇率；留空确认可恢复自动获取。',fmt(hkdCnyRate,4));
+    if(input==null)return;
+    const value=input.trim();
+    if(!value){
+      clearHkdCnyManual();
+      loadHkdCnyRate(true).then(payload=>{if(payload?.rate>0)setHkdCnyQuote(payload);});
+      showToast('已恢复自动获取 HKD/CNY');
+      return;
+    }
+    const rate=num(value,NaN);
+    if(!(rate>0)){showToast('HKD/CNY 汇率格式不正确',ACC.loss);return;}
+    const next={rate,source:'manual',manual:true,updatedAt:Date.now()};
+    saveHkdCnyManual(next);saveHkdCnyCache(next);setHkdCnyQuote(next);
+    showToast(`HKD/CNY 已修正为 ${fmt(rate,4)}`,ACC.teal);
+  };
   const closePosition=(p,data)=>{const record={...p,...data,closedAt:Date.now()};onAccountChange(positions.filter(item=>item.id!==p.id),[record,...closed],stocks);showToast(`${p.underlying} 已平仓 · ${cnMoney(calcCnClosed(record).pnl,'CNY',true)}`);};
   return(
     <section className="cn-account">
@@ -3037,7 +3069,7 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
 
       {view==='stocks'&&<>
         {showForm&&<CnStockForm onAdd={s=>{onStocks([...stocks,s]);setShowForm(false);showToast(`已添加 ${s.market==='HK'?'港股通':'A股'} ${s.ticker}${s.currentPrice==null?' · 行情稍后自动重试':` · 当前价 ${cnMoney(cnStockCny(s,s.currentPrice,hkdCnyRate))}`}`);}} onCancel={()=>setShowForm(false)}/>}
-        {!!stocks.length&&<div className="cn-stock-summary"><div><span>A 股 · 人民币</span><strong>{cnMoney(cnTotal.value)}</strong><small>成本 {cnMoney(cnTotal.cost)} · {cnTotal.priced}/{cnStocks.length} 已录价</small></div><div className="hk"><span>港股通 · 折人民币</span><strong>{cnMoney(hkTotal.value)}</strong><small>成本 {cnMoney(hkTotal.cost)} · HKD/CNY {fmt(hkdCnyRate,4)} · {hkTotal.priced}/{hkStocks.length} 已录价</small></div></div>}
+        {!!stocks.length&&<div className="cn-stock-summary"><div><span>A 股 · 人民币</span><strong>{cnMoney(cnTotal.value)}</strong><small>成本 {cnMoney(cnTotal.cost)} · {cnTotal.priced}/{cnStocks.length} 已录价</small></div><div className="hk"><span>港股通 · 折人民币</span><strong>{cnMoney(hkTotal.value)}</strong><small>成本 {cnMoney(hkTotal.cost)} · <button className="cn-fx-button" onClick={editHkdCnyRate} title="点击手动修正 HKD/CNY">HKD/CNY {fmt(hkdCnyRate,4)}{hkdCnyQuote?.manual?' 手动':''}</button> · {hkTotal.priced}/{hkStocks.length} 已录价</small></div></div>}
         {!!stocks.length&&<div className="cn-stock-toolbar">
           <div className="cnopt-segmented">
             {[['ALL','全部'],['CN','A 股'],['HK','港股通']].map(([value,label])=><button key={value} className={stockMarketFilter===value?'active':''} onClick={()=>setStockMarketFilter(value)}>{label}</button>)}

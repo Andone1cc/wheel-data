@@ -132,6 +132,20 @@ async function fetchCboeStockQuote(ticker) {
   return { name: quote.company_name || quote.symbol_name || null, price };
 }
 
+async function fetchExchangeRateQuote(ticker) {
+  const match = /^([A-Z]{3})([A-Z]{3})=X$/.exec(String(ticker || '').toUpperCase());
+  if (!match) return null;
+  const [, base, target] = match;
+  const data = await fetchJson(`https://open.er-api.com/v6/latest/${base}`, {
+    headers: { 'User-Agent': BROWSER_USER_AGENT },
+    timeoutMs: 4500,
+    attempts: 1,
+  });
+  const price = finiteNumber(data?.rates?.[target]);
+  if (!(price > 0)) return null;
+  return { name: `${base}/${target}`, price, source: 'ExchangeRate' };
+}
+
 function normalCdf(x) {
   const sign = x < 0 ? -1 : 1;
   const z = Math.abs(x) / Math.sqrt(2);
@@ -708,16 +722,20 @@ module.exports = async function handler(req, res) {
       const cboeQuoteRequest = !isCnOrHk && !upperTicker.includes('=')
         ? fetchCboeStockQuote(upperTicker).catch(() => null)
         : Promise.resolve(null);
-      const [yahooResult, cnQuoteResult, cboeQuoteResult] = await Promise.allSettled([yahooRequest, cnQuoteRequest, cboeQuoteRequest]);
+      const fxQuoteRequest = upperTicker.includes('=')
+        ? fetchExchangeRateQuote(upperTicker).catch(() => null)
+        : Promise.resolve(null);
+      const [yahooResult, cnQuoteResult, cboeQuoteResult, fxQuoteResult] = await Promise.allSettled([yahooRequest, cnQuoteRequest, cboeQuoteRequest, fxQuoteRequest]);
       const data = yahooResult.status === 'fulfilled' ? yahooResult.value : null;
       const cnQuote = cnQuoteResult.status === 'fulfilled' ? cnQuoteResult.value : null;
       const cboeQuote = cboeQuoteResult.status === 'fulfilled' ? cboeQuoteResult.value : null;
+      const fxQuote = fxQuoteResult.status === 'fulfilled' ? fxQuoteResult.value : null;
       const meta = data?.chart?.result?.[0]?.meta || {};
-      const price = meta.regularMarketPrice ?? cnQuote?.price ?? cboeQuote?.price ?? null;
-      const name = cnQuote?.name || meta.shortName || meta.longName || cboeQuote?.name || null;
+      const price = meta.regularMarketPrice ?? cnQuote?.price ?? cboeQuote?.price ?? fxQuote?.price ?? null;
+      const name = cnQuote?.name || meta.shortName || meta.longName || cboeQuote?.name || fxQuote?.name || null;
       if (price == null && !name) throw new Error('股票行情源暂时不可用');
       res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
-      return res.status(200).json({ ticker, price, name, source: meta.regularMarketPrice != null ? 'Yahoo' : cnQuote?.price != null ? 'Tencent' : 'CBOE' });
+      return res.status(200).json({ ticker, price, name, source: meta.regularMarketPrice != null ? 'Yahoo' : cnQuote?.price != null ? 'Tencent' : cboeQuote?.price != null ? 'CBOE' : fxQuote?.source || 'ExchangeRate' });
     } catch (e) {
       return res.status(502).json({ ticker, price: null, name: null, error: e.message });
     }
