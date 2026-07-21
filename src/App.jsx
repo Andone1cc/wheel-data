@@ -2735,13 +2735,21 @@ function calcCnOption(p,markPrice=p.currentPrice){
   const margin=estimateCnOptionMargin(p,nominal,openCash);
   const daysLeft=Math.max(0,daysBetween(today(),p.expDate||today()));
   const daysHeld=Math.max(1,daysBetween(p.openDate||today(),today()));
+  const daysTotal=Math.max(1,daysBetween(p.openDate||today(),p.expDate||today()));
   let buffer=null;
   if(num(p.underlyingPrice)>0&&num(p.strike)>0){
     buffer=p.type==='P'
       ?((num(p.underlyingPrice)-num(p.strike))/num(p.underlyingPrice))*100
       :((num(p.strike)-num(p.underlyingPrice))/num(p.underlyingPrice))*100;
   }
-  return{qty,multiplier,gross,fees,pnl,openCash,nominal,margin,daysLeft,daysHeld,buffer};
+  return{qty,multiplier,gross,fees,pnl,openCash,nominal,margin,daysLeft,daysHeld,daysTotal,buffer};
+}
+
+function calcCnExpiryYield(p,r=calcCnOption(p)){
+  const pnl=(p.side==='SELL'?r.openCash:-r.openCash)-r.fees;
+  const capital=r.margin||r.openCash||r.nominal;
+  const annual=calcAnnual(pnl,capital,r.daysTotal);
+  return{pnl,capital,days:r.daysTotal,annual};
 }
 
 function scoreCnOption(p,r,totalMargin=0){
@@ -2843,6 +2851,7 @@ function CnOptionRow({p,totalMargin,currentIndex,onUpdate,onClose,onDelete}){
   const [edit,setEdit]=useState({currentPrice:p.currentPrice??'',underlyingPrice:p.underlyingPrice??'',indexPrice:currentIndex??p.indexPrice??'',delta:p.delta??'',iv:p.iv==null?'':p.iv*100,marginUsed:p.marginUsed??''});
   const [close,setClose]=useState({closePrice:p.currentPrice??'',closeDate:today(),closeFees:String(Math.max(1,num(p.qty,1))*CN_OPTION_FEE_PER_CONTRACT)});
   const r=calcCnOption(p),health=scoreCnOption(p,r,totalMargin);
+  const expiryYield=calcCnExpiryYield(p,r);
   const indexPrice=currentIndex??p.indexPrice;
   const indexStrike=cnIndexEquivalent(p.strike,p.underlyingPrice,indexPrice);
   const setE=(key,value)=>setEdit(prev=>({...prev,[key]:value}));
@@ -2857,6 +2866,7 @@ function CnOptionRow({p,totalMargin,currentIndex,onUpdate,onClose,onDelete}){
           <Stat label="开仓 / 现价" value={`${fmt(p.openPrice,4)} / ${fmt(p.currentPrice,4)}`} sub={p.contractCode||'手动录入'}/>
           <Stat label="ETF / 指数等效" value={p.underlyingPrice==null?'待录入':`¥${fmt(p.underlyingPrice,3)} → ${indexStrike==null?'—':fmt(indexStrike,0)}点`} sub={`${indexPrice?`中证500 ${fmt(indexPrice,0)} · `:''}${r.buffer==null?'未计算缓冲':`缓冲 ${fmt(r.buffer,1)}%`}`}/>
           <Stat label="IV / Delta" value={`${p.iv==null?'—':fmt(p.iv*100,1)+'%'} / ${p.delta==null?'—':fmt(p.delta,3)}`} sub={`保证金 ${cnMoney(r.margin)}`}/>
+          <Stat label="到期年化" value={fmtA(expiryYield.annual)} sub={`到期 ${cnMoney(expiryYield.pnl,'CNY',true)}`} color={expiryYield.pnl>=0?ACC.amber:ACC.loss}/>
           <Stat label="浮动盈亏" value={cnMoney(r.pnl,'CNY',true)} sub={`手续费 ${cnMoney(r.fees)}`} color={r.pnl>=0?ACC.profit:ACC.loss}/>
         </div>
         <div className="cn-position-side"><span className="section-label">健康分</span><strong className="health-pill" style={{'--health-color':health.color}}>{health.score}</strong><small style={{color:health.color}}>{health.label}</small></div>
@@ -2944,6 +2954,11 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
   const hkdCnyRate=hkdCnyQuote?.rate||DEFAULT_HKD_CNY_RATE;
   const totalMargin=positions.reduce((sum,p)=>sum+calcCnOption(p).margin,0);
   const optionPnl=positions.reduce((sum,p)=>sum+calcCnOption(p).pnl,0);
+  const expiryYields=positions.map(p=>calcCnExpiryYield(p,calcCnOption(p)));
+  const expiryCapital=expiryYields.reduce((sum,item)=>sum+item.capital,0);
+  const expiryPnl=expiryYields.reduce((sum,item)=>sum+item.pnl,0);
+  const expiryDays=expiryCapital>0?expiryYields.reduce((sum,item)=>sum+item.days*item.capital,0)/expiryCapital:0;
+  const expiryAnnual=expiryCapital>0?calcAnnual(expiryPnl,expiryCapital,expiryDays):null;
   const closedPnl=closed.reduce((sum,p)=>sum+calcCnClosed(p).pnl,0);
   const scores=positions.map(p=>scoreCnOption(p,calcCnOption(p),totalMargin).score);
   const avgScore=scores.length?Math.round(scores.reduce((a,b)=>a+b,0)/scores.length):null;
@@ -3049,6 +3064,7 @@ function CnAccountPanel({positions,closed,stocks,onPositions,onClosed,onStocks,o
         <div><span>活跃期权</span><strong>{positions.length}</strong><small>浮盈 {cnMoney(optionPnl,'CNY',true)}</small></div>
         <div><span>期权保证金</span><strong>{cnMoney(totalMargin)}</strong><small>未填则按仓位估算</small></div>
         <div><span>股票持仓</span><strong>{stocks.length}</strong><small>A 股 {cnStocks.length} · 港股通 {hkStocks.length}</small></div>
+        <div><span>到期年化</span><strong className={(expiryAnnual??0)>=0?'pos':'neg'}>{fmtA(expiryAnnual)}</strong><small>{positions.length?`预计 ${cnMoney(expiryPnl,'CNY',true)} · ${fmt(expiryDays,0)}天`:'暂无仓位'}</small></div>
         <div><span>期权已实现</span><strong className={closedPnl>=0?'pos':'neg'}>{cnMoney(closedPnl,'CNY',true)}</strong><small>{closed.length} 笔记录</small></div>
         <div><span>期权健康分</span><strong style={{color:avgScore==null?V('dim'):scoreColor(avgScore)}}>{avgScore??'—'}</strong><small>{avgScore==null?'暂无仓位':scoreLabel(avgScore)}</small></div>
       </div>
