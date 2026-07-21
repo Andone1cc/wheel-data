@@ -1210,11 +1210,11 @@ function CnOptionsPanel({embedded=false}){
     }catch(e){
       let saved=null;
       try{saved=JSON.parse(localStorage.getItem(storageKey)||'null');}catch{}
-      if(saved?.payload&&Date.now()-(saved.savedAt||0)<12*60*60*1000){
+      if(saved?.payload&&Date.now()-(saved.savedAt||0)<7*24*60*60*1000){
         const fallback={...saved.payload,clientStale:true,warning:'行情源暂时不稳定，正在展示本设备最近一次成功快照。'};
         cacheRef.current.set(key,fallback);setData(fallback);setError('');setLastLoaded(new Date(saved.savedAt));
       }else{
-        const message=/fetch failed|network|timeout|aborted/i.test(e.message||'')
+        const message=/fetch failed|network|timeout|timed out|aborted/i.test(e.message||'')
           ?'行情源连接超时，系统已自动重试，请稍后再刷新'
           :(e.message||'行情拉取失败');
         setError(message);

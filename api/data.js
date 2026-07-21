@@ -441,7 +441,7 @@ async function getSseMonths() {
   try {
     const data = await fetchJson(sseHqUrl('v1/sho/list/exchange/stockexpire', {
       select: 'stockid,expiremonth',
-    }), { headers: SSE_HEADERS, timeoutMs: 10000 });
+    }), { headers: SSE_HEADERS, timeoutMs: 3500, attempts: 1 });
     const months = (data?.list || [])
       .filter((row) => String(row?.[0]) === '510500')
       .map((row) => String(row[1]))
@@ -463,10 +463,10 @@ async function fetchSseOfficialChain(config, month, months) {
     fetchJson(sseHqUrl(`v1/sho/list/tstyle/${config.symbol}_${month.slice(-2)}`, {
       select: 'contractid,last,chg_rate,presetpx,exepx',
       order: 'contractid,ase',
-    }), { headers: SSE_HEADERS, timeoutMs: 10000 }),
+    }), { headers: SSE_HEADERS, timeoutMs: 5000, attempts: 1 }),
     fetchJson(sseHqUrl(`v1/sh1/list/self/${config.symbol}`, {
       select: 'code,cpxxextendname,last,change,chg_rate,amp_rate,volume,amount,prev_close',
-    }), { headers: SSE_HEADERS, timeoutMs: 10000 }),
+    }), { headers: SSE_HEADERS, timeoutMs: 5000, attempts: 1 }),
   ]);
   const underlyingRow = underlying?.list?.[0];
   const underlyingPrice = marketNumber(underlyingRow?.[2]);
