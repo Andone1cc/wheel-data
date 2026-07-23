@@ -288,6 +288,39 @@ async function fetchCnStockQuote(market,ticker){
   }catch{return{quoteSymbol,price:null,name:null};}
 }
 
+const CN_STOCK_QUOTE_CACHE_PREFIX='whl-cn-stock-quote-v1-';
+const CN_STOCK_QUOTE_CACHE_TTL=60*1000;
+const cnStockQuoteMemoryCache=new Map();
+function readCnStockQuoteCache(key){
+  const memory=cnStockQuoteMemoryCache.get(key);
+  if(memory&&Date.now()-memory.savedAt<CN_STOCK_QUOTE_CACHE_TTL)return memory.payload;
+  try{
+    const saved=JSON.parse(localStorage.getItem(`${CN_STOCK_QUOTE_CACHE_PREFIX}${key}`)||'null');
+    if(saved?.payload&&Date.now()-saved.savedAt<CN_STOCK_QUOTE_CACHE_TTL){
+      cnStockQuoteMemoryCache.set(key,saved);
+      return saved.payload;
+    }
+  }catch{}
+  return null;
+}
+function saveCnStockQuoteCache(key,payload){
+  if(!payload||!(payload.price!=null||payload.name))return;
+  const saved={savedAt:Date.now(),payload};
+  cnStockQuoteMemoryCache.set(key,saved);
+  try{localStorage.setItem(`${CN_STOCK_QUOTE_CACHE_PREFIX}${key}`,JSON.stringify(saved));}catch{}
+}
+async function fetchCnStockQuoteCached(market,ticker,force=false){
+  const key=cnStockQuoteSymbol(market,ticker);
+  if(!key)return fetchCnStockQuote(market,ticker);
+  if(!force){
+    const cached=readCnStockQuoteCache(key);
+    if(cached)return cached;
+  }
+  const quote=await fetchCnStockQuote(market,ticker);
+  saveCnStockQuoteCache(key,quote);
+  return quote;
+}
+
 async function fetchStockCloseOnDate(ticker,date){
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
   try{
@@ -2927,7 +2960,7 @@ function CnStockForm({onAdd,onCancel}){
   const submit=async()=>{
     if(!valid||saving)return;
     setSaving(true);
-    const quote=await fetchCnStockQuote(f.market,f.ticker);
+    const quote=await fetchCnStockQuoteCached(f.market,f.ticker);
     onAdd({...f,name:f.name.trim()||quote.name||'',id:Date.now(),shares:num(f.shares),costPerShare:num(f.costPerShare),
       currentPrice:quote.price,currency:f.market==='HK'?'HKD':'CNY',source:'auto-quote',
       quoteSymbol:quote.quoteSymbol,priceUpdatedAt:quote.price==null?null:Date.now()});
@@ -2949,7 +2982,7 @@ function CnStockForm({onAdd,onCancel}){
   );
 }
 
-function CnStockRow({stock,hkdCnyRate,onRefresh,onClose,onDelete,refreshing}){
+function CnStockRow({stock,hkdCnyRate,onClose,onDelete}){
   const [mode,setMode]=useState('');
   const [close,setClose]=useState({closePrice:stock.currentPrice==null?'':String(stock.currentPrice),closeShares:String(stock.shares),closeDate:today()});
   const currency=stock.currency||((stock.market==='HK')?'HKD':'CNY');
@@ -2972,7 +3005,7 @@ function CnStockRow({stock,hkdCnyRate,onRefresh,onClose,onDelete,refreshing}){
     <article className="cn-stock-card">
       <div className="cn-stock-id"><b>{stock.ticker}</b><strong>{stock.name||'未命名证券'}</strong><span className={stock.market==='HK'?'hk':''}>{exchange}</span></div>
       <div className="cn-stock-metrics"><Stat label="持仓" value={`${fmt(stock.shares,0)} 股`} sub={stock.acquireDate}/><Stat label="成本价" value={cnMoney(stock.market==='HK'?stock.costPerShare:costPerShareCny,currency)} sub={costSub}/><Stat label="当前价" value={stock.currentPrice==null?'同步中':cnMoney(stock.market==='HK'?stock.currentPrice:currentPriceCny,currency)} sub={valueSub}/><Stat label="浮动盈亏" value={pnl==null?'—':cnMoney(pnlCny,'CNY',true)} sub={pnl==null?'行情同步后计算':fmtA(cost?100*pnl/cost:null)} color={pnl==null?V('dim'):pnl>=0?ACC.profit:ACC.loss}/></div>
-      <div className="cn-row-actions"><button onClick={()=>onRefresh(stock)} disabled={refreshing}>{refreshing?'同步中…':'刷新行情'}</button><button className="profit" onClick={()=>setMode(mode==='close'?'':'close')}>{mode==='close'?'取消平仓':'平仓'}</button><button className="danger" onClick={()=>{if(window.confirm(`确认删除 ${stock.ticker}？`))onDelete(stock.id);}}>删除</button></div>
+      <div className="cn-row-actions"><button className="profit" onClick={()=>setMode(mode==='close'?'':'close')}>{mode==='close'?'取消平仓':'平仓'}</button><button className="danger" onClick={()=>{if(window.confirm(`确认删除 ${stock.ticker}？`))onDelete(stock.id);}}>删除</button></div>
       {mode==='close'&&<div className="cn-inline-panel close"><div><strong>确认股票平仓</strong><p>按原币种记录卖出价，部分平仓会保留剩余股数。</p></div><div className="cn-inline-grid compact"><NumField label="平仓价" prefix={stock.market==='HK'?'HK$':'¥'} value={close.closePrice} onChange={v=>setClose(prev=>({...prev,closePrice:v}))}/><NumField label="平仓股数" value={close.closeShares} onChange={v=>setClose(prev=>({...prev,closeShares:v}))} suffix="股"/><DateField label="平仓日期" value={close.closeDate} onChange={v=>setClose(prev=>({...prev,closeDate:v}))}/></div><div className="cn-form-actions"><button className="btn btn-primary" disabled={!closeValid} onClick={()=>{onClose(stock,{closeShares,closePrice:num(close.closePrice),closeDate:close.closeDate,closeFees:0});setMode('');}}>计入已平仓</button><button className="btn btn-ghost" onClick={()=>setMode('')}>取消</button></div></div>}
     </article>
   );
@@ -2982,7 +3015,7 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
   const [view,setView]=useState('options');
   const [showForm,setShowForm]=useState(false);
   const [indexQuote,setIndexQuote]=useState(()=>readCsi500Cache());
-  const [refreshingStock,setRefreshingStock]=useState(null);
+  const [refreshingStocks,setRefreshingStocks]=useState(false);
   const [refreshingOptions,setRefreshingOptions]=useState(false);
   const initialOptionSync=React.useRef(false);
   const [stockMarketFilter,setStockMarketFilter]=useState('ALL');
@@ -3025,19 +3058,6 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
   });
   const totals=(items)=>items.reduce((acc,s)=>{const cost=num(s.shares)*cnStockCny(s,s.costPerShare,hkdCnyRate);const value=s.currentPrice==null?null:num(s.shares)*cnStockCny(s,s.currentPrice,hkdCnyRate);return{cost:acc.cost+cost,value:acc.value+(value??0),priced:acc.priced+(value==null?0:1)};},{cost:0,value:0,priced:0});
   const cnTotal=totals(cnStocks),hkTotal=totals(hkStocks);
-  const stockQuoteKey=stocks.map(stock=>`${stock.id}:${stock.market}:${stock.ticker}`).join('|');
-  useEffect(()=>{
-    if(!stockQuoteKey)return;
-    let alive=true;
-    Promise.all(stocks.map(async stock=>({id:stock.id,...await fetchCnStockQuote(stock.market,stock.ticker)}))).then(quotes=>{
-      if(!alive)return;
-      const byId=new Map(quotes.filter(item=>item.price!=null||item.name).map(item=>[item.id,item]));
-      let changed=false;
-      const next=stocks.map(stock=>{const quote=byId.get(stock.id);if(!quote)return stock;const currentPrice=quote.price??stock.currentPrice;const name=stock.name||quote.name||'';if(currentPrice===stock.currentPrice&&name===stock.name)return stock;changed=true;return{...stock,name,currentPrice,quoteSymbol:quote.quoteSymbol,priceUpdatedAt:quote.price==null?stock.priceUpdatedAt:Date.now()};});
-      if(changed)onStocks(next);
-    });
-    return()=>{alive=false;};
-  },[stockQuoteKey]);
   const addLabel=view==='options'?'录入期权':view==='stocks'?'录入股票':'';
   const addPosition=(item)=>{onPositions([...positions,item]);setShowForm(false);showToast(`已添加 ${item.underlying} ${item.type==='P'?'认沽':'认购'}`);};
   const refreshOptionPositions=async()=>{
@@ -3089,13 +3109,32 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
     initialOptionSync.current=true;
     refreshOptionPositions();
   },[positions.length]);
-  const refreshStock=async(stock)=>{
-    setRefreshingStock(stock.id);
-    const quote=await fetchCnStockQuote(stock.market,stock.ticker);
-    if(quote.price==null&&!quote.name)showToast(`${stock.ticker} 行情暂时没有返回`,ACC.loss);
-    else{onStocks(stocks.map(item=>item.id===stock.id?{...item,name:item.name||quote.name||'',currentPrice:quote.price??item.currentPrice,quoteSymbol:quote.quoteSymbol,priceUpdatedAt:quote.price==null?item.priceUpdatedAt:Date.now()}:item));showToast(`${stock.ticker} 行情与名称已更新`);}
-    setRefreshingStock(null);
+  const refreshStocks=async(force=false)=>{
+    if(!stocks.length||refreshingStocks)return;
+    setRefreshingStocks(true);
+    try{
+      const quotes=await Promise.all(stocks.map(async stock=>({id:stock.id,...await fetchCnStockQuoteCached(stock.market,stock.ticker,force)})));
+      const byId=new Map(quotes.filter(item=>item.price!=null||item.name).map(item=>[item.id,item]));
+      let changed=false;
+      const updatedAt=Date.now();
+      const next=stocks.map(stock=>{
+        const quote=byId.get(stock.id);
+        if(!quote)return stock;
+        const currentPrice=quote.price??stock.currentPrice;
+        const name=stock.name||quote.name||'';
+        if(currentPrice===stock.currentPrice&&name===stock.name&&quote.quoteSymbol===stock.quoteSymbol)return stock;
+        changed=true;
+        return{...stock,name,currentPrice,quoteSymbol:quote.quoteSymbol,priceUpdatedAt:quote.price==null?stock.priceUpdatedAt:updatedAt};
+      });
+      if(changed)onStocks(next);
+      if(!byId.size)showToast('股票行情暂时没有返回',ACC.loss);
+      else if(byId.size<stocks.length)showToast(`股票行情已更新，${stocks.length-byId.size} 笔未返回`,ACC.amber);
+    }finally{setRefreshingStocks(false);}
   };
+  useEffect(()=>{
+    if(view!=='stocks'||!stocks.length)return;
+    refreshStocks();
+  },[view,stocks.length]);
   const editHkdCnyRate=()=>{
     const input=window.prompt('输入 HKD/CNY 汇率；留空确认可恢复自动获取。',fmt(hkdCnyRate,4));
     if(input==null)return;
@@ -3147,6 +3186,7 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
         </div>
         <div className="cn-account-actions">
           {view==='options'&&<button className="btn cn-account-refresh" onClick={refreshOptionPositions} disabled={refreshingOptions||!positions.length}>{refreshingOptions?'同步行情中…':'↻ 获取最新数据'}</button>}
+          {view==='stocks'&&<button className="btn cn-account-refresh" onClick={()=>refreshStocks(true)} disabled={refreshingStocks||!stocks.length}>{refreshingStocks?'同步行情中…':'↻ 刷新行情'}</button>}
           {addLabel&&<button className="btn cn-account-add" onClick={()=>setShowForm(!showForm)}>{showForm?'✕ 取消':`＋ ${addLabel}`}</button>}
         </div>
       </div>
@@ -3167,7 +3207,7 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
           <span>{filteredStocks.length}/{stocks.length}</span>
         </div>}
         {!stocks.length&&!showForm?<div className="cn-account-empty"><span>沪港</span><strong>还没有股票持仓</strong><p>支持 A 股和港股通；成本价、当前价按原币种显示，汇总统一折成人民币。</p><button className="btn btn-primary" onClick={()=>setShowForm(true)}>＋ 录入第一笔</button></div>:(
-          filteredStocks.length?<div className="cn-stock-list">{filteredStocks.map(s=><CnStockRow key={s.id} stock={s} hkdCnyRate={hkdCnyRate} onRefresh={refreshStock} onClose={closeStockPosition} refreshing={refreshingStock===s.id} onDelete={id=>onStocks(stocks.filter(item=>item.id!==id))}/>)}</div>
+          filteredStocks.length?<div className="cn-stock-list">{filteredStocks.map(s=><CnStockRow key={s.id} stock={s} hkdCnyRate={hkdCnyRate} onClose={closeStockPosition} onDelete={id=>onStocks(stocks.filter(item=>item.id!==id))}/>)}</div>
           :<div className="cn-account-empty compact"><span>筛选</span><strong>没有匹配的股票持仓</strong><p>换一个市场、代码或名称试试。</p></div>
         )}
       </>}
