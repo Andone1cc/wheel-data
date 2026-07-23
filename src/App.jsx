@@ -1260,7 +1260,7 @@ function cnExpectedAnnual(contract){
   return netPremium>0?(netPremium/strike)*(365/dte)*100:null;
 }
 
-function CnOptionsPanel({embedded=false}){
+function CnOptionsPanel({embedded=false,refreshActionRef,onLoadingChange}){
   const [symbol,setSymbol]=useState('159922');
   const [data,setData]=useState(null);
   const [indexQuote,setIndexQuote]=useState(()=>readCsi500Cache());
@@ -1331,6 +1331,19 @@ function CnOptionsPanel({embedded=false}){
     finally{setLoading(false);}
   },[]);
 
+  useEffect(()=>{
+    onLoadingChange?.(loading);
+  },[loading,onLoadingChange]);
+
+  useEffect(()=>{
+    if(!refreshActionRef)return;
+    refreshActionRef.current=()=>{
+      load(symbol,data?.selectedMonth||'',true);
+      refreshIndex(true);
+    };
+    return()=>{refreshActionRef.current=null;};
+  },[refreshActionRef,load,refreshIndex,symbol,data?.selectedMonth]);
+
   useEffect(()=>{load(symbol,CN_OPTION_NEXT_MONTH);},[symbol,load]);
   useEffect(()=>{refreshIndex();},[refreshIndex]);
 
@@ -1363,10 +1376,6 @@ function CnOptionsPanel({embedded=false}){
           {loading?'同步中…':'↻ 刷新数据'}
         </button>
       </div>}
-      {embedded&&<div className="cnopt-embedded-actions"><button className="btn cnopt-refresh" onClick={()=>{load(symbol,data?.selectedMonth||'',true);refreshIndex(true);}} disabled={loading}>
-        {loading?'同步中…':'↻ 刷新数据'}
-      </button></div>}
-
       <div className="cnopt-targets">
         {CN_OPTION_TARGETS.map(item=>(
           <button key={item.symbol} className={`cnopt-target${symbol===item.symbol?' active':''}`}
@@ -3019,6 +3028,8 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
   const [indexQuote,setIndexQuote]=useState(()=>readCsi500Cache());
   const [refreshingStocks,setRefreshingStocks]=useState(false);
   const [refreshingOptions,setRefreshingOptions]=useState(false);
+  const [refreshingOptionData,setRefreshingOptionData]=useState(false);
+  const optionDataRefreshRef=React.useRef(null);
   const initialOptionSync=React.useRef(false);
   const [stockMarketFilter,setStockMarketFilter]=useState('ALL');
   const [stockQuery,setStockQuery]=useState('');
@@ -3189,6 +3200,7 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
         <div className="cn-account-actions">
           {view==='options'&&<button className="btn cn-account-refresh" onClick={refreshOptionPositions} disabled={refreshingOptions||!positions.length}>{refreshingOptions?'同步行情中…':'↻ 获取最新数据'}</button>}
           {view==='stocks'&&<button className="btn cn-account-refresh" onClick={()=>refreshStocks(true)} disabled={refreshingStocks||!stocks.length}>{refreshingStocks?'同步行情中…':'↻ 刷新行情'}</button>}
+          {view==='chain'&&<button className="btn cn-account-refresh" onClick={()=>optionDataRefreshRef.current?.()} disabled={refreshingOptionData}>{refreshingOptionData?'同步中…':'↻ 刷新数据'}</button>}
           {addLabel&&<button className="btn cn-account-add" onClick={()=>setShowForm(!showForm)}>{showForm?'✕ 取消':`＋ ${addLabel}`}</button>}
         </div>
       </div>
@@ -3231,7 +3243,7 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
         </>}
       </>}
 
-      {view==='chain'&&<div className="cn-account-chain"><CnOptionsPanel embedded/></div>}
+      {view==='chain'&&<div className="cn-account-chain"><CnOptionsPanel embedded refreshActionRef={optionDataRefreshRef} onLoadingChange={setRefreshingOptionData}/></div>}
     </section>
   );
 }
@@ -3728,17 +3740,25 @@ function App(){
                     ['closed','期权已平仓',closed.length],['sgov','SGOV 底仓',null],
                   ].map(([key,label,count])=><button key={key} className={tab===key?'active':''} onClick={()=>setTab(key)}><span>{label}</span>{count!=null&&<b>{count}</b>}</button>)}
                 </div>
-                {(tab==='active'||tab==='closed')&&(
+                {(tab==='active'||tab==='closed'||tab==='stocks')&&(
                   <div className="market-account-actions">
-                    <button onClick={refreshPrices} disabled={!!loading} className="btn"
+                    {tab!=='stocks'&&<button onClick={refreshPrices} disabled={!!loading} className="btn"
                       style={{background:loading==='refresh'?V('line'):ACC.blueBg,color:loading==='refresh'?V('faint'):ACC.blue,
                         border:`1.5px solid ${loading==='refresh'?V('line'):`${ACC.blue}44`}`,fontWeight:500}}>
                       {loading==='refresh'?'拉取中…':'↻ CBOE 刷新'}
-                    </button>
-                    <button onClick={()=>setShowForm(s=>!s)} className="btn"
+                    </button>}
+                    {tab==='active'&&<button onClick={()=>setShowForm(s=>!s)} className="btn"
                       style={{background:ACC.amberSoft,color:ACC.amber,border:`1.5px solid ${ACC.amber}44`,fontWeight:600}}>
                       {showForm?'✕ 取消':'＋ 录入期权'}
-                    </button>
+                    </button>}
+                    {tab==='stocks'&&<button onClick={refreshStockPrices} disabled={refreshingStocks||!stocks.length} className="btn"
+                      style={{background:refreshingStocks?V('line'):ACC.tealBg,color:refreshingStocks?V('faint'):ACC.teal,border:`1.5px solid ${refreshingStocks?V('line'):`${ACC.teal}44`}`,fontWeight:600}}>
+                      {refreshingStocks?'拉取中…':'↻ 刷新股价'}
+                    </button>}
+                    {tab==='stocks'&&<button onClick={()=>setShowStockForm(s=>!s)} className="btn"
+                      style={{background:ACC.profit+'18',color:ACC.profit,border:`1.5px solid ${ACC.profit}44`,fontWeight:600}}>
+                      {showStockForm?'✕ 取消':'＋ 录入股票'}
+                    </button>}
                   </div>
                 )}
               </div>
@@ -3794,22 +3814,6 @@ function App(){
           {/* 股票持仓 Tab */}
           {tab==='stocks'&&(
             <>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14,flexWrap:'wrap',gap:8}}>
-                <div>
-                  <div style={{fontWeight:700,fontSize:15,marginBottom:2}}>股票持仓</div>
-                  <div style={{fontSize:12,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>接货自动录入 · 可录入股票 · 刷新股价同步更新</div>
-                </div>
-                <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
-                <button onClick={refreshStockPrices} disabled={refreshingStocks||!stocks.length} className="btn"
-                  style={{background:refreshingStocks?V('line'):ACC.tealBg,color:refreshingStocks?V('faint'):ACC.teal,border:`1.5px solid ${refreshingStocks?V('line'):`${ACC.teal}44`}`,fontWeight:600}}>
-                  {refreshingStocks?'拉取中…':'↻ 刷新股价'}
-                </button>
-                <button onClick={()=>setShowStockForm(s=>!s)} className="btn"
-                  style={{background:ACC.profit+'18',color:ACC.profit,border:`1.5px solid ${ACC.profit}44`,fontWeight:600}}>
-                  {showStockForm?'✕ 取消':'＋ 录入股票'}
-                </button>
-                </div>
-              </div>
               {showStockForm&&<AddStockForm
                 onAdd={s=>{mutateStocks([...stocks,s]);setShowStockForm(false);showToast(`已添加 ${s.ticker} ${s.shares}股`);}}
                 onCancel={()=>setShowStockForm(false)}/>}
