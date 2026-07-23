@@ -2142,7 +2142,7 @@ function SummaryBar({positions,commPerSide,sgov}){
   );
 }
 
-/* ══ 添加表单 ══════════════════════════════════════ */
+/* ══ 录入期权表单 ═══════════════════════════════════ */
 function AddForm({onAdd,onCancel,commPerSide}){
   const [f,setF]=useState({ticker:'',type:'P',strike:'',qty:'1',openDate:today(),expDate:'',premium:'',marginType:'cash',customMargin:''});
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
@@ -2159,7 +2159,7 @@ function AddForm({onAdd,onCancel,commPerSide}){
   };
   return(
     <div className="card mobile-form-card anim-in" style={{padding:22,marginBottom:16,borderColor:`${ACC.amber}33`}}>
-      <div style={{fontSize:13,fontWeight:700,color:ACC.amber,marginBottom:18}}>＋ 添加期权仓位</div>
+      <div style={{fontSize:13,fontWeight:700,color:ACC.amber,marginBottom:18}}>＋ 录入期权仓位</div>
       <div className="mobile-form-grid" style={{display:'grid',gridTemplateColumns:'2fr 110px 1fr 80px',gap:12,marginBottom:12}}>
         <Field label="标的代码" value={f.ticker} onChange={v=>set('ticker',v.toUpperCase())} placeholder="MRVL"/>
         <SelectField label="方向" value={f.type} onChange={v=>set('type',v)} options={[{value:'P',label:'卖 Put'},{value:'C',label:'卖 Call'}]}/>
@@ -2183,7 +2183,7 @@ function AddForm({onAdd,onCancel,commPerSide}){
         {netPrem!=null&&<span style={{fontSize:12,fontFamily:'IBM Plex Mono,monospace',color:V('dim')}}>净权利金：<span style={{color:ACC.profit}}>${fmt(netPrem)}</span></span>}
       </div>}
       <div style={{display:'flex',gap:8}}>
-        <button onClick={submit} disabled={!valid} className="btn btn-primary" style={{minWidth:100}}>添加仓位</button>
+        <button onClick={submit} disabled={!valid} className="btn btn-primary" style={{minWidth:100}}>录入期权</button>
         <button onClick={onCancel} className="btn btn-ghost">取消</button>
       </div>
     </div>
@@ -2638,8 +2638,8 @@ function StocksSummary({stocks}){
   const totalValue=stocks.filter(st=>st.currentPrice).reduce((s,st)=>s+st.currentPrice*st.shares,0);
   const totalUnreal=stocks.filter(st=>st.currentPrice).length?totalValue-stocks.filter(st=>st.currentPrice).reduce((s,st)=>s+st.costPerShare*st.shares,0):null;
   return(
-    <div className="glass-card anim-in" style={{padding:'20px 24px',marginBottom:16}}>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))',gap:20,alignItems:'end'}}>
+    <div className="glass-card anim-in" style={{padding:'16px 20px',marginBottom:16}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))',gap:20,alignItems:'start'}}>
         <div style={{display:'flex',flexDirection:'column',gap:4}}>
           <span className="section-label">总成本基础</span>
           <span style={{fontSize:26,fontWeight:700,color:ACC.amber,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>${fmt(totalCost,0)}</span>
@@ -2650,8 +2650,10 @@ function StocksSummary({stocks}){
         </div>}
         {totalUnreal!=null&&<div style={{display:'flex',flexDirection:'column',gap:4}}>
           <span className="section-label">总浮动盈亏</span>
-          <span style={{fontSize:28,fontWeight:700,color:totalUnreal>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(totalUnreal)}</span>
-          <span className={'risk-badge '+(totalUnreal>=0?'risk-safe':'risk-itm')} style={{alignSelf:'flex-start',marginTop:2}}>{fmtA(totalCost>0?(totalUnreal/totalCost)*100:null)}</span>
+          <div style={{display:'flex',alignItems:'baseline',gap:8,flexWrap:'wrap'}}>
+            <span style={{fontSize:28,fontWeight:700,color:totalUnreal>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(totalUnreal)}</span>
+            <span className={'risk-badge '+(totalUnreal>=0?'risk-safe':'risk-itm')}>{fmtA(totalCost>0?(totalUnreal/totalCost)*100:null)}</span>
+          </div>
         </div>}
         <div style={{display:'flex',flexDirection:'column',gap:4}}>
           <span className="section-label">持股标的</span>
@@ -3672,15 +3674,6 @@ function App(){
               {cloudStatus==='ok'?'☁ 已同步':cloudStatus==='err'?'☁ 同步失败':cloudStatus==='syncing'?'☁ 同步中…':'☁ 未配置'}
             </button>
             {US_ACCOUNT_TABS.includes(tab)&&<button onClick={()=>setShowCommModal(true)} className="btn btn-ghost btn-comm" style={{fontSize:12,fontFamily:'IBM Plex Mono,monospace',padding:'7px 12px'}}>¢ ${commPerSide}/张</button>}
-            {US_ACCOUNT_TABS.includes(tab)&&<button onClick={refreshPrices} disabled={!!loading} className="btn"
-              style={{background:loading==='refresh'?V('line'):ACC.blueBg,color:loading==='refresh'?V('faint'):ACC.blue,
-                border:`1.5px solid ${loading==='refresh'?V('line'):`${ACC.blue}44`}`,fontWeight:500}}>
-              {loading==='refresh'?'拉取中…':'↻ CBOE 刷新'}
-            </button>}
-            {tab==='active'&&<button onClick={()=>setShowForm(s=>!s)} className="btn"
-              style={{background:ACC.amberSoft,color:ACC.amber,border:`1.5px solid ${ACC.amber}44`,fontWeight:600}}>
-              {showForm?'✕ 取消':'＋ 添加'}
-            </button>}
             <button className="theme-btn" onClick={toggleTheme} title={theme==='dark'?'切换浅色':'切换深色'}>{theme==='dark'?'☀':'🌙'}</button>
           </div>
         </div>
@@ -3736,13 +3729,24 @@ function App(){
           {/* 活跃仓位 Tab */}
           {tab==='active'&&(
             <>
+              <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginBottom:12,flexWrap:'wrap'}}>
+                <button onClick={refreshPrices} disabled={!!loading} className="btn"
+                  style={{background:loading==='refresh'?V('line'):ACC.blueBg,color:loading==='refresh'?V('faint'):ACC.blue,
+                    border:`1.5px solid ${loading==='refresh'?V('line'):`${ACC.blue}44`}`,fontWeight:500}}>
+                  {loading==='refresh'?'拉取中…':'↻ CBOE 刷新'}
+                </button>
+                <button onClick={()=>setShowForm(s=>!s)} className="btn"
+                  style={{background:ACC.amberSoft,color:ACC.amber,border:`1.5px solid ${ACC.amber}44`,fontWeight:600}}>
+                  {showForm?'✕ 取消':'＋ 录入期权'}
+                </button>
+              </div>
               {showForm&&<AddForm onAdd={addPosition} onCancel={()=>setShowForm(false)} commPerSide={commPerSide}/>}
               {positions.length>0&&<SummaryBar positions={positions} commPerSide={commPerSide} sgov={sgov}/>}
               {positions.length===0&&!showForm&&(
                 <div style={{textAlign:'center',padding:'70px 20px',color:V('faint'),border:`1.5px dashed ${V('line')}`,borderRadius:16}}>
                   <div style={{fontSize:38,marginBottom:12,opacity:.3}}>◎</div>
                   <div style={{fontSize:15,marginBottom:6,color:V('dim')}}>还没有活跃仓位</div>
-                  <div style={{fontSize:13}}>点击右上角「＋ 添加」录入</div>
+                  <div style={{fontSize:13}}>点击上方「＋ 录入期权」开始</div>
                 </div>
               )}
               {positions.length>0&&(
