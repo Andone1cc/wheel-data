@@ -2365,7 +2365,7 @@ function ActiveTableHeader(){
 }
 
 /* ══ 已平仓历史行 ══════════════════════════════════════ */
-function ClosedRow({c,commPerSide,onDelete,onUpdateExpiryReview,positions=[],closed=[]}){
+function ClosedRow({c,commPerSide,onDelete,onUpdateExpiryReview,positions=[],closed=[],quoteRefreshKey=0}){
   const r=calcClosed(c,commPerSide);
   const isCall=c.type==='C';
   const typeColor=isCall?ACC.loss:ACC.profit;
@@ -2403,7 +2403,7 @@ function ClosedRow({c,commPerSide,onDelete,onUpdateExpiryReview,positions=[],clo
       if(alive)setHoldQuote({loading:false,data:null,error:true});
     });
     return()=>{alive=false;};
-  },[canEstimateHold,c.ticker,c.expDate,c.strike,c.type]);
+  },[canEstimateHold,c.ticker,c.expDate,c.strike,c.type,quoteRefreshKey]);
   useEffect(()=>{
     if(!canReviewExpiry){
       setExpiryQuote({loading:false,data:null,error:false});
@@ -3339,6 +3339,7 @@ function App(){
   const [rollTarget,setRollTarget]=useState(null);
   const [loading,setLoading]=useState(false);
   const [refreshingStocks,setRefreshingStocks]=useState(false);
+  const [closedQuoteRefreshKey,setClosedQuoteRefreshKey]=useState(0);
   const [lastRefresh,setLastRefresh]=useState(null);
   const [toast,setToast]=useState(null);
 
@@ -3501,7 +3502,9 @@ function App(){
   // 刷新报价：股价走 Vercel 代理，期权走 CBOE
   const refreshPrices=async()=>{
     const allTickers=[...new Set([...positions.map(p=>p.ticker),...stocks.map(s=>s.ticker)])];
-    if(!allTickers.length)return;
+    const refreshableClosed=closed.filter(c=>c.closeType!=='roll'&&c.closeType!=='assigned'&&c.closeType!=='expired'&&c.expDate&&c.expDate>=today());
+    if(!allTickers.length&&!refreshableClosed.length)return;
+    if(refreshableClosed.length)setClosedQuoteRefreshKey(key=>key+1);
     setLoading('refresh');
     try{
       // 股价：Vercel 代理 → Yahoo（服务端请求，无 CORS）
@@ -3517,7 +3520,7 @@ function App(){
       if(stocks.length)mutateStocks(stocks.map(s=>({...s,currentPrice:stockPrices[s.ticker]??s.currentPrice})));
       setLastRefresh(new Date().toLocaleTimeString('zh-CN'));
       const stockOk=Object.values(stockPrices).filter(v=>v!=null).length;
-      showToast(`股价 ${stockOk}/${allTickers.length} · 期权现价 ${optOk}/${positions.length}`);
+      showToast(`股价 ${stockOk}/${allTickers.length} · 期权现价 ${optOk}/${positions.length}${refreshableClosed.length?` · 平仓估算 ${refreshableClosed.length} 笔已刷新`:''}`);
     }catch(e){showToast('刷新失败：'+e.message,ACC.loss);}
     setLoading(false);
   };
@@ -3716,30 +3719,34 @@ function App(){
                 <div><div className="cnopt-kicker">US WHEEL · PORTFOLIO</div><h2>美股账户</h2><p>美股期权、股票持仓与 SGOV 底仓统一管理；CBOE 延迟行情刷新，收益和保证金按美元口径汇总。</p></div>
                 <div className="market-account-hero-side">
                   <div className="market-account-hero-badges"><span>美元账户</span><span>CBOE 延迟</span><span>SGOV 底仓</span></div>
-                  <div className="market-account-tabs">
-                    {[
-                      ['active','活跃期权',positions.length],['stocks','股票持仓',stocks.length],
-                      ['closed','期权已平仓',closed.length],['sgov','SGOV 底仓',null],
-                    ].map(([key,label,count])=><button key={key} className={tab===key?'active':''} onClick={()=>setTab(key)}><span>{label}</span>{count!=null&&<b>{count}</b>}</button>)}
-                  </div>
                 </div>
+              </div>
+              <div className="market-account-nav">
+                <div className="market-account-tabs">
+                  {[
+                    ['active','活跃期权',positions.length],['stocks','股票持仓',stocks.length],
+                    ['closed','期权已平仓',closed.length],['sgov','SGOV 底仓',null],
+                  ].map(([key,label,count])=><button key={key} className={tab===key?'active':''} onClick={()=>setTab(key)}><span>{label}</span>{count!=null&&<b>{count}</b>}</button>)}
+                </div>
+                {(tab==='active'||tab==='closed')&&(
+                  <div className="market-account-actions">
+                    <button onClick={refreshPrices} disabled={!!loading} className="btn"
+                      style={{background:loading==='refresh'?V('line'):ACC.blueBg,color:loading==='refresh'?V('faint'):ACC.blue,
+                        border:`1.5px solid ${loading==='refresh'?V('line'):`${ACC.blue}44`}`,fontWeight:500}}>
+                      {loading==='refresh'?'拉取中…':'↻ CBOE 刷新'}
+                    </button>
+                    <button onClick={()=>setShowForm(s=>!s)} className="btn"
+                      style={{background:ACC.amberSoft,color:ACC.amber,border:`1.5px solid ${ACC.amber}44`,fontWeight:600}}>
+                      {showForm?'✕ 取消':'＋ 录入期权'}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
           {/* 活跃仓位 Tab */}
           {tab==='active'&&(
             <>
-              <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginBottom:12,flexWrap:'wrap'}}>
-                <button onClick={refreshPrices} disabled={!!loading} className="btn"
-                  style={{background:loading==='refresh'?V('line'):ACC.blueBg,color:loading==='refresh'?V('faint'):ACC.blue,
-                    border:`1.5px solid ${loading==='refresh'?V('line'):`${ACC.blue}44`}`,fontWeight:500}}>
-                  {loading==='refresh'?'拉取中…':'↻ CBOE 刷新'}
-                </button>
-                <button onClick={()=>setShowForm(s=>!s)} className="btn"
-                  style={{background:ACC.amberSoft,color:ACC.amber,border:`1.5px solid ${ACC.amber}44`,fontWeight:600}}>
-                  {showForm?'✕ 取消':'＋ 录入期权'}
-                </button>
-              </div>
               {showForm&&<AddForm onAdd={addPosition} onCancel={()=>setShowForm(false)} commPerSide={commPerSide}/>}
               {positions.length>0&&<SummaryBar positions={positions} commPerSide={commPerSide} sgov={sgov}/>}
               {positions.length===0&&!showForm&&(
@@ -3779,7 +3786,7 @@ function App(){
                 </div>
               ):(<>
                 <ClosedTableHeader/>
-                {closed.map(c=><ClosedRow key={c.id} c={c} commPerSide={commPerSide} positions={positions} closed={closed} onUpdateExpiryReview={updateClosedExpiryReview} onDelete={()=>removeClosedRecord(c.id)}/>)}
+                {closed.map(c=><ClosedRow key={c.id} c={c} commPerSide={commPerSide} positions={positions} closed={closed} quoteRefreshKey={closedQuoteRefreshKey} onUpdateExpiryReview={updateClosedExpiryReview} onDelete={()=>removeClosedRecord(c.id)}/>)}
               </>)}
             </>
           )}
