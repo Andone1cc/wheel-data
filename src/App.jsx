@@ -2662,14 +2662,14 @@ function StocksSummary({stocks}){
   );
 }
 
-/* 手动添加股票表单 */
+/* 录入股票表单 */
 function AddStockForm({onAdd,onCancel}){
   const [f,setF]=useState({ticker:'',shares:'',costPerShare:'',acquireDate:today()});
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
   const valid=f.ticker&&f.shares&&f.costPerShare;
   return(
     <div className="card mobile-form-card anim-in" style={{padding:20,marginBottom:14,borderColor:`${ACC.profit}33`}}>
-      <div style={{fontSize:13,fontWeight:700,color:ACC.profit,marginBottom:16}}>＋ 手动录入股票仓位</div>
+      <div style={{fontSize:13,fontWeight:700,color:ACC.profit,marginBottom:16}}>＋ 录入股票持仓</div>
       <div className="mobile-form-grid" style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:12,marginBottom:14}}>
         <Field label="标的代码" value={f.ticker} onChange={v=>set('ticker',v.toUpperCase())} placeholder="MRVL"/>
         <NumField label="持仓股数" value={f.shares} onChange={v=>set('shares',v)} placeholder="100" suffix="股"/>
@@ -3336,6 +3336,7 @@ function App(){
   const [closeTarget,setCloseTarget]=useState(null);
   const [rollTarget,setRollTarget]=useState(null);
   const [loading,setLoading]=useState(false);
+  const [refreshingStocks,setRefreshingStocks]=useState(false);
   const [lastRefresh,setLastRefresh]=useState(null);
   const [toast,setToast]=useState(null);
 
@@ -3517,6 +3518,19 @@ function App(){
       showToast(`股价 ${stockOk}/${allTickers.length} · 期权现价 ${optOk}/${positions.length}`);
     }catch(e){showToast('刷新失败：'+e.message,ACC.loss);}
     setLoading(false);
+  };
+
+  const refreshStockPrices=async()=>{
+    if(!stocks.length||refreshingStocks)return;
+    setRefreshingStocks(true);
+    try{
+      const stockPrices=await fetchStockPrices(stocks.map(s=>s.ticker));
+      mutateStocks(stocks.map(s=>({...s,currentPrice:stockPrices[s.ticker]??s.currentPrice})));
+      setLastRefresh(new Date().toLocaleTimeString('zh-CN'));
+      const stockOk=Object.values(stockPrices).filter(v=>v!=null).length;
+      showToast(`股价 ${stockOk}/${stocks.length} 已更新`,stockOk?ACC.teal:ACC.loss);
+    }catch(e){showToast('刷新股价失败：'+e.message,ACC.loss);}
+    finally{setRefreshingStocks(false);}
   };
 
   const refreshPricesAI=async()=>{
@@ -3772,12 +3786,18 @@ function App(){
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14,flexWrap:'wrap',gap:8}}>
                 <div>
                   <div style={{fontWeight:700,fontSize:15,marginBottom:2}}>股票持仓</div>
-                  <div style={{fontSize:12,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>接货自动录入 · 可手动添加 · 刷新股价同步更新</div>
+                  <div style={{fontSize:12,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>接货自动录入 · 可录入股票 · 刷新股价同步更新</div>
                 </div>
+                <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                <button onClick={refreshStockPrices} disabled={refreshingStocks||!stocks.length} className="btn"
+                  style={{background:refreshingStocks?V('line'):ACC.tealBg,color:refreshingStocks?V('faint'):ACC.teal,border:`1.5px solid ${refreshingStocks?V('line'):`${ACC.teal}44`}`,fontWeight:600}}>
+                  {refreshingStocks?'拉取中…':'↻ 刷新股价'}
+                </button>
                 <button onClick={()=>setShowStockForm(s=>!s)} className="btn"
                   style={{background:ACC.profit+'18',color:ACC.profit,border:`1.5px solid ${ACC.profit}44`,fontWeight:600}}>
-                  {showStockForm?'✕ 取消':'＋ 手动添加'}
+                  {showStockForm?'✕ 取消':'＋ 录入股票'}
                 </button>
+                </div>
               </div>
               {showStockForm&&<AddStockForm
                 onAdd={s=>{mutateStocks([...stocks,s]);setShowStockForm(false);showToast(`已添加 ${s.ticker} ${s.shares}股`);}}
@@ -3787,7 +3807,7 @@ function App(){
                 <div style={{textAlign:'center',padding:'60px 20px',color:V('faint'),border:`1.5px dashed ${V('line')}`,borderRadius:16}}>
                   <div style={{fontSize:38,marginBottom:12,opacity:.3}}>📊</div>
                   <div style={{fontSize:15,marginBottom:6,color:V('dim')}}>暂无股票仓位</div>
-                  <div style={{fontSize:13}}>期权被行权「接货」时自动建仓 · 或点击「手动添加」</div>
+                  <div style={{fontSize:13}}>期权被行权「接货」时自动建仓 · 或点击「录入股票」</div>
                 </div>
               ):(stocks.length>0&&<>
                 <StocksTableHeader/>
