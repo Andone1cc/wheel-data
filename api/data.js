@@ -75,6 +75,7 @@ const UPSTREAM_POLICY = {
   '_default': { minIntervalMs: 80, cooldownMs: 4000 },
 };
 const upstreamState = new Map();
+const upstreamLocks = new Map();
 const SZSE_HEADERS = {
   Accept: 'application/json, text/plain, */*',
   'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
@@ -113,16 +114,25 @@ function upstreamPolicy(url) {
 async function beforeUpstreamRequest(url) {
   const host = upstreamHost(url);
   const policy = upstreamPolicy(url);
+  // 深交所报告接口并发请求容易触发网关限流；上交所行情接口支持并行拉取
+  // 合约链和标的行情，不能让两次请求排队后把 Vercel 函数拖过超时上限。
+  const serialized = host === 'www.szse.cn';
+  const previous = serialized ? (upstreamLocks.get(host) || Promise.resolve()) : Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => { release = resolve; });
+  if (serialized) upstreamLocks.set(host, current);
+  await previous.catch(() => {});
   const state = upstreamState.get(host) || { lastRequest: 0, failures: 0, cooldownUntil: 0 };
   const now = Date.now();
   if (state.cooldownUntil > now) {
+    if (serialized) release();
     throw new Error(`${host} 暂时冷却中，请稍后重试`);
   }
   const gap = policy.minIntervalMs - (now - state.lastRequest);
   if (gap > 0) await wait(gap);
   state.lastRequest = Date.now();
   upstreamState.set(host, state);
-  return { host, state, policy };
+  return { host, state, policy, release: serialized ? release : null };
 }
 
 function markUpstreamSuccess(host, state) {
@@ -165,6 +175,8 @@ async function fetchUpstream(url, options = {}, format = 'text') {
       lastError = error;
       if (requestContext) markUpstreamFailure(requestContext.host, requestContext.state, requestContext.policy);
       if (/^4\d\d /.test(error.message) && !error.message.startsWith('429 ')) throw error;
+    } finally {
+      requestContext?.release?.();
     }
     if (attempt < attempts - 1) await wait(250 + attempt * 450);
   }
@@ -524,7 +536,7 @@ async function fetchSzseReport(params) {
   const payload = await fetchJson(szseReportUrl(params), {
     headers: SZSE_HEADERS,
     timeoutMs: 3000,
-    attempts: 1,
+    attempts: 2,
   });
   const report = Array.isArray(payload) ? payload[0] : payload;
   if (!report || report.error) throw new Error(report?.error || '深交所官方数据为空');
@@ -660,10 +672,10 @@ async function fetchSseOfficialChain(config, month, months) {
     fetchJson(sseHqUrl(`v1/sho/list/tstyle/${config.symbol}_${month.slice(-2)}`, {
       select: 'contractid,last,chg_rate,presetpx,exepx',
       order: 'contractid,ase',
-    }), { headers: SSE_HEADERS, timeoutMs: 5000, attempts: 1 }),
+    }), { headers: SSE_HEADERS, timeoutMs: 9000, attempts: 1 }),
     fetchJson(sseHqUrl(`v1/sh1/list/self/${config.symbol}`, {
       select: 'code,cpxxextendname,last,change,chg_rate,amp_rate,volume,amount,prev_close',
-    }), { headers: SSE_HEADERS, timeoutMs: 5000, attempts: 1 }),
+    }), { headers: SSE_HEADERS, timeoutMs: 9000, attempts: 1 }),
   ]);
   const underlyingRow = underlying?.list?.[0];
   const underlyingPrice = marketNumber(underlyingRow?.[2]);

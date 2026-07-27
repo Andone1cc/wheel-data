@@ -13,6 +13,22 @@ const V=(n)=>`var(--${n})`;
 const fmt=(n,d=2)=>n==null?'—':Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtM=(n)=>n==null?'—':(n>=0?'+$':'-$')+Math.abs(n).toFixed(2);
 const fmtA=(n)=>n==null?'—':(n>=0?'+':'')+n.toFixed(1)+'%';
+const finitePrice=(value)=>{
+  const raw=value&&typeof value==='object'?value.price:value;
+  const n=Number(raw);
+  return Number.isFinite(n)&&n>0?n:null;
+};
+const normalizeUsStock=(stock)=>{
+  if(!stock||typeof stock!=='object')return stock;
+  const quote=stock.currentPrice&&typeof stock.currentPrice==='object'?stock.currentPrice:null;
+  return{
+    ...stock,
+    currentPrice:finitePrice(stock.currentPrice),
+    quoteSource:stock.quoteSource||quote?.source||null,
+    quoteTime:stock.quoteTime||quote?.quoteTime||null,
+    quoteFreshness:stock.quoteFreshness||quote?.freshness||null,
+  };
+};
 const daysBetween=(a,b)=>Math.round((new Date(b)-new Date(a))/86400000);
 const today=()=>new Date().toISOString().slice(0,10);
 const calcAnnual=(profit,capital,days)=>{
@@ -260,7 +276,8 @@ async function fetchStockPrices(tickers){
     try{
       const res=await fetch(`${proxyBase}/api/quote/${encodeURIComponent(ticker)}`,{signal:AbortSignal.timeout(8000)});
       const data=await res.json();
-      results[ticker]=data?.price!=null?data:null;
+      const price=finitePrice(data?.price);
+      results[ticker]=price!=null?{...data,price}:null;
     }catch{results[ticker]=null;}
   }));
   return results;
@@ -1377,7 +1394,8 @@ function CnOptionsPanel({embedded=false,refreshActionRef,onLoadingChange}){
     return()=>{refreshActionRef.current=null;};
   },[refreshActionRef,load,refreshIndex,symbol,data?.selectedMonth]);
 
-  useEffect(()=>{load(symbol,CN_OPTION_NEXT_MONTH);},[symbol,load]);
+  // 首次进入或切换标的时主动绕过服务端/CDN 短缓存，避免把交易所故障时的旧快照当成最新行情。
+  useEffect(()=>{load(symbol,CN_OPTION_NEXT_MONTH,true);},[symbol,load]);
   useEffect(()=>{refreshIndex();},[refreshIndex]);
 
   const contracts=(data?.contracts||[]).filter(contract=>{
@@ -2623,8 +2641,11 @@ function ClosedRow({c,commPerSide,onDelete,onUpdateExpiryReview,positions=[],clo
 
 /* ══ 股票仓位组件 ══════════════════════════════════════ */
 function StockRow({s,onUpdatePrice,onDelete}){
-  const costBasis=s.costPerShare*s.shares;
-  const currentValue=s.currentPrice?s.currentPrice*s.shares:null;
+  const shares=num(s.shares);
+  const costPerShare=finitePrice(s.costPerShare)??0;
+  const currentPrice=finitePrice(s.currentPrice);
+  const costBasis=costPerShare*shares;
+  const currentValue=currentPrice!=null?currentPrice*shares:null;
   const unrealized=currentValue!=null?currentValue-costBasis:null;
   const unrealizedPct=unrealized!=null?(unrealized/costBasis)*100:null;
   const daysHeld=s.acquireDate?Math.max(1,daysBetween(s.acquireDate,today())):null;
@@ -2639,15 +2660,15 @@ function StockRow({s,onUpdatePrice,onDelete}){
           </span>
         </div>
         <div style={{display:'flex',flexDirection:'column',gap:2}}>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,color:V('ink'),fontWeight:600}}>{s.shares+' 股'}</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{'成本 $'+fmt(s.costPerShare)+'/股'}</span>
+            <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,color:V('ink'),fontWeight:600}}>{shares+' 股'}</span>
+          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{'成本 $'+fmt(costPerShare)+'/股'}</span>
         </div>
         <div>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,color:ACC.amber,fontWeight:600}}>{'$'+fmt(costBasis,0)}</span>
         </div>
         <div style={{padding:'0 12px',display:'flex',flexDirection:'column',gap:2}}>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint'),letterSpacing:'.08em'}}>{'当前价格'}</span>
-          <InlineEdit value={s.currentPrice} onSave={v=>onUpdatePrice(s.id,v)}/>
+          <InlineEdit value={currentPrice} onSave={v=>onUpdatePrice(s.id,v)}/>
           {s.quoteSource&&<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:9,color:V('faint')}}>{s.quoteSource}{s.quoteTime?` · ${s.quoteTime}`:''}</span>}
         </div>
         <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-end',paddingRight:8}}>
@@ -2680,9 +2701,15 @@ function StocksTableHeader(){
 
 function StocksSummary({stocks}){
   if(!stocks.length)return null;
-  const totalCost=stocks.reduce((s,st)=>s+st.costPerShare*st.shares,0);
-  const totalValue=stocks.filter(st=>st.currentPrice).reduce((s,st)=>s+st.currentPrice*st.shares,0);
-  const totalUnreal=stocks.filter(st=>st.currentPrice).length?totalValue-stocks.filter(st=>st.currentPrice).reduce((s,st)=>s+st.costPerShare*st.shares,0):null;
+  const priced=stocks.map(st=>({
+    shares:num(st.shares),
+    costPerShare:finitePrice(st.costPerShare)??0,
+    currentPrice:finitePrice(st.currentPrice),
+  }));
+  const totalCost=priced.reduce((s,st)=>s+st.costPerShare*st.shares,0);
+  const pricedStocks=priced.filter(st=>st.currentPrice!=null);
+  const totalValue=pricedStocks.reduce((s,st)=>s+st.currentPrice*st.shares,0);
+  const totalUnreal=pricedStocks.length?totalValue-pricedStocks.reduce((s,st)=>s+st.costPerShare*st.shares,0):null;
   return(
     <div className="glass-card anim-in" style={{padding:'16px 20px',marginBottom:16}}>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))',gap:20,alignItems:'start'}}>
@@ -3359,7 +3386,7 @@ function App(){
   const [theme,setTheme]=useState(()=>localStorage.getItem(SK.THEME)||'dark');
   const [positions,setPositions]=useState(()=>ls(SK.POS,[]));
   const [closed,setClosed]=useState(()=>ls(SK.CLOSED,[]));
-  const [stocks,setStocks]=useState(()=>ls(SK.STOCKS,[]));
+  const [stocks,setStocks]=useState(()=>ls(SK.STOCKS,[]).map(normalizeUsStock));
   const [sgov,setSgov]=useState(()=>ls(SK.SGOV,{}));
   const [cfg,setCfg]=useState(()=>ls(SK.CFG,{commPerSide:DEFAULT_COMM}));
   const [cnPositions,setCnPositions]=useState(()=>ls(SK.CN_POS,[]));
@@ -3406,7 +3433,7 @@ function App(){
     const next={
       positions:Array.isArray(remote.positions)?remote.positions:local.positions,
       closed:Array.isArray(remote.closed)?remote.closed:local.closed,
-      stocks:Array.isArray(remote.stocks)?remote.stocks:local.stocks,
+      stocks:Array.isArray(remote.stocks)?remote.stocks.map(normalizeUsStock):local.stocks.map(normalizeUsStock),
       sgov:remote.sgov&&typeof remote.sgov==='object'?remote.sgov:local.sgov,
       cfg:remote.cfg&&typeof remote.cfg==='object'?remote.cfg:local.cfg,
       cnPositions:Array.isArray(remote.cnPositions)?remote.cnPositions:local.cnPositions,
@@ -3501,8 +3528,9 @@ function App(){
     if(!data.silent)showToast('到期价已修正');
   },[positions,stocks,sgov,cfg,pushCloud]);
   const mutateStocks=(next)=>{
-    setStocks(next);lss(SK.STOCKS,next);
-    persistPatch({stocks:next});
+    const normalized=next.map(normalizeUsStock);
+    setStocks(normalized);lss(SK.STOCKS,normalized);
+    persistPatch({stocks:normalized});
   };
   const mutateSgov=(next)=>{
     setSgov(next);lss(SK.SGOV,next);
@@ -3595,7 +3623,10 @@ function App(){
     setRefreshingStocks(true);
     try{
       const stockPrices=await fetchStockPrices(stocks.map(s=>s.ticker));
-      mutateStocks(stocks.map(s=>({...s,currentPrice:stockPrices[s.ticker]??s.currentPrice})));
+      mutateStocks(stocks.map(s=>{
+        const quote=stockPrices[s.ticker];
+        return {...s,currentPrice:quote?.price??finitePrice(s.currentPrice),quoteSource:quote?.source||s.quoteSource||null,quoteTime:quote?.quoteTime||s.quoteTime||null,quoteFreshness:quote?.freshness||s.quoteFreshness||null};
+      }));
       setLastRefresh(new Date().toLocaleTimeString('zh-CN'));
       const stockOk=Object.values(stockPrices).filter(v=>v!=null).length;
       showToast(`股价 ${stockOk}/${stocks.length} 已更新`,stockOk?ACC.teal:ACC.loss);
