@@ -15,7 +15,7 @@ async function redisGet(url, token, key) {
 async function redisSet(url, token, key, valueStr) {
   const res = await fetch(`${url}/set/${encodeURIComponent(key)}`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/plain; charset=utf-8' },
     body: valueStr,
   });
   return res.ok;
@@ -744,7 +744,7 @@ async function fetchSzseChain(config, requestedMonth, realtime = false) {
   return fetchSzseOfficialCloseChain(config, month, months, realtime);
 }
 
-async function fetchCnOptionChain(symbol, month, force = false, realtime = false) {
+async function fetchCnOptionChain(symbol, month, force = false, realtime = false, options = {}) {
   const config = CN_OPTION_UNDERLYINGS[symbol];
   if (!config) throw new Error('仅支持 510500、159922');
   const cacheKey = `${symbol}-${month || 'near'}-${realtime ? 'realtime' : 'official'}`;
@@ -767,12 +767,19 @@ async function fetchCnOptionChain(symbol, month, force = false, realtime = false
         indexStrike: contract.strike > 0 ? (contract.strike / data.underlyingPrice) * index.price : null,
       })),
     } : data;
-    const snapshot = { ...enriched, snapshotSavedAt: Date.now() };
+    const fetchedAt = new Date().toISOString();
+    const dataDate = String(enriched.quoteTime || enriched.underlyingQuoteTime || shanghaiDate()).slice(0, 10);
+    const snapshot = {
+      ...enriched,
+      dataDate,
+      fetchedAt,
+      snapshotSavedAt: Date.now(),
+    };
     cnOptionCache.set(cacheKey, { time: Date.now(), data: snapshot });
     const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
     const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
-    if (redisUrl && redisToken) {
-      // Redis 只用于故障兜底，不阻塞行情响应。
+    if (redisUrl && redisToken && options.persist !== false) {
+      // 普通查询不阻塞行情响应；收盘 Cron 会显式 await 持久化。
       redisSet(redisUrl, redisToken, `wheel_cn_option_${cacheKey}`, JSON.stringify(snapshot)).catch(() => {});
     }
     return { ...snapshot, cached: false, stale: false };
@@ -783,14 +790,27 @@ async function fetchCnOptionChain(symbol, month, force = false, realtime = false
       const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
       if (redisUrl && redisToken) {
         try {
-          const raw = await redisGet(redisUrl, redisToken, `wheel_cn_option_${cacheKey}`);
-          const parsed = raw ? JSON.parse(raw) : null;
-          if (parsed?.contracts?.length) fallback = parsed;
+          // 实时请求与收盘 Cron 使用不同缓存键；实时失败时必须读取收盘快照。
+          const requestedMonth = /^\d{6}$/.test(String(month || ''))
+            ? String(month)
+            : fallbackOptionMonths()[0];
+          const keys = [
+            `wheel_cn_option_${cacheKey}`,
+            `wheel_cn_option_eod_latest_${symbol}_${requestedMonth}`,
+          ];
+          for (const key of keys) {
+            const raw = await redisGet(redisUrl, redisToken, key);
+            const parsed = raw ? JSON.parse(raw) : null;
+            if (parsed?.contracts?.length) {
+              fallback = parsed;
+              break;
+            }
+          }
         } catch {}
       }
     }
     if (fallback) {
-      const snapshotTime = fallback.quoteTime || (fallback.snapshotSavedAt
+      const snapshotTime = fallback.dataDate || fallback.quoteTime || (fallback.snapshotSavedAt
         ? new Date(fallback.snapshotSavedAt).toISOString()
         : '时间未知');
       const isSzseClose = config.exchange === 'SZSE' || fallback.source === 'szse-official-close';
@@ -802,12 +822,114 @@ async function fetchCnOptionChain(symbol, month, force = false, realtime = false
         cacheScope: cached ? 'memory' : 'shared',
         staleReason: isSzseClose ? 'official-close-lag' : 'upstream-unavailable',
         warning: isSzseClose
-          ? `深交所期权链为日终口径，最新官方发布日为 ${snapshotTime}；交易日盘中显示上一交易日属于正常情况。当前为云端保存的官方快照。`
+          ? `深交所期权链为日终口径，最新官方发布日为 ${snapshotTime}；当前为云端保存的官方快照。`
           : `官方行情暂时不可用，已返回云端最近快照（${snapshotTime}）。`,
       };
     }
     throw error;
   }
+}
+
+function cnOptionEodKey(symbol, month) {
+  return `wheel_cn_option_eod_latest_${symbol}_${month}`;
+}
+
+async function persistCnOptionSnapshot(snapshot, cacheKey, options = {}) {
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!redisUrl || !redisToken) throw new Error('未配置 UPSTASH_REDIS_REST_URL/TOKEN，无法保存收盘快照');
+  const month = snapshot.selectedMonth;
+  const dataDate = snapshot.dataDate || String(snapshot.quoteTime || shanghaiDate()).slice(0, 10);
+  const mode = options.mode || 'eod';
+  const isPreclose = mode === 'preclose';
+  const latestKey = isPreclose
+    ? `wheel_cn_option_preclose_latest_${snapshot.symbol}_${month}`
+    : cnOptionEodKey(snapshot.symbol, month);
+  const value = JSON.stringify({
+    ...snapshot,
+    dataDate,
+    fetchedAt: snapshot.fetchedAt || new Date().toISOString(),
+    snapshotMode: mode,
+    snapshotSource: snapshot.source || null,
+    freshness: isPreclose ? (snapshot.freshness || 'delayed') : 'official-close',
+    notice: isPreclose
+      ? `盘中预备快照（${dataDate}）；期权链可能仍为上一交易日官方口径。`
+      : `交易日收盘快照（${dataDate}）；盘中实时数据不可用时将自动使用此快照。`,
+    stale: false,
+  });
+  const keys = [
+    `wheel_cn_option_${cacheKey}`,
+    isPreclose
+      ? `wheel_cn_option_preclose_${snapshot.symbol}_${dataDate}_${month}`
+      : `wheel_cn_option_eod_${snapshot.symbol}_${dataDate}_${month}`,
+    latestKey,
+  ];
+  const results = await Promise.all(keys.map((key) => redisSet(redisUrl, redisToken, key, value)));
+  if (results.some((ok) => !ok)) throw new Error('收盘快照写入 Redis 失败');
+  return { key: latestKey, dataDate, month };
+}
+
+async function runCnOptionEodSync(symbol) {
+  const configuredMonths = fallbackOptionMonths();
+  const months = process.env.CN_OPTION_EOD_ALL_MONTHS === '1'
+    ? configuredMonths
+    : configuredMonths.slice(0, 2);
+  const startedAt = new Date().toISOString();
+  const results = [];
+  const errors = [];
+  for (const month of months) {
+    try {
+      // 收盘任务不请求腾讯盘中价，保证 ETF、期权链和 Greeks 使用同一交易日口径。
+      const payload = await fetchCnOptionChain(symbol, month, true, false, { persist: false });
+      const saved = await persistCnOptionSnapshot({
+        ...payload,
+        snapshotMode: 'eod',
+        fetchedAt: new Date().toISOString(),
+      }, `${symbol}-${month}-official`);
+      results.push({ symbol, month, dataDate: saved.dataDate, contracts: payload.contracts?.length || 0 });
+    } catch (error) {
+      errors.push({ symbol, month, error: error.message });
+    }
+  }
+  return {
+    symbol,
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    months,
+    saved: results,
+    errors,
+    ok: results.length > 0 && errors.length === 0,
+  };
+}
+
+async function runCnOptionPrecloseSync(symbol) {
+  const months = fallbackOptionMonths().slice(0, 2);
+  const startedAt = new Date().toISOString();
+  const results = [];
+  const errors = [];
+  for (const month of months) {
+    try {
+      // 预备任务请求盘中标的价；深交所期权链仍可能是上一交易日官方收盘口径。
+      const payload = await fetchCnOptionChain(symbol, month, true, true, { persist: false });
+      const saved = await persistCnOptionSnapshot({
+        ...payload,
+        snapshotMode: 'preclose',
+        fetchedAt: new Date().toISOString(),
+      }, `${symbol}-${month}-realtime`, { mode: 'preclose' });
+      results.push({ symbol, month, dataDate: saved.dataDate, contracts: payload.contracts?.length || 0 });
+    } catch (error) {
+      errors.push({ symbol, month, error: error.message });
+    }
+  }
+  return {
+    symbol,
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    months,
+    saved: results,
+    errors,
+    ok: results.length > 0 && errors.length === 0,
+  };
 }
 
 module.exports = async function handler(req, res) {
@@ -818,6 +940,38 @@ module.exports = async function handler(req, res) {
   // 统一在最上面解析一次密码，后面所有需要鉴权的分支都用它
   const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
   const passwordOk = !!process.env.ACCESS_PASSWORD && safeEqual(token, process.env.ACCESS_PASSWORD);
+
+  // ══════════════════════════════════════════════════
+  // A 股期权收盘快照任务（Vercel Cron 专用）
+  // /api/cron/cn-options-510500
+  // /api/cron/cn-options-159922
+  // ══════════════════════════════════════════════════
+  if (reqUrl.startsWith('/api/cron/cn-options') || reqUrl.includes('cronSymbol=')) {
+    if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+    const cronSecret = process.env.CRON_SECRET;
+    const cronAuthorized = cronSecret && safeEqual(token, cronSecret);
+    if (process.env.NODE_ENV === 'production' && !cronAuthorized) {
+      return res.status(401).json({ error: 'Cron secret 不正确' });
+    }
+    const cronUrl = new URL(reqUrl, 'http://localhost');
+    const symbol = cronUrl.searchParams.get('symbol')
+      || cronUrl.searchParams.get('cronSymbol')
+      || (reqUrl.includes('159922') ? '159922' : '510500');
+    try {
+      const result = reqUrl.includes('preclose') || cronUrl.searchParams.get('cronMode') === 'preclose'
+        ? await runCnOptionPrecloseSync(symbol)
+        : await runCnOptionEodSync(symbol);
+      const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+      const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+      if (redisUrl && redisToken) {
+        const statusKey = `wheel_cn_option_eod_status_${shanghaiDate()}`;
+        await redisSet(redisUrl, redisToken, statusKey, JSON.stringify(result));
+      }
+      return res.status(result.ok ? 200 : 502).json(result);
+    } catch (error) {
+      return res.status(500).json({ error: 'A 股期权收盘任务失败', detail: error.message });
+    }
+  }
 
   // ══════════════════════════════════════════════════
   // 富途 OpenD API 代理（需密码 —— 这条链路能直接访问你的

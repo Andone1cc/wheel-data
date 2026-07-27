@@ -2,8 +2,30 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "regions": ["hkg1"],
+  "crons": [
+    {
+      "path": "/api/cron/cn-options-preclose-510500",
+      "schedule": "50 5 * * 1-5"
+    },
+    {
+      "path": "/api/cron/cn-options-preclose-159922",
+      "schedule": "50 5 * * 1-5"
+    },
+    {
+      "path": "/api/cron/cn-options-510500",
+      "schedule": "10 8 * * 1-5"
+    },
+    {
+      "path": "/api/cron/cn-options-159922",
+      "schedule": "20 8 * * 1-5"
+    }
+  ],
   "rewrites": [
     { "source": "/api/cn-options",     "destination": "/api/data" },
+    { "source": "/api/cron/cn-options-preclose-510500", "destination": "/api/data?cronSymbol=510500&cronMode=preclose" },
+    { "source": "/api/cron/cn-options-preclose-159922", "destination": "/api/data?cronSymbol=159922&cronMode=preclose" },
+    { "source": "/api/cron/cn-options-510500", "destination": "/api/data?cronSymbol=510500" },
+    { "source": "/api/cron/cn-options-159922", "destination": "/api/data?cronSymbol=159922" },
     { "source": "/api/health",          "destination": "/api/data" },
     { "source": "/api/cboe/:ticker",    "destination": "/api/data" },
     { "source": "/api/quote/:ticker",   "destination": "/api/data" },

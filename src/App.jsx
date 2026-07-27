@@ -1412,6 +1412,14 @@ function CnOptionsPanel({embedded=false,refreshActionRef,onLoadingChange}){
   const dataNotice=data?.warning||(!data?.stale&&data?.notice)||'';
   const isOfficialCloseNotice=data?.staleReason==='official-close-lag'||(!data?.warning&&data?.source==='szse-official-close'&&data?.notice);
   const noticeKind=isOfficialCloseNotice?'info':'warning';
+  const snapshotDate=data?.dataDate||String(data?.quoteTime||'').slice(0,10)||'未知日期';
+  const snapshotSource=data?.snapshotMode==='eod'
+    ? `收盘快照 · ${snapshotDate}`
+    : data?.snapshotMode==='preclose'
+      ? `盘中预备 · ${snapshotDate}`
+    : data?.stale
+      ? `最近快照 · ${snapshotDate}`
+      : data?.freshness==='realtime'?'实时行情':'交易所行情';
   const atmStrike=data?.underlyingPrice&&data?.contracts?.length
     ? data.contracts.reduce((best,item)=>Math.abs(item.strike-data.underlyingPrice)<Math.abs(best-data.underlyingPrice)?item.strike:best,data.contracts[0].strike)
     : null;
@@ -1456,7 +1464,7 @@ function CnOptionsPanel({embedded=false,refreshActionRef,onLoadingChange}){
             <div><span>合约月份</span><strong>{cnMonthLabel(data.selectedMonth)}</strong><small>{data.contracts?.[0]?.expiry||'—'} 到期</small></div>
             <div><span>合约数量</span><strong>{data.contracts?.length||0}</strong><small>Call + Put</small></div>
             <div><span>当前筛选成交量</span><strong>{fmt(totalVolume,0)}</strong><small>{contracts.length} 条结果</small></div>
-            <div className="cnopt-source"><span>行情 / Greeks</span><strong>期权链·交易所官方</strong><small>官方收盘口径 · BS 反推</small></div>
+            <div className="cnopt-source"><span>行情 / Greeks</span><strong>{snapshotSource}</strong><small>{data?.greekNote||'BS 反推，仅供研究'}</small></div>
           </div>
 
           <div className="cnopt-toolbar">
