@@ -353,7 +353,7 @@ async function fetchStockCloseOnDate(ticker,date){
     if(!res.ok)return null;
     const data=await res.json();
     const price=Number(data?.price);
-    if(!Number.isFinite(price))return null;
+    if(!(Number.isFinite(price)&&price>0))return null;
     return{price,date:data?.date||date,requestedDate:data?.requestedDate||date,source:data?.source||'History'};
   }catch(e){
     console.warn(`history fetch ${ticker} ${date}:`,e.message);
@@ -654,7 +654,8 @@ function calcClosed(c,comm=DEFAULT_COMM){
 }
 
 function calcExpiryReview(c,r,expiryPrice,comm=DEFAULT_COMM){
-  if(expiryPrice==null)return null;
+  // 股票价格不可能为 0；0 通常代表历史接口没有返回数据，不能拿来判断行权。
+  if(!(Number(expiryPrice)>0))return null;
   const qty=c.qty||1;
   const intrinsicPerShare=c.type==='P'
     ?Math.max(0,c.strike-expiryPrice)
@@ -2438,7 +2439,7 @@ function ClosedRow({c,commPerSide,onDelete,onUpdateExpiryReview,positions=[],clo
   const isManual=!isRoll&&!isAssigned&&!isExpired;
   const canEstimateHold=isManual&&c.expDate&&c.expDate>=today();
   const canReviewExpiry=!!(c.expDate&&c.expDate<today()&&!isExpired&&!isAssigned);
-  const cachedExpiryPrice=Number.isFinite(Number(c.expiryReviewPrice))?Number(c.expiryReviewPrice):null;
+  const cachedExpiryPrice=Number.isFinite(Number(c.expiryReviewPrice))&&Number(c.expiryReviewPrice)>0?Number(c.expiryReviewPrice):null;
   const [holdQuote,setHoldQuote]=useState({loading:false,data:null,error:false});
   const [expiryQuote,setExpiryQuote]=useState({loading:false,data:null,error:false});
   const nextPos=positions.find(p=>p.rolledFrom===c.id);
@@ -2587,7 +2588,7 @@ function ClosedRow({c,commPerSide,onDelete,onUpdateExpiryReview,positions=[],clo
                 </span>
                 <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:12,color:expiryReview.wouldAssign?ACC.amber:ACC.loss,fontWeight:600}}>
                   {expiryReview.wouldAssign
-                    ?`避开内在 $${fmt(expiryReview.intrinsicValue)}`
+                    ?`到期内在 $${fmt(expiryReview.intrinsicValue)}`
                     :`少收权利金 $${fmt(expiryReview.lostPremium)}`}
                 </span>
               </>
@@ -3512,10 +3513,15 @@ function App(){
     persistPatch({closed:next});
   };
   const updateClosedExpiryReview=useCallback((id,data)=>{
+    const price=Number(data?.price);
+    if(!(price>0)){
+      if(!data?.silent)showToast('到期收盘价无效，暂不判断是否行权',ACC.amber);
+      return;
+    }
     setClosed(prev=>{
       const next=prev.map(c=>c.id===id?{
         ...c,
-        expiryReviewPrice:data.price,
+        expiryReviewPrice:price,
         expiryReviewDate:data.date,
         expiryReviewSource:data.source||'History',
         expiryReviewManual:!!data.manual,

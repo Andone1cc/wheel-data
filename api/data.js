@@ -989,58 +989,74 @@ module.exports = async function handler(req, res) {
       return beforeOrOn || rows.sort((a, b) => a.ts - b.ts)[0];
     };
 
-    try {
-      const yahooRes = await fetch(
-        `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&period1=${period1}&period2=${period2}`,
-        { headers: { 'User-Agent': BROWSER_USER_AGENT }, signal: AbortSignal.timeout(4500) }
-      );
-      const yahooText = await yahooRes.text();
-      const payload = yahooText.trim().startsWith('{') ? JSON.parse(yahooText) : null;
-      const result = payload?.chart?.result?.[0];
-      const timestamps = result?.timestamp || [];
-      const closes = result?.indicators?.quote?.[0]?.close || [];
-      const rows = timestamps
-        .map((ts, index) => ({ ts, price: closes[index], date: new Date(ts * 1000).toISOString().slice(0, 10) }))
-        .filter((row) => Number.isFinite(Number(row.price)));
-      const picked = pickClose(rows);
-      if (picked) {
-        res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=604800');
-        return res.status(200).json({ ticker, date: picked.date, requestedDate: date, price: Number(picked.price), source: 'Yahoo' });
-      }
-    } catch {}
+    // Yahoo 的 query1 在云函数出口偶尔会返回 429；query2 使用同一数据但
+    // 不同边缘节点，作为低成本的第二次尝试。
+    for (const host of ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {
+      try {
+        const payload = await fetchJson(
+          `https://${host}/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&period1=${period1}&period2=${period2}`,
+          {
+            headers: {
+              Accept: 'application/json, text/plain, */*',
+              'Accept-Language': 'en-US,en;q=0.9',
+              Referer: 'https://finance.yahoo.com/',
+              'User-Agent': BROWSER_USER_AGENT,
+            },
+            timeoutMs: 4500,
+            attempts: 1,
+          },
+        );
+        const result = payload?.chart?.result?.[0];
+        const timestamps = result?.timestamp || [];
+        const closes = result?.indicators?.quote?.[0]?.close || [];
+        const rows = timestamps
+          .map((ts, index) => ({ ts, price: closes[index], date: new Date(ts * 1000).toISOString().slice(0, 10) }))
+          .filter((row) => Number(row.price) > 0);
+        const picked = pickClose(rows);
+        if (picked) {
+          res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=604800');
+          return res.status(200).json({ ticker, date: picked.date, requestedDate: date, price: Number(picked.price), source: 'Yahoo' });
+        }
+      } catch {}
+    }
 
-    try {
-      const fromDate = new Date(target - 5 * 86400000).toISOString().slice(0, 10);
-      const toDate = new Date(target + 3 * 86400000).toISOString().slice(0, 10);
-      const nasdaqUrl = new URL(`https://api.nasdaq.com/api/quote/${encodeURIComponent(ticker)}/historical`);
-      nasdaqUrl.searchParams.set('assetclass', 'stocks');
-      nasdaqUrl.searchParams.set('fromdate', fromDate);
-      nasdaqUrl.searchParams.set('todate', toDate);
-      nasdaqUrl.searchParams.set('limit', '20');
-      const nasdaqRes = await fetch(nasdaqUrl, {
-        headers: {
-          'User-Agent': BROWSER_USER_AGENT,
-          Accept: 'application/json, text/plain, */*',
-          Origin: 'https://www.nasdaq.com',
-          Referer: 'https://www.nasdaq.com/',
-        },
-        signal: AbortSignal.timeout(5000),
-      });
-      const rows = ((await nasdaqRes.json())?.data?.tradesTable?.rows || [])
-        .map((row) => {
-          const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(row.date || '');
-          const price = Number(String(row.close || '').replace(/[$,]/g, ''));
-          if (!match || !Number.isFinite(price)) return null;
-          const isoDate = `${match[3]}-${match[1]}-${match[2]}`;
-          return { date: isoDate, ts: Math.floor(Date.UTC(Number(match[3]), Number(match[1]) - 1, Number(match[2])) / 1000), price };
-        })
-        .filter(Boolean);
-      const picked = pickClose(rows);
-      if (picked) {
-        res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=604800');
-        return res.status(200).json({ ticker, date: picked.date, requestedDate: date, price: picked.price, source: 'Nasdaq' });
-      }
-    } catch {}
+    // Nasdaq 对 ETF 和股票使用不同 assetclass。DRAM 等 Cboe ETF 若按 stocks
+    // 请求会直接返回 Symbol not exists，因此 ETF 必须优先尝试。
+    const fromDate = new Date(target - 5 * 86400000).toISOString().slice(0, 10);
+    const toDate = new Date(target + 3 * 86400000).toISOString().slice(0, 10);
+    for (const assetClass of ['etf', 'stocks']) {
+      try {
+        const nasdaqUrl = new URL(`https://api.nasdaq.com/api/quote/${encodeURIComponent(ticker)}/historical`);
+        nasdaqUrl.searchParams.set('assetclass', assetClass);
+        nasdaqUrl.searchParams.set('fromdate', fromDate);
+        nasdaqUrl.searchParams.set('todate', toDate);
+        nasdaqUrl.searchParams.set('limit', '20');
+        const nasdaqRes = await fetch(nasdaqUrl, {
+          headers: {
+            'User-Agent': BROWSER_USER_AGENT,
+            Accept: 'application/json, text/plain, */*',
+            Origin: 'https://www.nasdaq.com',
+            Referer: 'https://www.nasdaq.com/',
+          },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!nasdaqRes.ok) continue;
+        const rows = ((await nasdaqRes.json())?.data?.tradesTable?.rows || [])
+          .map((row) => {
+            const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(row.date || '');
+            const price = Number(String(row.close || '').replace(/[$,]/g, ''));
+            if (!match || !(price > 0)) return null;
+            const isoDate = `${match[3]}-${match[1]}-${match[2]}`;
+            return { date: isoDate, ts: Math.floor(Date.UTC(Number(match[3]), Number(match[1]) - 1, Number(match[2])) / 1000), price };
+          })
+          .filter(Boolean);
+        const picked = pickClose(rows);
+        if (picked) {
+          res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=604800');
+          return res.status(200).json({ ticker, date: picked.date, requestedDate: date, price: picked.price, source: `Nasdaq-${assetClass}` });
+        }
+      } catch {}
+    }
 
     try {
       const d1 = new Date(target - 5 * 86400000).toISOString().slice(0, 10).replace(/-/g, '');
