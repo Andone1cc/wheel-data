@@ -260,7 +260,7 @@ async function fetchStockPrices(tickers){
     try{
       const res=await fetch(`${proxyBase}/api/quote/${encodeURIComponent(ticker)}`,{signal:AbortSignal.timeout(8000)});
       const data=await res.json();
-      results[ticker]=data?.price??null;
+      results[ticker]=data?.price!=null?data:null;
     }catch{results[ticker]=null;}
   }));
   return results;
@@ -284,7 +284,15 @@ async function fetchCnStockQuote(market,ticker){
   try{
     const response=await fetch(`${proxyBase}/api/quote/${encodeURIComponent(quoteSymbol)}`,{signal:AbortSignal.timeout(8000)});
     const data=await response.json();
-    return{quoteSymbol,price:data?.price??null,name:data?.name||null};
+    return{
+      quoteSymbol,
+      price:data?.price??null,
+      name:data?.name||null,
+      source:data?.source||null,
+      quoteTime:data?.quoteTime||null,
+      freshness:data?.freshness||null,
+      stale:data?.stale===true,
+    };
   }catch{return{quoteSymbol,price:null,name:null};}
 }
 
@@ -366,66 +374,81 @@ function parseOCC(occ){
    - 约 15 分钟延迟，数据权威
    - 一次请求拿到该 ticker 所有期权合约，然后按到期日+行权价筛选
 ═══════════════════════════════════════════════════ */
+const CBOE_CHAIN_CACHE_MS=30*1000;
+const cboeChainCache=new Map();
+const cboeChainPending=new Map();
+
+function findCboeOption(options, expDate, strike, type){
+  const wantType=type==='P'?'put':'call';
+  let best=null, bestDiff=Infinity;
+  for(const option of options||[]){
+    const parsed=parseOCC(option.option);
+    if(!parsed||parsed.type!==wantType||parsed.expiry!==expDate)continue;
+    const diff=Math.abs(parsed.strike-strike);
+    if(diff<bestDiff){bestDiff=diff;best=option;}
+  }
+  return best;
+}
+
+function normalizeCboeOption(option,meta={}){
+  if(!option)return null;
+  const n=v=>{const x=Number(v);return Number.isFinite(x)&&x!==0?x:null;};
+  const price=n(option.last_trade_price)||n(option.ask)||(n(option.bid)&&n(option.ask)?(n(option.bid)+n(option.ask))/2:null);
+  const bid=n(option.bid), ask=n(option.ask);
+  if(!price&&!bid&&!ask)return null;
+  return{
+    price:price||(bid&&ask?(bid+ask)/2:null),
+    bid,ask,delta:n(option.delta),iv:n(option.iv),
+    source:'CBOE',
+    quoteTime:meta.quoteTime||null,
+    receivedAt:meta.receivedAt||new Date().toISOString(),
+    freshness:'delayed',
+  };
+}
+
+async function fetchOptionChainCBOE(ticker, signal){
+  const key=String(ticker||'').trim().toUpperCase();
+  if(!key)throw new Error('CBOE ticker 为空');
+  const cached=cboeChainCache.get(key);
+  if(cached&&Date.now()-cached.savedAt<CBOE_CHAIN_CACHE_MS)return cached.payload;
+  if(cboeChainPending.has(key))return cboeChainPending.get(key);
+  const pending=(async()=>{
+    const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
+    const res=await fetch(`${proxyBase}/api/cboe/${encodeURIComponent(key)}`,{signal:signal||AbortSignal.timeout(12000)});
+    if(!res.ok)throw new Error(`CBOE ${key} HTTP ${res.status}`);
+    const data=await res.json();
+    const dd=data?.data||{};
+    const options=Array.isArray(dd.options)?dd.options:[];
+    if(!options.length)throw new Error(`CBOE ${key} empty option chain`);
+    const n=v=>{const x=Number(v);return Number.isFinite(x)?x:null;};
+    const iv30=n(dd.iv30), hi=n(dd.iv30_one_year_high), lo=n(dd.iv30_one_year_low);
+    return{
+      options,
+      stockPrice:n(dd.current_price)||n(dd.close)||n(dd.prev_day_close),
+      stockIV:iv30,stockHV:null,
+      ivRank:(iv30!=null&&hi!=null&&lo!=null&&hi>lo)?Math.round((iv30-lo)/(hi-lo)*100):null,
+      source:data?.source||'CBOE',
+      quoteTime:data?.quoteTime||dd.quote_time||dd.timestamp||dd.last_updated||null,
+      receivedAt:data?.receivedAt||new Date().toISOString(),
+      freshness:data?.freshness||'delayed',
+    };
+  })();
+  cboeChainPending.set(key,pending);
+  try{
+    const payload=await pending;
+    cboeChainCache.set(key,{savedAt:Date.now(),payload});
+    return payload;
+  }finally{cboeChainPending.delete(key);}
+}
+
 async function fetchOptionPriceCBOE(ticker, expDate, strike, type){
   try{
-    // 优先走 Vercel 代理（解决 CORS 问题），没配置时直连 CBOE
-    const proxyBase=localStorage.getItem('whl-cloud-url');
-    const url=proxyBase
-      ?`${proxyBase}/api/cboe/${encodeURIComponent(ticker)}`
-      :`https://cdn.cboe.com/api/global/delayed_quotes/options/${encodeURIComponent(ticker)}.json`;
-    const res=await fetch(url,{signal:AbortSignal.timeout(12000)});
-    if(!res.ok)return null;
-    const data=await res.json();
-    const options=data?.data?.options;
-    if(!Array.isArray(options)||!options.length)return null;
-
-    const wantType=type==='P'?'put':'call';
-    let best=null, bestDiff=Infinity;
-    for(const o of options){
-      const parsed=parseOCC(o.option);
-      if(!parsed||parsed.type!==wantType)continue;
-      if(parsed.expiry!==expDate)continue;
-      const diff=Math.abs(parsed.strike-strike);
-      if(diff<bestDiff){bestDiff=diff;best=o;}
-    }
-    if(!best)return null;
-    const n=v=>{const x=Number(v);return isFinite(x)&&x!==0?x:null;};
-    const price=n(best.last_trade_price)||n(best.ask)||null;
-    const bid=n(best.bid);
-    const ask=n(best.ask);
-    if(!price&&!bid&&!ask)return null;
-    return{
-      price:price||(bid&&ask?(bid+ask)/2:null),
-      bid, ask,
-      delta:n(best.delta),
-      iv:n(best.iv),
-      source:'CBOE',
-    };
+    const chain=await fetchOptionChainCBOE(ticker,AbortSignal.timeout(12000));
+    return normalizeCboeOption(findCboeOption(chain.options,expDate,strike,type),chain);
   }catch(e){
     console.warn(`CBOE option fetch ${ticker}:`,e.message);
     return null;
   }
-}
-
-async function fetchOptionChainCBOE(ticker, signal){
-  const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
-  const res=await fetch(`${proxyBase}/api/cboe/${encodeURIComponent(ticker)}`,{signal});
-  if(!res.ok)throw new Error(`CBOE ${ticker} HTTP ${res.status}`);
-  const data=await res.json();
-  const dd=data?.data||{};
-  const options=Array.isArray(dd.options)?dd.options:[];
-  if(!options.length)throw new Error(`CBOE ${ticker} empty option chain`);
-  const n=v=>{const x=Number(v);return Number.isFinite(x)?x:null;};
-  const iv30=n(dd.iv30);
-  const hi=n(dd.iv30_one_year_high);
-  const lo=n(dd.iv30_one_year_low);
-  return{
-    options,
-    stockPrice:n(dd.current_price)||n(dd.close)||n(dd.prev_day_close),
-    stockIV:iv30,
-    stockHV:null,
-    ivRank:(iv30!=null&&hi!=null&&lo!=null&&hi>lo)?Math.round((iv30-lo)/(hi-lo)*100):null,
-  };
 }
 
 /* ═══════════════════════════════════════════════════
@@ -467,11 +490,21 @@ async function fetchOptionPriceYahooChart(ticker, expDate, strike, type){
 /* ── 三源瀑布：CBOE（主） → Finnhub → Yahoo ── */
 async function fetchAllOptionPrices(positions, fhKey){
   const results={};
-  await Promise.all(positions.map(async p=>{
-    let r=await fetchOptionPriceCBOE(p.ticker,p.expDate,p.strike,p.type);
-    if(!r?.price&&fhKey) r=await fetchOptionPriceFinnhub(p.ticker,p.expDate,p.strike,p.type,fhKey);
-    if(!r?.price) r=await fetchOptionPriceYahooChart(p.ticker,p.expDate,p.strike,p.type);
-    if(r?.price) results[p.id]=r;
+  const groups=new Map();
+  positions.forEach(position=>{
+    const key=String(position.ticker||'').trim().toUpperCase();
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(position);
+  });
+  await Promise.all([...groups.entries()].map(async([ticker,group])=>{
+    let chain=null;
+    try{chain=await fetchOptionChainCBOE(ticker,AbortSignal.timeout(12000));}catch{}
+    await Promise.all(group.map(async p=>{
+      let r=chain?normalizeCboeOption(findCboeOption(chain.options,p.expDate,p.strike,p.type),chain):null;
+      if(!r?.price&&fhKey)r=await fetchOptionPriceFinnhub(p.ticker,p.expDate,p.strike,p.type,fhKey);
+      if(!r?.price)r=await fetchOptionPriceYahooChart(p.ticker,p.expDate,p.strike,p.type);
+      if(r?.price)results[p.id]=r;
+    }));
   }));
   return results;
 }
@@ -2260,6 +2293,9 @@ function DetailDrawer({p,r,health,commPerSide,onUpdateOptionPrice,onClose,onDele
           <div style={{marginBottom:10}}>
             <div className="section-label" style={{marginBottom:5}}>期权现价（自动 / 手动录入）</div>
             <InlineEdit value={p.optionPrice} onSave={onUpdateOptionPrice}/>
+            {p.optionQuoteSource&&<div style={{fontSize:10,color:V('faint'),fontFamily:'IBM Plex Mono,monospace',marginTop:5}}>
+              {p.optionQuoteSource} · {p.optionQuoteFreshness==='delayed'?'延迟行情':p.optionQuoteFreshness||'行情'}{p.optionQuoteTime?` · ${p.optionQuoteTime}`:''}
+            </div>}
           </div>
           {r.profitNow!=null?(
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
@@ -2612,6 +2648,7 @@ function StockRow({s,onUpdatePrice,onDelete}){
         <div style={{padding:'0 12px',display:'flex',flexDirection:'column',gap:2}}>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint'),letterSpacing:'.08em'}}>{'当前价格'}</span>
           <InlineEdit value={s.currentPrice} onSave={v=>onUpdatePrice(s.id,v)}/>
+          {s.quoteSource&&<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:9,color:V('faint')}}>{s.quoteSource}{s.quoteTime?` · ${s.quoteTime}`:''}</span>}
         </div>
         <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-end',paddingRight:8}}>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:15,fontWeight:600,color:V('ink')}}>
@@ -2974,7 +3011,7 @@ function CnStockForm({onAdd,onCancel}){
     const quote=await fetchCnStockQuoteCached(f.market,f.ticker);
     onAdd({...f,name:f.name.trim()||quote.name||'',id:Date.now(),shares:num(f.shares),costPerShare:num(f.costPerShare),
       currentPrice:quote.price,currency:f.market==='HK'?'HKD':'CNY',source:'auto-quote',
-      quoteSymbol:quote.quoteSymbol,priceUpdatedAt:quote.price==null?null:Date.now()});
+      quoteSymbol:quote.quoteSymbol,quoteSource:quote.source||null,quoteTime:quote.quoteTime||null,quoteFreshness:quote.freshness||null,priceUpdatedAt:quote.price==null?null:Date.now()});
   };
   return(
     <div className="cn-account-form anim-in">
@@ -3137,7 +3174,7 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
         const name=stock.name||quote.name||'';
         if(currentPrice===stock.currentPrice&&name===stock.name&&quote.quoteSymbol===stock.quoteSymbol)return stock;
         changed=true;
-        return{...stock,name,currentPrice,quoteSymbol:quote.quoteSymbol,priceUpdatedAt:quote.price==null?stock.priceUpdatedAt:updatedAt};
+        return{...stock,name,currentPrice,quoteSymbol:quote.quoteSymbol,quoteSource:quote.source||stock.quoteSource||null,quoteTime:quote.quoteTime||stock.quoteTime||null,quoteFreshness:quote.freshness||stock.quoteFreshness||null,priceUpdatedAt:quote.price==null?stock.priceUpdatedAt:updatedAt};
       });
       if(changed)onStocks(next);
       if(!byId.size)showToast('股票行情暂时没有返回',ACC.loss);
@@ -3524,14 +3561,30 @@ function App(){
       // 期权现价：CBOE（免 Key，真实数据）
       const optPrices=positions.length?await fetchAllOptionPrices(positions,null):{};
       const optOk=Object.keys(optPrices).length;
-      if(positions.length)mutate(positions.map(p=>({
+      if(positions.length)mutate(positions.map(p=>{
+        const quote=stockPrices[p.ticker];
+        return{
         ...p,
-        currentPrice:stockPrices[p.ticker]??p.currentPrice,
-        ...(optPrices[p.id]?{optionPrice:optPrices[p.id].price,optionDelta:optPrices[p.id].delta||null}:{}),
-      })));
-      if(stocks.length)mutateStocks(stocks.map(s=>({...s,currentPrice:stockPrices[s.ticker]??s.currentPrice})));
+        currentPrice:quote?.price??p.currentPrice,
+        underlyingQuoteSource:quote?.source||p.underlyingQuoteSource||null,
+        underlyingQuoteTime:quote?.quoteTime||p.underlyingQuoteTime||null,
+        underlyingQuoteFreshness:quote?.freshness||p.underlyingQuoteFreshness||null,
+        ...(optPrices[p.id]?{
+          optionPrice:optPrices[p.id].price,
+          optionDelta:optPrices[p.id].delta||null,
+          optionIv:optPrices[p.id].iv||null,
+          optionQuoteSource:optPrices[p.id].source||null,
+          optionQuoteTime:optPrices[p.id].quoteTime||null,
+          optionQuoteFreshness:optPrices[p.id].freshness||'delayed',
+          optionQuoteReceivedAt:optPrices[p.id].receivedAt||new Date().toISOString(),
+        }:{}),
+      };}));
+      if(stocks.length)mutateStocks(stocks.map(s=>{
+        const quote=stockPrices[s.ticker];
+        return{...s,currentPrice:quote?.price??s.currentPrice,quoteSource:quote?.source||s.quoteSource||null,quoteTime:quote?.quoteTime||s.quoteTime||null,quoteFreshness:quote?.freshness||s.quoteFreshness||null};
+      }));
       setLastRefresh(new Date().toLocaleTimeString('zh-CN'));
-      const stockOk=Object.values(stockPrices).filter(v=>v!=null).length;
+      const stockOk=Object.values(stockPrices).filter(v=>v?.price!=null).length;
       showToast(`股价 ${stockOk}/${allTickers.length} · 期权现价 ${optOk}/${positions.length}${refreshableClosed.length?` · 平仓估算 ${refreshableClosed.length} 笔已刷新`:''}`);
     }catch(e){showToast('刷新失败：'+e.message,ACC.loss);}
     setLoading(false);

@@ -63,6 +63,18 @@ let cnMonthCache = { time: 0, months: [] };
 let csi500IndexCache = { time: 0, data: null };
 const CSI500_INDEX_CACHE_MS = 5 * 60 * 1000;
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36';
+// 上游请求策略：Vercel 的函数实例是短生命周期的，因此这里做的是“单实例保护”。
+// 共享故障快照仍由 Redis 负责，避免在上游异常时连续重试拖慢整次函数执行。
+const UPSTREAM_POLICY = {
+  'qt.gtimg.cn': { minIntervalMs: 120, cooldownMs: 5000 },
+  'cdn.cboe.com': { minIntervalMs: 220, cooldownMs: 8000 },
+  'query1.finance.yahoo.com': { minIntervalMs: 180, cooldownMs: 8000 },
+  'yunhq.sse.com.cn': { minIntervalMs: 180, cooldownMs: 5000 },
+  'szse.cn': { minIntervalMs: 180, cooldownMs: 5000 },
+  'open.er-api.com': { minIntervalMs: 120, cooldownMs: 5000 },
+  '_default': { minIntervalMs: 80, cooldownMs: 4000 },
+};
+const upstreamState = new Map();
 const SZSE_HEADERS = {
   Accept: 'application/json, text/plain, */*',
   'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
@@ -89,23 +101,69 @@ function marketNumber(value) {
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function upstreamHost(url) {
+  try { return new URL(url).hostname; } catch { return '_default'; }
+}
+
+function upstreamPolicy(url) {
+  const host = upstreamHost(url);
+  return UPSTREAM_POLICY[host] || UPSTREAM_POLICY._default;
+}
+
+async function beforeUpstreamRequest(url) {
+  const host = upstreamHost(url);
+  const policy = upstreamPolicy(url);
+  const state = upstreamState.get(host) || { lastRequest: 0, failures: 0, cooldownUntil: 0 };
+  const now = Date.now();
+  if (state.cooldownUntil > now) {
+    throw new Error(`${host} 暂时冷却中，请稍后重试`);
+  }
+  const gap = policy.minIntervalMs - (now - state.lastRequest);
+  if (gap > 0) await wait(gap);
+  state.lastRequest = Date.now();
+  upstreamState.set(host, state);
+  return { host, state, policy };
+}
+
+function markUpstreamSuccess(host, state) {
+  state.failures = 0;
+  state.cooldownUntil = 0;
+  upstreamState.set(host, state);
+}
+
+function markUpstreamFailure(host, state, policy) {
+  state.failures = (state.failures || 0) + 1;
+  if (state.failures >= 3) state.cooldownUntil = Date.now() + policy.cooldownMs;
+  upstreamState.set(host, state);
+}
+
 async function fetchUpstream(url, options = {}, format = 'text') {
-  const { timeoutMs = 8000, attempts = 3, ...fetchOptions } = options;
+  const { timeoutMs = 8000, attempts = 2, ...fetchOptions } = options;
   let lastError;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    let requestContext;
     try {
+      requestContext = await beforeUpstreamRequest(url);
       const response = await fetch(url, { ...fetchOptions, signal: AbortSignal.timeout(timeoutMs) });
       if (!response.ok) {
         const error = new Error(`${response.status} ${response.statusText}`);
-        if (response.status < 500 && response.status !== 429) throw error;
-        lastError = error;
+        throw error;
       } else if (format === 'json') {
-        return await response.json();
+        const value = await response.json();
+        markUpstreamSuccess(requestContext.host, requestContext.state);
+        return value;
+      } else if (format === 'arrayBuffer') {
+        const value = await response.arrayBuffer();
+        markUpstreamSuccess(requestContext.host, requestContext.state);
+        return value;
       } else {
-        return await response.text();
+        const value = await response.text();
+        markUpstreamSuccess(requestContext.host, requestContext.state);
+        return value;
       }
     } catch (error) {
       lastError = error;
+      if (requestContext) markUpstreamFailure(requestContext.host, requestContext.state, requestContext.policy);
       if (/^4\d\d /.test(error.message) && !error.message.startsWith('429 ')) throw error;
     }
     if (attempt < attempts - 1) await wait(250 + attempt * 450);
@@ -121,6 +179,29 @@ async function fetchJson(url, options = {}) {
   return fetchUpstream(url, options, 'json');
 }
 
+function quoteFreshness(source, quoteTime = null) {
+  if (source === 'Tencent' || source === 'tencent-quote-index' || source === 'tencent-etf-realtime') return 'realtime';
+  if (source === 'sse-official-realtime') return 'realtime';
+  if (source === 'CBOE' || source === 'Yahoo') return 'delayed';
+  if (source === 'szse-official-close' || source === 'sse-official-close') return 'official-close';
+  return quoteTime ? 'delayed' : 'unknown';
+}
+
+function withQuoteMeta(payload, { symbol, source, quoteTime = null, currency = null, assetType = 'stock', stale = false, staleReason = null } = {}) {
+  return {
+    ...payload,
+    symbol: symbol || payload.symbol || payload.ticker || null,
+    assetType: payload.assetType || assetType,
+    currency: payload.currency || currency || null,
+    source: payload.source || source || null,
+    quoteTime: payload.quoteTime || quoteTime || null,
+    receivedAt: payload.receivedAt || new Date().toISOString(),
+    freshness: payload.freshness || quoteFreshness(payload.source || source, payload.quoteTime || quoteTime),
+    stale: payload.stale ?? stale,
+    staleReason: payload.staleReason || staleReason || null,
+  };
+}
+
 async function fetchCboeStockQuote(ticker) {
   const data = await fetchJson(
     `https://cdn.cboe.com/api/global/delayed_quotes/options/${encodeURIComponent(ticker)}.json`,
@@ -129,7 +210,13 @@ async function fetchCboeStockQuote(ticker) {
   const quote = data?.data || {};
   const price = finiteNumber(quote.current_price) ?? finiteNumber(quote.close) ?? finiteNumber(quote.prev_day_close);
   if (!(price > 0)) return null;
-  return { name: quote.company_name || quote.symbol_name || null, price };
+  const quoteTime = quote.quote_time || quote.timestamp || quote.last_updated || null;
+  return withQuoteMeta({ name: quote.company_name || quote.symbol_name || null, price }, {
+    symbol: ticker,
+    source: 'CBOE',
+    quoteTime,
+    currency: 'USD',
+  });
 }
 
 async function fetchExchangeRateQuote(ticker) {
@@ -143,7 +230,11 @@ async function fetchExchangeRateQuote(ticker) {
   });
   const price = finiteNumber(data?.rates?.[target]);
   if (!(price > 0)) return null;
-  return { name: `${base}/${target}`, price, source: 'ExchangeRate' };
+  return withQuoteMeta({ name: `${base}/${target}`, price }, {
+    symbol: ticker,
+    source: 'ExchangeRate',
+    currency: target,
+  });
 }
 
 function normalCdf(x) {
@@ -302,13 +393,15 @@ async function fetchTencentCsi500Index() {
   const fields = quoted?.split('~') || [];
   const price = marketNumber(fields[3]);
   if (!(price > 0) || fields[2] !== '000905') throw new Error('腾讯中证500指数行情为空');
-  return {
+  return withQuoteMeta({
     code: '000905', name: '中证500指数', price,
     change: marketNumber(fields[31]), changePct: marketNumber(fields[32]),
     previousClose: marketNumber(fields[4]),
     quoteTime: formatTencentQuoteTime(fields[30]) || shanghaiDate(),
     source: 'tencent-quote-index',
-  };
+  }, {
+    symbol: '000905', source: 'tencent-quote-index', quoteTime: formatTencentQuoteTime(fields[30]) || shanghaiDate(), currency: 'CNY', assetType: 'index',
+  });
 }
 
 async function fetchTencentEtfQuote(config) {
@@ -326,14 +419,50 @@ async function fetchTencentEtfQuote(config) {
   const fields = quoted?.split('~') || [];
   const price = marketNumber(fields[3]);
   if (!(price > 0)) throw new Error(`${config.symbol} ETF 盘中行情为空`);
-  return {
+  return withQuoteMeta({
     price,
     previousClose: marketNumber(fields[4]),
     change: marketNumber(fields[31]),
     changePct: marketNumber(fields[32]),
     quoteTime: formatTencentQuoteTime(fields[30]) || shanghaiDate(),
     source: 'tencent-etf-realtime',
-  };
+  }, {
+    symbol: config.symbol, source: 'tencent-etf-realtime', quoteTime: formatTencentQuoteTime(fields[30]) || shanghaiDate(), currency: 'CNY', assetType: 'etf',
+  });
+}
+
+function parseTencentQuoteText(text, { symbol, tencentSymbol, currency = null, assetType = 'stock' } = {}) {
+  const fields = (text.match(/="([\s\S]*?)";/)?.[1] || '').split('~');
+  const price = marketNumber(fields[3]);
+  if (fields.length < 4 || !(price > 0)) return null;
+  const sourceCurrency = currency || fields[75] || fields[35] || null;
+  const quoteTime = formatTencentQuoteTime(fields[30]) || null;
+  return withQuoteMeta({
+    name: fields[1] || null,
+    code: fields[2] || tencentSymbol || null,
+    price,
+    previousClose: marketNumber(fields[4]),
+    changePct: marketNumber(fields[32]),
+    volume: marketNumber(fields[6]),
+    quoteTime,
+    source: 'Tencent',
+  }, {
+    symbol: symbol || tencentSymbol,
+    source: 'Tencent',
+    quoteTime,
+    currency: sourceCurrency,
+    assetType,
+  });
+}
+
+async function fetchTencentQuote(tencentSymbol, options = {}) {
+  const buffer = await fetchUpstream(`https://qt.gtimg.cn/q=${encodeURIComponent(tencentSymbol)}`, {
+    headers: { Accept: '*/*', 'User-Agent': BROWSER_USER_AGENT, Referer: 'https://gu.qq.com/' },
+    timeoutMs: options.timeoutMs || 3000,
+    attempts: options.attempts || 1,
+  }, 'arrayBuffer');
+  const text = new TextDecoder('gbk').decode(buffer);
+  return parseTencentQuoteText(text, { ...options, tencentSymbol });
 }
 
 async function fetchLiveEtfQuote(config) {
@@ -355,19 +484,21 @@ async function fetchCsi500Index() {
       const row = payload?.list?.[0];
       const price = marketNumber(row?.[2]);
       if (!(price > 0)) throw realtimeError;
-      data = {
+      data = withQuoteMeta({
         code: '000905', name: '中证500指数', price,
         change: marketNumber(row?.[3]), changePct: marketNumber(row?.[4]),
         previousClose: marketNumber(row?.[8]),
         quoteTime: formatSseQuoteTime(payload.date, payload.time),
         source: 'sse-official-index',
-      };
+      }, {
+        symbol: '000905', source: 'sse-official-index', quoteTime: formatSseQuoteTime(payload.date, payload.time), currency: 'CNY', assetType: 'index',
+      });
     }
     csi500IndexCache = { time: Date.now(), data };
     return { ...data, cached: false };
   } catch (error) {
     if (csi500IndexCache.data) {
-      return { ...csi500IndexCache.data, cached: true, stale: true };
+      return { ...csi500IndexCache.data, cached: true, stale: true, freshness: 'stale', staleReason: 'upstream-unavailable' };
     }
     throw error;
   }
@@ -486,6 +617,8 @@ async function fetchSzseOfficialCloseChain(config, month, months, realtime = fal
       const underlyingQuoteTime = realtimeUnderlying?.quoteTime || quoteDate;
       return {
         ...config,
+        assetType: 'option-chain',
+        currency: 'CNY',
         months,
         selectedMonth: month,
         underlyingPrice,
@@ -495,6 +628,8 @@ async function fetchSzseOfficialCloseChain(config, month, months, realtime = fal
         contracts: enrichLocalGreeks(contracts, underlyingPrice),
         delayed: true,
         source: 'szse-official-close',
+        freshness: 'official-close',
+        receivedAt: new Date().toISOString(),
         notice: realtimeUnderlying
           ? `159922 标的使用腾讯盘中行情（${underlyingQuoteTime}）；期权链为深交所官方收盘口径（${quoteDate}），不含实时买卖盘。`
           : `深交所期权链为日终口径，最新官方发布日为 ${quoteDate}；交易日盘中显示上一交易日属于正常情况，不含实时买卖盘。`,
@@ -564,12 +699,16 @@ async function fetchSseOfficialChain(config, month, months) {
 
   return {
     ...config,
+    assetType: 'option-chain',
+    currency: 'CNY',
     months,
     selectedMonth: month,
     underlyingPrice,
     quoteTime: formatSseQuoteTime(chain.date, chain.time),
     contracts: enrichLocalGreeks(contracts, underlyingPrice),
     source: 'sse-official-realtime',
+    freshness: 'realtime',
+    receivedAt: new Date().toISOString(),
     notice: '上交所官方实时行情；官方公网接口不含 Bid/Ask、成交量和持仓量。',
     greekNote: 'IV/Delta 由上交所官方实时最新价按 Black-Scholes 反推，仅供研究。',
   };
@@ -647,6 +786,7 @@ async function fetchCnOptionChain(symbol, month, force = false, realtime = false
         ...fallback,
         cached: true,
         stale: true,
+        freshness: 'stale',
         cacheScope: cached ? 'memory' : 'shared',
         staleReason: isSzseClose ? 'official-close-lag' : 'upstream-unavailable',
         warning: isSzseClose
@@ -713,12 +853,25 @@ module.exports = async function handler(req, res) {
   if (reqUrl.startsWith('/api/cboe/')) {
     const ticker = decodeURIComponent(reqUrl.replace('/api/cboe/', '').split('?')[0]);
     try {
-      const r = await fetch(
-        `https://cdn.cboe.com/api/global/delayed_quotes/options/${ticker}.json`,
-        { headers: { 'User-Agent': 'Mozilla/5.0' } }
+      const data = await fetchJson(
+        `https://cdn.cboe.com/api/global/delayed_quotes/options/${encodeURIComponent(ticker)}.json`,
+        { headers: { 'User-Agent': BROWSER_USER_AGENT }, timeoutMs: 12000, attempts: 1 }
       );
-      const data = await r.json();
-      return res.status(200).json(data);
+      const quote = data?.data || {};
+      const quoteTime = quote.quote_time || quote.timestamp || quote.last_updated || null;
+      const payload = {
+        ...data,
+        symbol: ticker,
+        assetType: 'option-chain',
+        currency: 'USD',
+        source: 'CBOE',
+        quoteTime,
+        receivedAt: new Date().toISOString(),
+        freshness: 'delayed',
+        stale: false,
+      };
+      res.setHeader('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120');
+      return res.status(200).json(payload);
     } catch (e) {
       return res.status(502).json({ error: 'CBOE failed', detail: e.message });
     }
@@ -736,25 +889,40 @@ module.exports = async function handler(req, res) {
       const isSzse = upperTicker.endsWith('.SZ');
       const isCnOrHk = isHk || isSse || isSzse;
       const code = upperTicker.split('.')[0];
-      const tencentSymbol = isHk ? `hk${code.padStart(5, '0')}` : isSse ? `sh${code}` : isSzse ? `sz${code}` : '';
+      const tencentSymbol = isHk
+        ? `hk${code.padStart(5, '0')}`
+        : isSse ? `sh${code}`
+          : isSzse ? `sz${code}`
+            : !upperTicker.includes('=') ? `us${code}` : '';
       const locale = isHk ? '&lang=zh-Hant-HK&region=HK' : (isSse || isSzse) ? '&lang=zh-CN&region=CN' : '';
-      const yahooRequest = fetch(
+      const yahooRequest = fetchJson(
         `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d${locale}`,
-        { headers: { 'User-Agent': BROWSER_USER_AGENT }, signal: AbortSignal.timeout(6000) }
-      ).then(async response => {
-        if (!response.ok) throw new Error(`Yahoo HTTP ${response.status}`);
-        return response.json();
+        { headers: { 'User-Agent': BROWSER_USER_AGENT }, timeoutMs: 6000, attempts: 1 }
+      ).then(data => {
+        const meta = data?.chart?.result?.[0]?.meta || {};
+        const price = finiteNumber(meta.regularMarketPrice) ?? finiteNumber(meta.previousClose);
+        if (!(price > 0)) return null;
+        const quoteTime = meta.regularMarketTime ? new Date(Number(meta.regularMarketTime) * 1000).toISOString() : null;
+        return withQuoteMeta({
+          name: meta.shortName || meta.longName || null,
+          price,
+          previousClose: finiteNumber(meta.previousClose),
+          quoteTime,
+        }, {
+          symbol: ticker,
+          source: 'Yahoo',
+          quoteTime,
+          currency: isHk ? 'HKD' : isSse || isSzse ? 'CNY' : 'USD',
+        });
       });
-      const cnQuoteRequest = tencentSymbol ? fetch(
-        `https://qt.gtimg.cn/q=${encodeURIComponent(tencentSymbol)}`,
-        { headers: { 'User-Agent': BROWSER_USER_AGENT, Referer: 'https://gu.qq.com/' }, signal: AbortSignal.timeout(4500) }
-      ).then(async response => {
-        if (!response.ok) return null;
-        const text = new TextDecoder('gbk').decode(await response.arrayBuffer());
-        const fields = (text.match(/="([\s\S]*?)";/)?.[1] || '').split('~');
-        const cnPrice = Number(fields[3]);
-        return fields.length > 3 ? { name: fields[1] || null, price: Number.isFinite(cnPrice) ? cnPrice : null } : null;
-      }).catch(() => null) : Promise.resolve(null);
+      const cnQuoteRequest = tencentSymbol
+        ? fetchTencentQuote(tencentSymbol, {
+          symbol: ticker,
+          currency: isHk ? 'HKD' : isSse || isSzse ? 'CNY' : 'USD',
+          timeoutMs: 4500,
+          attempts: 1,
+        })
+        : Promise.resolve(null);
       const cboeQuoteRequest = !isCnOrHk && !upperTicker.includes('=')
         ? fetchCboeStockQuote(upperTicker).catch(() => null)
         : Promise.resolve(null);
@@ -762,16 +930,24 @@ module.exports = async function handler(req, res) {
         ? fetchExchangeRateQuote(upperTicker).catch(() => null)
         : Promise.resolve(null);
       const [yahooResult, cnQuoteResult, cboeQuoteResult, fxQuoteResult] = await Promise.allSettled([yahooRequest, cnQuoteRequest, cboeQuoteRequest, fxQuoteRequest]);
-      const data = yahooResult.status === 'fulfilled' ? yahooResult.value : null;
+      const yahooQuote = yahooResult.status === 'fulfilled' ? yahooResult.value : null;
       const cnQuote = cnQuoteResult.status === 'fulfilled' ? cnQuoteResult.value : null;
       const cboeQuote = cboeQuoteResult.status === 'fulfilled' ? cboeQuoteResult.value : null;
       const fxQuote = fxQuoteResult.status === 'fulfilled' ? fxQuoteResult.value : null;
-      const meta = data?.chart?.result?.[0]?.meta || {};
-      const price = meta.regularMarketPrice ?? cnQuote?.price ?? cboeQuote?.price ?? fxQuote?.price ?? null;
-      const name = cnQuote?.name || meta.shortName || meta.longName || cboeQuote?.name || fxQuote?.name || null;
+      // A/H 股票优先腾讯盘中价；美股优先 CBOE 延迟价，再回退 Yahoo/腾讯。
+      // 这样不会因为 Yahoo 返回上一交易日的 regularMarketPrice 而覆盖更近的本地行情。
+      const selected = (isCnOrHk ? [cnQuote, yahooQuote, cboeQuote] : [cboeQuote, yahooQuote, cnQuote, fxQuote]).find((quote) => quote?.price > 0 || quote?.name);
+      const price = selected?.price ?? null;
+      const name = selected?.name || null;
       if (price == null && !name) throw new Error('股票行情源暂时不可用');
       res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
-      return res.status(200).json({ ticker, price, name, source: meta.regularMarketPrice != null ? 'Yahoo' : cnQuote?.price != null ? 'Tencent' : cboeQuote?.price != null ? 'CBOE' : fxQuote?.source || 'ExchangeRate' });
+      return res.status(200).json(withQuoteMeta({ ticker, price, name }, {
+        symbol: ticker,
+        source: selected?.source || 'unknown',
+        quoteTime: selected?.quoteTime || null,
+        currency: selected?.currency || (isHk ? 'HKD' : isSse || isSzse ? 'CNY' : upperTicker.includes('=') ? upperTicker.slice(3, 6) : 'USD'),
+        assetType: upperTicker.includes('=') ? 'fx' : 'stock',
+      }));
     } catch (e) {
       return res.status(502).json({ ticker, price: null, name: null, error: e.message });
     }
