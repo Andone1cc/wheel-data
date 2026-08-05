@@ -546,11 +546,25 @@ async function fetchAIPrices(tickers,apiKey){
 }
 
 /* ── 计算核心（活跃仓位）── */
+function positionCapital(p){
+  const qty=p.qty||1;
+  if(p.marginType==='stock'){
+    // 股票担保不冻结现金，但用被担保股票市值作为收益率分母。
+    const stored=Number(p.collateralValue);
+    return Number.isFinite(stored)&&stored>0?stored:p.strike*100*qty;
+  }
+  return (p.marginType==='cash'?p.strike*100:(p.customMargin||0))*qty;
+}
+function positionMargin(p){
+  // 股票担保不计入 SGOV/现金保证金占用。
+  return p.marginType==='stock'?0:positionCapital(p);
+}
 function calc(p,comm=DEFAULT_COMM){
   const qty=p.qty||1;
   const commTotal=comm*qty*2;
   const openPrem=p.premium*100*qty;
-  const capital=(p.marginType==='cash'?p.strike*100:(p.customMargin||0))*qty;
+  const capital=positionCapital(p);
+  const margin=positionMargin(p);
   const daysHeld=Math.max(1,daysBetween(p.openDate,today()));
   const daysTotal=Math.max(1,daysBetween(p.openDate,p.expDate));
   const daysLeft=Math.max(0,daysBetween(today(),p.expDate));
@@ -568,7 +582,7 @@ function calc(p,comm=DEFAULT_COMM){
   const annualExp=calcAnnual(profitExp,capital,daysTotal);
   let buffer=null;
   if(p.currentPrice)buffer=p.type==='P'?((p.currentPrice-p.strike)/p.currentPrice)*100:((p.strike-p.currentPrice)/p.currentPrice)*100;
-  return{qty,commTotal,commExp,openPrem,capital,daysHeld,daysTotal,daysLeft,thetaPct,profitNow,yieldNow,annualNow,capturedPct,profitExp,yieldExp,annualExp,buffer};
+  return{qty,commTotal,commExp,openPrem,capital,margin,daysHeld,daysTotal,daysLeft,thetaPct,profitNow,yieldNow,annualNow,capturedPct,profitExp,yieldExp,annualExp,buffer};
 }
 
 function clamp(n,min,max){return Math.max(min,Math.min(max,n));}
@@ -642,7 +656,7 @@ function scorePosition(p,r,ctx={}){
 function calcClosed(c,comm=DEFAULT_COMM){
   const qty=c.qty||1;
   const openPrem=c.premium*100*qty;
-  const capital=(c.marginType==='cash'?c.strike*100:(c.customMargin||0))*qty;
+  const capital=positionCapital(c);
   const closeType=c.closeType||'manual'; // manual | expired | assigned | roll
   const commUsed=closeType==='expired'?comm*qty:comm*qty*2;
   const closePrem=(c.closePrice||0)*100*qty;
@@ -927,13 +941,13 @@ function RollModal({pos,commPerSide,onConfirm,onClose}){
 }
 
 /* ══ 平仓弹层 ══════════════════════════════════════ */
-function CloseModal({pos,commPerSide,onConfirm,onClose}){
+function CloseModal({pos,commPerSide,onConfirm,onClose,initialCloseType='manual'}){
   const [closePrice,setClosePrice]=useState('');
   const [closeDate,setCloseDate]=useState(today());
-  const [closeType,setCloseType]=useState('manual'); // manual | expired | assigned
+  const [closeType,setCloseType]=useState(initialCloseType); // manual | expired | assigned
   const qty=pos.qty||1;
   const openPrem=pos.premium*100*qty;
-  const capital=(pos.marginType==='cash'?pos.strike*100:(pos.customMargin||0))*qty;
+  const capital=positionCapital(pos);
   const shares=qty*100; // 期权行权 1手 = 100股
 
   // 不同平仓方式的手续费和收益
@@ -983,14 +997,14 @@ function CloseModal({pos,commPerSide,onConfirm,onClose}){
       {/* 接货专属信息框 */}
       {closeType==='assigned'&&(
         <div style={{background:`${ACC.amber}0f`,border:`1px solid ${ACC.amber}33`,borderRadius:10,padding:'14px 16px',marginBottom:14}}>
-          <div style={{fontSize:10,color:ACC.amber,letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',marginBottom:12}}>📦 接货详情</div>
+          <div style={{fontSize:10,color:ACC.amber,letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',marginBottom:12}}>{pos.type==='P'?'📦 接货详情':'📤 被行权交割'}</div>
           <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14}}>
-            <Stat label="接货股数" value={`${shares} 股`} color={V('ink')} sub={`${qty}手 × 100`}/>
-            <Stat label="行权价（买入价）" value={`$${fmt(pos.strike,0)}`} color={ACC.amber}/>
-            <Stat label="实际每股成本" value={`$${fmt(effectiveCost,2)}`} color={ACC.profit} sub="行权价 − 净权利金"/>
+            <Stat label={pos.type==='P'?'接货股数':'交割股数'} value={`${shares} 股`} color={V('ink')} sub={`${qty}手 × 100`}/>
+            <Stat label={pos.type==='P'?'行权价（买入价）':'行权价（卖出价）'} value={`$${fmt(pos.strike,0)}`} color={ACC.amber}/>
+            <Stat label={pos.type==='P'?'实际每股成本':'股票交割价'} value={`$${fmt(pos.type==='P'?effectiveCost:pos.strike,2)}`} color={ACC.profit} sub={pos.type==='P'?'行权价 − 净权利金':'从股票持仓扣减'}/>
           </div>
           <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${ACC.amber}22`,display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
-            <Stat label="接货占用资金" value={`$${fmt(assignedMarketValue,0)}`} color={ACC.loss} sub="将从 SGOV 扣减"/>
+            <Stat label={pos.type==='P'?'接货占用资金':'交割名义金额'} value={`$${fmt(assignedMarketValue,0)}`} color={ACC.loss} sub={pos.type==='P'?'将从 SGOV 扣减':'不扣减 SGOV'}/>
             <Stat label="期权收益（已锁定）" value={fmtM(profit)} color={ACC.profit} sub="权利金 − 手续费"/>
           </div>
         </div>
@@ -1019,12 +1033,12 @@ function CloseModal({pos,commPerSide,onConfirm,onClose}){
           // 接货额外信息
           ...(closeType==='assigned'?{
             assignedShares:shares,
-            assignedCostPerShare:effectiveCost,
+            assignedCostPerShare:pos.type==='P'?effectiveCost:pos.strike,
             assignedMarketValue,
             assignedTicker:pos.ticker,
           }:{}),
         })} className="btn btn-primary" style={{minWidth:100}}>
-          {closeType==='assigned'?'确认接货':'确认平仓'}
+          {closeType==='assigned'?(pos.type==='P'?'确认接货':'确认交割'):'确认平仓'}
         </button>
         <button onClick={onClose} className="btn btn-ghost">取消</button>
       </div>
@@ -2124,7 +2138,9 @@ function SgovPanel({sgov,onUpdate,totalMarginUsed}){
 /* ══ 汇总栏 ══════════════════════════════════════ */
 function SummaryBar({positions,commPerSide,sgov}){
   const rs=positions.map(p=>calc(p,commPerSide));
-  const totalMargin=rs.reduce((s,r)=>s+r.capital,0);
+  const totalMargin=rs.reduce((s,r)=>s+r.margin,0);
+  const totalCapital=rs.reduce((s,r)=>s+r.capital,0);
+  const stockCollateral=rs.reduce((s,r,i)=>s+(positions[i].marginType==='stock'?r.capital:0),0);
   const totalGross=rs.reduce((s,r)=>s+r.openPrem,0);
   const totalComm=rs.reduce((s,r)=>s+r.commExp,0);
   const totalNet=totalGross-totalComm;
@@ -2134,9 +2150,9 @@ function SummaryBar({positions,commPerSide,sgov}){
   // ── 年化：用总利润÷总保证金，资金加权，避免简单平均失真 ──
   // 「持到到期」：净权利金 ÷ 总保证金，天数用资金加权平均持有天数
   const avgExp=(()=>{
-    if(!positions.length||totalMargin===0)return null;
-    const wDays=rs.reduce((s,r)=>s+r.daysTotal*(r.capital||0),0)/totalMargin;
-    return calcAnnual(totalNet,totalMargin,wDays);
+    if(!positions.length||totalCapital===0)return null;
+    const wDays=rs.reduce((s,r)=>s+r.daysTotal*(r.capital||0),0)/totalCapital;
+    return calcAnnual(totalNet,totalCapital,wDays);
   })();
 
   // 「现在卖出」：当前浮动利润 ÷ 总保证金（仅有期权现价的仓位参与）
@@ -2162,7 +2178,7 @@ function SummaryBar({positions,commPerSide,sgov}){
     return calcAnnual(totalProfitNow,sgovMV,wDays);
   })():null;
   const expVsSgov=(avgExp!=null&&sgovMV)?(()=>{
-    const wDays=rs.reduce((s,r)=>s+r.daysTotal*(r.capital||0),0)/Math.max(1,totalMargin);
+    const wDays=rs.reduce((s,r)=>s+r.daysTotal*(r.capital||0),0)/Math.max(1,totalCapital);
     return calcAnnual(totalNet,sgovMV,wDays);
   })():null;
   const Box=({label,value,color,sub,hl,sz=22})=>(
@@ -2185,7 +2201,8 @@ function SummaryBar({positions,commPerSide,sgov}){
   return(
     <div className="glass-card summary-card anim-in" style={{padding:'18px 22px',marginBottom:16}}>
       <div className="summary-grid" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:14,marginBottom:14,paddingBottom:14,borderBottom:`1px solid ${V('line')}`}}>
-        <Box label="期权总保证金" value={`$${fmt(totalMargin,0)}`} color={V('dim')} sub={`${positions.length} 个仓位`}/>
+        <Box label="现金/券商保证金" value={`$${fmt(totalMargin,0)}`} color={V('dim')} sub={`${positions.length} 个仓位`}/>
+        {stockCollateral>0&&<Box label="股票担保市值" value={`$${fmt(stockCollateral,0)}`} color={ACC.teal} sub="卖 Call 的持仓担保"/>}
         <Box label="收入权利金" value={`$${fmt(totalGross)}`} color={ACC.amber} sub="开仓时收取的总权利金"/>
         <Box label="手续费合计" value={`-$${fmt(totalComm)}`} color={ACC.loss} sub="持到到期单边×仓位数"/>
         <Box label="净权利金（到期）" value={`$${fmt(totalNet)}`} color={ACC.profit} hl={ACC.profit}/>
@@ -2212,26 +2229,78 @@ function SummaryBar({positions,commPerSide,sgov}){
 }
 
 /* ══ 录入期权表单 ═══════════════════════════════════ */
-function AddForm({onAdd,onCancel,commPerSide}){
+function coveredCallAvailability(stocks=[],positions=[],ticker='',neededShares=0){
+  const symbol=String(ticker||'').trim().toUpperCase();
+  const heldShares=stocks
+    .filter(s=>String(s.ticker||'').trim().toUpperCase()===symbol)
+    .reduce((sum,s)=>sum+(Number(s.shares)||0),0);
+  const reservedShares=positions
+    .filter(p=>p.type==='C'&&p.marginType==='stock'&&String(p.ticker||'').trim().toUpperCase()===symbol)
+    .reduce((sum,p)=>sum+(Number(p.coveredShares)||((Number(p.qty)||1)*100)),0);
+  let remaining=Math.max(0,neededShares);
+  let value=0;
+  let cost=0;
+  let coveredShares=0;
+  let reservedRemaining=reservedShares;
+  stocks
+    .filter(s=>String(s.ticker||'').trim().toUpperCase()===symbol)
+    .forEach(s=>{
+      if(remaining<=0)return;
+      const held=Math.max(0,(Number(s.shares)||0));
+      const reserved=Math.min(held,reservedRemaining);
+      reservedRemaining-=reserved;
+      const available=held-reserved;
+      const take=Math.min(available,remaining);
+      const current=finitePrice(s.currentPrice)??(Number(s.costPerShare)||0);
+      value+=take*current;
+      cost+=take*(Number(s.costPerShare)||0);
+      coveredShares+=take;
+      remaining-=take;
+    });
+  return{
+    heldShares,
+    reservedShares,
+    availableShares:Math.max(0,heldShares-reservedShares),
+    coveredShares,
+    value,
+    cost,
+  };
+}
+
+function AddForm({onAdd,onCancel,commPerSide,stocks=[],positions=[]}){
   const [f,setF]=useState({ticker:'',type:'P',strike:'',qty:'1',openDate:today(),expDate:'',premium:'',marginType:'cash',customMargin:''});
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
-  const autoCapital=(f.marginType==='cash'?(parseFloat(f.strike)||0)*100:(parseFloat(f.customMargin)||0))*(parseInt(f.qty)||1);
   const qty=parseInt(f.qty)||1;
+  const neededShares=qty*100;
+  const coverage=coveredCallAvailability(stocks,positions,f.ticker,neededShares);
+  const autoCapital=f.marginType==='cash'
+    ?(parseFloat(f.strike)||0)*neededShares
+    :f.marginType==='stock'
+      ?coverage.value
+      :(parseFloat(f.customMargin)||0)*qty;
   const comm=commPerSide*qty*2;
   const netPrem=f.premium?Math.max(0,parseFloat(f.premium)*100*qty-comm):null;
-  const valid=f.ticker&&f.strike&&f.expDate&&f.premium;
+  const stockCovered=f.type==='C'&&f.marginType==='stock'&&coverage.coveredShares>=neededShares;
+  const valid=f.ticker&&f.strike&&f.expDate&&f.premium&&(f.marginType!=='stock'||stockCovered);
   const submit=()=>{
     if(!valid)return;
     onAdd({id:Date.now(),ticker:f.ticker.toUpperCase().trim(),type:f.type,strike:parseFloat(f.strike),qty,
       openDate:f.openDate,expDate:f.expDate,premium:parseFloat(f.premium),marginType:f.marginType,
-      customMargin:parseFloat(f.customMargin)||0,currentPrice:null,optionPrice:null});
+      customMargin:parseFloat(f.customMargin)||0,
+      ...(f.marginType==='stock'?{
+        coveredShares:neededShares,
+        collateralValue:coverage.value,
+        collateralCostBasis:coverage.cost,
+      }:{}),
+      currentPrice:null,optionPrice:null});
   };
+  const selectType=(type)=>setF(p=>({...p,type,marginType:type==='P'&&p.marginType==='stock'?'cash':p.marginType}));
   return(
     <div className="card mobile-form-card anim-in" style={{padding:22,marginBottom:16,borderColor:`${ACC.amber}33`}}>
       <div style={{fontSize:13,fontWeight:700,color:ACC.amber,marginBottom:18}}>＋ 录入期权仓位</div>
       <div className="mobile-form-grid" style={{display:'grid',gridTemplateColumns:'2fr 110px 1fr 80px',gap:12,marginBottom:12}}>
         <Field label="标的代码" value={f.ticker} onChange={v=>set('ticker',v.toUpperCase())} placeholder="MRVL"/>
-        <SelectField label="方向" value={f.type} onChange={v=>set('type',v)} options={[{value:'P',label:'卖 Put'},{value:'C',label:'卖 Call'}]}/>
+        <SelectField label="方向" value={f.type} onChange={selectType} options={[{value:'P',label:'卖 Put'},{value:'C',label:'卖 Call'}]}/>
         <NumField label="行权价" prefix="$" value={f.strike} onChange={v=>set('strike',v)} placeholder="190"/>
         <NumField label="手数" value={f.qty} onChange={v=>set('qty',v)} placeholder="1" suffix="手"/>
       </div>
@@ -2242,11 +2311,24 @@ function AddForm({onAdd,onCancel,commPerSide}){
       </div>
       <div className="mobile-form-grid" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
         <SelectField label="保证金类型" value={f.marginType} onChange={v=>set('marginType',v)}
-          options={[{value:'cash',label:'现金担保（行权价×100）'},{value:'custom',label:'自定义（券商实际占用）'}]}/>
+          options={[
+            ...(f.type==='C'?[{value:'stock',label:'股票担保（持仓×100）'}]:[]),
+            {value:'cash',label:'现金担保（行权价×100）'},
+            {value:'custom',label:'自定义（券商实际占用）'},
+          ]}/>
         {f.marginType==='custom'
           ?<NumField label="自定义占用资金" prefix="$" value={f.customMargin} onChange={v=>set('customMargin',v)} placeholder="5000"/>
-          :<Field label="占用资金（自动）" value={`$${fmt(autoCapital,0)}`} onChange={()=>{}} readOnly color={ACC.amber}/>}
+          :f.marginType==='stock'
+            ?<Field label="股票担保市值（自动）" value={`$${fmt(autoCapital,0)}`} onChange={()=>{}} readOnly color={ACC.teal}/>
+            :<Field label="占用资金（自动）" value={`$${fmt(autoCapital,0)}`} onChange={()=>{}} readOnly color={ACC.amber}/>}
       </div>
+      {f.type==='C'&&f.marginType==='stock'&&(
+        <div style={{background:stockCovered?ACC.tealBg:ACC.lossBg,border:`1px solid ${(stockCovered?ACC.teal:ACC.loss)}44`,borderRadius:10,padding:'10px 14px',marginBottom:14,fontSize:12,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>
+          <span style={{color:stockCovered?ACC.teal:ACC.loss,fontWeight:700}}>股票担保：</span>
+          {coverage.availableShares} 股可用 / 需要 {neededShares} 股
+          {!stockCovered&&<span style={{display:'block',marginTop:4,color:ACC.loss}}>请先录入足够的 {f.ticker||'该标的'} 股票，或改用现金担保。</span>}
+        </div>
+      )}
       {f.premium&&<div style={{background:V('surface'),border:`1px solid ${V('line')}`,borderRadius:10,padding:'10px 14px',marginBottom:14,display:'flex',gap:24,flexWrap:'wrap'}}>
         <span style={{fontSize:12,fontFamily:'IBM Plex Mono,monospace',color:V('dim')}}>手续费双边：<span style={{color:ACC.loss}}>${fmt(comm)}</span></span>
         {netPrem!=null&&<span style={{fontSize:12,fontFamily:'IBM Plex Mono,monospace',color:V('dim')}}>净权利金：<span style={{color:ACC.profit}}>${fmt(netPrem)}</span></span>}
@@ -2260,7 +2342,10 @@ function AddForm({onAdd,onCancel,commPerSide}){
 }
 
 /* ══ 详情抽屉 ══════════════════════════════════════ */
-function DetailDrawer({p,r,health,commPerSide,onUpdateOptionPrice,onClose,onDelete,onRoll}){
+function DetailDrawer({p,r,health,commPerSide,onUpdateOptionPrice,onClose,onAssign,onDelete,onRoll}){
+  const isITM=r.buffer!=null&&r.buffer<=0;
+  const quickAssignment=p.type==='P'&&isITM;
+  const quickCallAssignment=p.type==='C'&&p.marginType==='stock'&&isITM;
   return(
     <div className="detail-drawer anim-fade" style={{borderTop:`1px solid ${V('line')}`,background:V('surface'),borderRadius:'0 0 14px 14px',padding:'18px 20px'}}>
       <div style={{marginBottom:16}}>
@@ -2275,7 +2360,7 @@ function DetailDrawer({p,r,health,commPerSide,onUpdateOptionPrice,onClose,onDele
         <Stat label="开仓权利金" value={`$${fmt(r.openPrem)}`} sub={`$${fmt(p.premium)}/股×${r.qty}手`} color={ACC.amber}/>
         <Stat label="手续费双边" value={`-$${fmt(r.commTotal)}`} sub={`$${commPerSide}/张×${r.qty}×2`} color={ACC.loss}/>
         <Stat label="净权利金" value={`$${fmt(r.openPrem-r.commTotal)}`} color={ACC.profit}/>
-        <Stat label="占用资金" value={`$${fmt(r.capital,0)}`} sub={p.marginType==='cash'?'现金担保':'自定义'} color={V('dim')}/>
+        <Stat label="担保资产" value={`$${fmt(r.capital,0)}`} sub={p.marginType==='cash'?'现金担保':p.marginType==='stock'?'股票担保（不占现金）':'自定义'} color={p.marginType==='stock'?ACC.teal:V('dim')}/>
         <Stat label="持有天数" value={`${r.daysHeld} 天`} sub={`共 ${r.daysTotal} 天`} color={V('dim')}/>
         {r.capturedPct!=null&&<Stat label="权利金捕获" value={`${r.capturedPct.toFixed(1)}%`} color={r.capturedPct>=50?ACC.profit:ACC.amber}/>}
         {r.buffer!=null&&<Stat label={p.type==='P'?'价外缓冲':'价外距离'} value={`${r.buffer>0?'+':''}${r.buffer.toFixed(1)}%`} sub={`现价 $${fmt(p.currentPrice)}`} color={r.buffer>0?ACC.profit:ACC.loss}/>}
@@ -2340,6 +2425,14 @@ function DetailDrawer({p,r,health,commPerSide,onUpdateOptionPrice,onClose,onDele
           <span style={{fontSize:11,color:V('faint'),fontFamily:'IBM Plex Mono,monospace'}}>仅扣单边 ${fmt(r.commExp)} · 剩 {r.daysLeft} 天</span>
         </div>
       </div>
+      {(quickAssignment||quickCallAssignment)&&<div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap',padding:'10px 12px',marginBottom:14,borderRadius:10,background:quickAssignment?ACC.amberSoft:ACC.lossBg,border:`1px solid ${(quickAssignment?ACC.amber:ACC.loss)}44`}}>
+        <span style={{fontSize:12,color:quickAssignment?ACC.amber:ACC.loss,fontFamily:'IBM Plex Mono,monospace'}}>
+          {quickAssignment?'ITM Put · 可能被提前行权，确认后将增加股票持仓。':'ITM Covered Call · 可能被行权，将从股票持仓扣减交割股数。'}
+        </span>
+        <button onClick={onAssign} className="btn" style={{background:quickAssignment?ACC.amberSoft:ACC.lossBg,color:quickAssignment?ACC.amber:ACC.loss,border:`1.5px solid ${(quickAssignment?ACC.amber:ACC.loss)}66`,whiteSpace:'nowrap'}}>
+          {quickAssignment?'📦 登记接货':'📤 登记被行权'}
+        </button>
+      </div>}
       <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
         <button onClick={onRoll} className="btn" style={{background:ACC.amberSoft,color:ACC.amber,border:'1.5px solid '+ACC.amber+'44'}}>{'↻ Roll 滚仓'}</button>
         <button onClick={onClose} className="btn btn-primary" style={{background:ACC.blue,color:'#fff'}}>{'↩ 平仓'}</button>
@@ -2350,7 +2443,7 @@ function DetailDrawer({p,r,health,commPerSide,onUpdateOptionPrice,onClose,onDele
 }
 
 /* ══ 活跃仓位行 ══════════════════════════════════════ */
-function PositionRow({p,commPerSide,portfolio,expanded,onToggle,onUpdateOptionPrice,onClose,onDelete,onRoll}){
+function PositionRow({p,commPerSide,portfolio,expanded,onToggle,onUpdateOptionPrice,onClose,onAssign,onDelete,onRoll}){
   const r=calc(p,commPerSide);
   const health=scorePosition(p,r,portfolio);
   const isCall=p.type==='C';
@@ -2422,7 +2515,7 @@ function PositionRow({p,commPerSide,portfolio,expanded,onToggle,onUpdateOptionPr
       </div>
       {expanded&&<DetailDrawer p={p} r={r} health={health} commPerSide={commPerSide}
         onUpdateOptionPrice={v=>onUpdateOptionPrice(p.id,v)}
-        onClose={onClose} onDelete={onDelete} onRoll={onRoll}/>}
+        onClose={onClose} onAssign={onAssign} onDelete={onDelete} onRoll={onRoll}/>}
     </div>
   );
 }
@@ -3664,6 +3757,10 @@ function App(){
   };
 
   // 平仓 / 接货
+  const openClose=(pos,initialCloseType='manual')=>{
+    setCloseTarget({pos,initialCloseType});
+    setExpanded(null);
+  };
   const confirmClose=(pos,data)=>{
     const {closePrice,closeDate,closeType,assignedShares,assignedCostPerShare,assignedMarketValue,assignedTicker}=data;
     const record={...pos,closePrice,closeDate,closeType,closedAt:Date.now(),...(closeType==='assigned'?{assignedShares,assignedCostPerShare,assignedMarketValue}:{})};
@@ -3671,20 +3768,44 @@ function App(){
     mutate(positions.filter(p=>p.id!==pos.id));
 
     if(closeType==='assigned'){
-      // 新建股票仓位
-      const newStock={
-        id:Date.now(),ticker:assignedTicker,shares:assignedShares,
-        costPerShare:assignedCostPerShare,acquireDate:closeDate,
-        source:'assigned',currentPrice:pos.currentPrice||null,
-        fromOptionId:pos.id,
-      };
-      mutateStocks([...stocks,newStock]);
-      // SGOV 市值自动扣减接货占用资金
-      if(sgov?.marketValue){
-        const newMV=Math.max(0,(sgov.marketValue||0)-assignedMarketValue);
-        mutateSgov({...sgov,marketValue:newMV});
+      const symbol=String(assignedTicker||pos.ticker).trim().toUpperCase();
+      if(pos.type==='P'){
+        // Put 接货：同标的合并到现有股票仓位，并按总成本重新计算均价。
+        const existingIndex=stocks.findIndex(s=>String(s.ticker||'').trim().toUpperCase()===symbol);
+        if(existingIndex>=0){
+          const existing=stocks[existingIndex];
+          const oldShares=Number(existing.shares)||0;
+          const addedShares=Number(assignedShares)||0;
+          const totalShares=oldShares+addedShares;
+          const totalCost=oldShares*(Number(existing.costPerShare)||0)+addedShares*(Number(assignedCostPerShare)||0);
+          const nextStocks=[...stocks];
+          nextStocks[existingIndex]={...existing,shares:totalShares,costPerShare:totalShares?totalCost/totalShares:0,source:'assigned',currentPrice:pos.currentPrice??existing.currentPrice};
+          mutateStocks(nextStocks);
+        }else{
+          mutateStocks([...stocks,{id:Date.now(),ticker:symbol,shares:assignedShares,costPerShare:assignedCostPerShare,acquireDate:closeDate,source:'assigned',currentPrice:pos.currentPrice||null,fromOptionId:pos.id}]);
+        }
+        // Put 接货资金从 SGOV 扣减；Covered Call 交割不涉及现金接货。
+        if(sgov?.marketValue){
+          const newMV=Math.max(0,(sgov.marketValue||0)-assignedMarketValue);
+          mutateSgov({...sgov,marketValue:newMV});
+        }
+        showToast(`📦 ${symbol} 接货 ${assignedShares}股，股票持仓已增加，SGOV 已扣减 $${fmt(assignedMarketValue,0)}`,ACC.amber);
+      }else{
+        // Call 被行权：交割股票，从同标的现有持仓中扣除，而不是新增股票。
+        let remaining=Number(assignedShares)||0;
+        const nextStocks=[];
+        stocks.forEach(stock=>{
+          const same=String(stock.ticker||'').trim().toUpperCase()===symbol;
+          const shares=Number(stock.shares)||0;
+          if(!same||remaining<=0){nextStocks.push(stock);return;}
+          const delivered=Math.min(shares,remaining);
+          const left=shares-delivered;
+          if(left>0)nextStocks.push({...stock,shares:left});
+          remaining-=delivered;
+        });
+        mutateStocks(nextStocks);
+        showToast(remaining>0?`📤 ${symbol} 已登记被行权，但股票不足 ${remaining}股，请检查持仓`:`📤 ${symbol} 已交割 ${assignedShares}股，股票持仓已扣减`,remaining>0?ACC.loss:ACC.amber);
       }
-      showToast(`📦 ${assignedTicker} 接货 ${assignedShares}股，SGOV 已扣减 $${fmt(assignedMarketValue,0)}`,ACC.amber);
     }else{
       showToast(`${pos.ticker} 已平仓，收益 ${fmtM(calcClosed(record,commPerSide).profit)}`);
     }
@@ -3718,7 +3839,7 @@ function App(){
   const updateStockPrice=(id,price)=>mutateStocks(stocks.map(s=>s.id===id?{...s,currentPrice:price}:s));
   const removeStock=(id)=>{mutateStocks(stocks.filter(s=>s.id!==id));showToast('已删除股票仓位',ACC.loss);};
 
-  const totalMarginUsed=positions.reduce((s,p)=>s+(p.marginType==='cash'?p.strike*100:(p.customMargin||0))*(p.qty||1),0);
+  const totalMarginUsed=positions.reduce((s,p)=>s+positionMargin(p),0);
 
   return(
     <div className="app-shell" style={{minHeight:'100vh',display:'flex',flexDirection:'column'}}>
@@ -3748,8 +3869,8 @@ function App(){
         onClose={()=>setShowCloudModal(false)}/>}
       {rollTarget&&<RollModal pos={rollTarget} commPerSide={commPerSide}
         onConfirm={(data)=>confirmRoll(rollTarget,data)} onClose={()=>setRollTarget(null)}/>}
-      {closeTarget&&<CloseModal pos={closeTarget} commPerSide={commPerSide}
-        onConfirm={(data)=>confirmClose(closeTarget,data)} onClose={()=>setCloseTarget(null)}/>}
+      {closeTarget&&<CloseModal pos={closeTarget.pos} initialCloseType={closeTarget.initialCloseType} commPerSide={commPerSide}
+        onConfirm={(data)=>confirmClose(closeTarget.pos,data)} onClose={()=>setCloseTarget(null)}/>}
 
       {/* ── Header ── */}
       <div className="app-header" style={{borderBottom:`1px solid ${V('line')}`,background:V('surface'),backdropFilter:'blur(14px)',position:'sticky',top:0,zIndex:50,boxShadow:V('shadow'),height:56,display:'flex',alignItems:'center'}}>
@@ -3865,7 +3986,7 @@ function App(){
           {/* 活跃仓位 Tab */}
           {tab==='active'&&(
             <>
-              {showForm&&<AddForm onAdd={addPosition} onCancel={()=>setShowForm(false)} commPerSide={commPerSide}/>}
+              {showForm&&<AddForm onAdd={addPosition} onCancel={()=>setShowForm(false)} commPerSide={commPerSide} stocks={stocks} positions={positions}/>}
               {positions.length>0&&<SummaryBar positions={positions} commPerSide={commPerSide} sgov={sgov}/>}
               {positions.length===0&&!showForm&&(
                 <div style={{textAlign:'center',padding:'70px 20px',color:V('faint'),border:`1.5px dashed ${V('line')}`,borderRadius:16}}>
@@ -3883,7 +4004,8 @@ function App(){
                       expanded={expanded===p.id}
                       onToggle={()=>toggleExpand(p.id)}
                       onUpdateOptionPrice={updateOptionPrice}
-                      onClose={()=>{setCloseTarget(p);setExpanded(null);}}
+                      onClose={()=>openClose(p)}
+                      onAssign={()=>openClose(p,'assigned')}
                       onDelete={()=>removePosition(p.id)}
                       onRoll={()=>{setRollTarget(p);setExpanded(null);}}/>
                   ))}
