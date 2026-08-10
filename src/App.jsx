@@ -2956,8 +2956,8 @@ function UsClosedSummary({optionClosed,stockClosed,commPerSide}){
   const avgAnnual=annual.length?annual.reduce((sum,r)=>sum+r.annual,0)/annual.length:null;
   if(!all.length)return null;
   return(
-    <div className="glass-card anim-in" style={{padding:'20px 24px',marginBottom:16}}>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:20,alignItems:'end'}}>
+    <div className="glass-card anim-in us-closed-summary" style={{padding:'20px 24px',marginBottom:16}}>
+      <div className="us-closed-summary-grid">
         <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">期权已实现</span><span style={{fontSize:24,fontWeight:700,color:optionProfit>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(optionProfit)}</span><span style={{fontSize:10,color:V('faint')}}>{optionClosed.length} 笔</span></div>
         <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">股票已实现</span><span style={{fontSize:24,fontWeight:700,color:stockProfit>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(stockProfit)}</span><span style={{fontSize:10,color:V('faint')}}>{stockClosed.length} 笔 · 现金成本口径</span></div>
         <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">合计已实现</span><span style={{fontSize:28,fontWeight:700,color:totalProfit>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(totalProfit)}</span></div>
@@ -2973,7 +2973,7 @@ function StockClosedTableHeader(){
   return <div style={{display:'grid',gridTemplateColumns:'3px minmax(140px,.9fr) minmax(118px,.8fr) minmax(118px,.8fr) minmax(180px,1.1fr) minmax(130px,.8fr) minmax(112px,.7fr) 32px',alignItems:'center',padding:'0 0 8px',marginBottom:4}}><div/><H t="标的"/><H t="持仓"/><H t="买入 / 平仓日"/><H t="收支明细"/><H t="净利润" right/><H t="实现年化" right/><div/></div>;
 }
 
-function StockClosedRow({c,onDelete}){
+function StockClosedRow({c,onUpdate,onDelete}){
   const r=calcUsStockClosed(c);
   const positive=r.profit>=0;
   return(
@@ -2983,7 +2983,7 @@ function StockClosedRow({c,onDelete}){
         <div style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:3}}><span style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:14,color:V('dim')}}>{c.ticker}</span><span className="badge" style={{color:ACC.teal,background:ACC.tealBg,borderColor:ACC.teal+'44'}}>股票</span></div>
         <div><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('ink'),fontWeight:600}}>{fmt(r.shares,0)} 股</span><div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{'现金成本 $'+fmt(r.costPerShare,2)+'/股'}</div></div>
         <div><div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('dim')}}>{c.acquireDate||'—'}</div><div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('faint')}}>→ {c.closeDate||'—'}</div><div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{r.daysHeld} 天</div></div>
-        <div style={{padding:'0 10px',display:'flex',flexDirection:'column',gap:3}}><div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13}}><span style={{color:ACC.amber}}>{'$'+fmt(r.costPerShare*r.shares,0)}</span><span style={{color:V('faint')}}> → </span><span style={{color:V('ink')}}>{'$'+fmt(r.closePrice*r.shares,0)}</span></div><div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>卖出金额 − 成本 − 费用 {'$'+fmt(r.fees,2)}</div></div>
+        <div style={{padding:'0 10px',display:'flex',flexDirection:'column',gap:3}}><div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13}}><span style={{color:ACC.amber}}>{'$'+fmt(r.costPerShare,2)+'/股'}</span><span style={{color:V('faint')}}> → </span><InlineEdit value={r.closePrice} onSave={value=>onUpdate&&onUpdate(c.id,{closePrice:value})}/></div><div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{'成交金额 '+('$'+fmt(r.closePrice*r.shares,0))+' − 成本 − 费用 '+('$'+fmt(r.fees,2))}</div></div>
         <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',paddingRight:8}}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:16,fontWeight:700,color:positive?ACC.profit:ACC.loss}}>{fmtM(r.profit)}</span></div>
         <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',paddingRight:8}}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,fontWeight:700,color:positive?ACC.profit:ACC.loss}}>{fmtA(r.annual)}</span></div>
         <div style={{display:'flex',justifyContent:'center'}}><button onClick={onDelete} style={{background:'none',border:'none',color:V('faint'),cursor:'pointer',fontSize:14,padding:4}} title="删除记录">×</button></div>
@@ -3965,6 +3965,11 @@ function App(){
   };
 
   const removeClosedRecord=(id)=>{mutateClosed(closed.filter(c=>c.id!==id));showToast('已删除记录',ACC.loss);};
+  const updateClosedStock=(id,patch)=>{
+    const next=closed.map(record=>record.id===id&&record.assetType==='stock'?{...record,...patch,closedAt:Date.now()}:record);
+    mutateClosed(next);
+    showToast('股票平仓记录已更新',ACC.teal);
+  };
   const updateStockPrice=(id,price)=>mutateStocks(stocks.map(s=>s.id===id?{...s,currentPrice:price}:s));
   const removeStock=(id)=>{mutateStocks(stocks.filter(s=>s.id!==id));showToast('已删除股票仓位',ACC.loss);};
   const usOptionClosed=closed.filter(c=>c?.assetType!=='stock');
@@ -4160,7 +4165,7 @@ function App(){
                 <div className="cnopt-segmented" style={{display:'inline-flex',marginBottom:12}}>
                   {[['ALL','全部'],['OPTION','期权'],['STOCK','股票']].map(([value,label])=><button key={value} className={usClosedFilter===value?'active':''} onClick={()=>setUsClosedFilter(value)}>{label} <span style={{opacity:.65}}>{value==='ALL'?closed.length:value==='OPTION'?usOptionClosed.length:usStockClosed.length}</span></button>)}
                 </div>
-                {usClosedFilter==='STOCK'?<><StockClosedTableHeader/>{filteredUsClosed.map(c=><StockClosedRow key={c.id} c={c} onDelete={()=>removeClosedRecord(c.id)}/>)}</>:usClosedFilter==='OPTION'?<><ClosedTableHeader/>{filteredUsClosed.map(c=><ClosedRow key={c.id} c={c} commPerSide={commPerSide} positions={positions} closed={closed} quoteRefreshKey={closedQuoteRefreshKey} onUpdateExpiryReview={updateClosedExpiryReview} onDelete={()=>removeClosedRecord(c.id)}/>)}</>:<>{usOptionClosed.length>0&&<><ClosedTableHeader/>{usOptionClosed.map(c=><ClosedRow key={c.id} c={c} commPerSide={commPerSide} positions={positions} closed={closed} quoteRefreshKey={closedQuoteRefreshKey} onUpdateExpiryReview={updateClosedExpiryReview} onDelete={()=>removeClosedRecord(c.id)}/>)}</>}{usStockClosed.length>0&&<><StockClosedTableHeader/>{usStockClosed.map(c=><StockClosedRow key={c.id} c={c} onDelete={()=>removeClosedRecord(c.id)}/>)}</>}</>}
+                {usClosedFilter==='STOCK'?<><StockClosedTableHeader/>{filteredUsClosed.map(c=><StockClosedRow key={c.id} c={c} onUpdate={updateClosedStock} onDelete={()=>removeClosedRecord(c.id)}/>)}</>:usClosedFilter==='OPTION'?<><ClosedTableHeader/>{filteredUsClosed.map(c=><ClosedRow key={c.id} c={c} commPerSide={commPerSide} positions={positions} closed={closed} quoteRefreshKey={closedQuoteRefreshKey} onUpdateExpiryReview={updateClosedExpiryReview} onDelete={()=>removeClosedRecord(c.id)}/>)}</>:<>{usOptionClosed.length>0&&<><ClosedTableHeader/>{usOptionClosed.map(c=><ClosedRow key={c.id} c={c} commPerSide={commPerSide} positions={positions} closed={closed} quoteRefreshKey={closedQuoteRefreshKey} onUpdateExpiryReview={updateClosedExpiryReview} onDelete={()=>removeClosedRecord(c.id)}/>)}</>}{usStockClosed.length>0&&<><StockClosedTableHeader/>{usStockClosed.map(c=><StockClosedRow key={c.id} c={c} onUpdate={updateClosedStock} onDelete={()=>removeClosedRecord(c.id)}/>)}</>}</>}
               </>)}
             </>
           )}
