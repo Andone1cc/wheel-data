@@ -42,6 +42,8 @@ const calcAnnual=(profit,capital,days)=>{
 };
 
 const DEFAULT_COMM=0.65;
+const DEFAULT_US_CLOSED_COST=75500;
+const DEFAULT_US_CLOSED_START='2026-06-01';
 const SK={
   POS:'whl-pos-v2',CLOSED:'whl-closed-v1',STOCKS:'whl-stocks-v1',SGOV:'whl-sgov-v3',CFG:'whl-cfg-v2',
   CN_POS:'whl-cn-pos-v1',CN_CLOSED:'whl-cn-closed-v1',CN_STOCKS:'whl-cn-stocks-v1',
@@ -2944,7 +2946,9 @@ function ClosedSummary({closed,commPerSide}){
   );
 }
 
-function UsClosedSummary({optionClosed,stockClosed,commPerSide}){
+function UsClosedSummary({optionClosed,stockClosed,commPerSide,costBasis=DEFAULT_US_CLOSED_COST,startDate=DEFAULT_US_CLOSED_START,onBasisChange}){
+  const [basisInput,setBasisInput]=useState(String(costBasis??DEFAULT_US_CLOSED_COST));
+  const [startInput,setStartInput]=useState(startDate||DEFAULT_US_CLOSED_START);
   const optionRs=optionClosed.map(c=>calcClosed(c,commPerSide));
   const stockRs=stockClosed.map(calcUsStockClosed);
   const optionProfit=optionRs.reduce((sum,r)=>sum+r.profit,0);
@@ -2952,8 +2956,12 @@ function UsClosedSummary({optionClosed,stockClosed,commPerSide}){
   const totalProfit=optionProfit+stockProfit;
   const all=[...optionRs,...stockRs];
   const wins=all.filter(r=>r.profit>0).length;
-  const annual=all.filter(r=>r.annual!=null);
-  const avgAnnual=annual.length?annual.reduce((sum,r)=>sum+r.annual,0)/annual.length:null;
+  const basis=num(basisInput,0);
+  const days=Math.max(1,daysBetween(startInput||DEFAULT_US_CLOSED_START,today()));
+  const portfolioAnnual=basis>0?calcAnnual(totalProfit,basis,days):null;
+  const commitBasis=()=>{const next=num(basisInput,0);if(next>0&&onBasisChange)onBasisChange({costBasis:next,startDate:startInput||DEFAULT_US_CLOSED_START});};
+  useEffect(()=>setBasisInput(String(costBasis??DEFAULT_US_CLOSED_COST)),[costBasis]);
+  useEffect(()=>setStartInput(startDate||DEFAULT_US_CLOSED_START),[startDate]);
   if(!all.length)return null;
   return(
     <div className="glass-card anim-in us-closed-summary" style={{padding:'20px 24px',marginBottom:16}}>
@@ -2961,8 +2969,14 @@ function UsClosedSummary({optionClosed,stockClosed,commPerSide}){
         <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">期权已实现</span><span style={{fontSize:24,fontWeight:700,color:optionProfit>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(optionProfit)}</span><span style={{fontSize:10,color:V('faint')}}>{optionClosed.length} 笔</span></div>
         <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">股票已实现</span><span style={{fontSize:24,fontWeight:700,color:stockProfit>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(stockProfit)}</span><span style={{fontSize:10,color:V('faint')}}>{stockClosed.length} 笔 · 现金成本口径</span></div>
         <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">合计已实现</span><span style={{fontSize:28,fontWeight:700,color:totalProfit>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(totalProfit)}</span></div>
-        <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">平均实现年化</span><span style={{fontSize:24,fontWeight:700,color:avgAnnual==null?V('dim'):avgAnnual>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtA(avgAnnual)}</span></div>
+        <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">基准实现年化</span><span style={{fontSize:24,fontWeight:700,color:portfolioAnnual==null?V('dim'):portfolioAnnual>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtA(portfolioAnnual)}</span><span style={{fontSize:10,color:V('faint')}}>{'本金 $'+fmt(basis,0)+' · '+days+' 天'}</span></div>
         <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">胜率</span><span style={{fontSize:24,fontWeight:700,color:ACC.blue,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{all.length?((wins/all.length)*100).toFixed(0):'—'}%</span><span style={{fontSize:10,color:V('faint')}}>{wins}/{all.length} 盈利</span></div>
+      </div>
+      <div className="us-closed-basis">
+        <span className="section-label">年化计算基准</span>
+        <label><span>总成本</span><span className="us-closed-basis-input"><b>$</b><input value={basisInput} inputMode="decimal" onChange={e=>setBasisInput(e.target.value)} onBlur={commitBasis} onKeyDown={e=>{if(e.key==='Enter')commitBasis();}}/></span></label>
+        <label><span>起始日</span><input type="date" value={startInput} onChange={e=>{setStartInput(e.target.value);if(onBasisChange&&e.target.value)onBasisChange({costBasis:basis,startDate:e.target.value});}}/></label>
+        <span className="us-closed-basis-hint">总收益 ÷ 总成本 × 365 ÷ 天数</span>
       </div>
     </div>
   );
@@ -4154,7 +4168,10 @@ function App(){
           {/* 已平仓 Tab */}
           {tab==='closed'&&(
             <>
-              <UsClosedSummary optionClosed={usOptionClosed} stockClosed={usStockClosed} commPerSide={commPerSide}/>
+              <UsClosedSummary optionClosed={usOptionClosed} stockClosed={usStockClosed} commPerSide={commPerSide}
+                costBasis={cfg.usClosedCostBasis??DEFAULT_US_CLOSED_COST}
+                startDate={cfg.usClosedStartDate||DEFAULT_US_CLOSED_START}
+                onBasisChange={({costBasis,startDate})=>mutateCfg({...cfg,usClosedCostBasis:costBasis,usClosedStartDate:startDate})}/>
               {closed.length===0?(
                 <div style={{textAlign:'center',padding:'70px 20px',color:V('faint'),border:`1.5px dashed ${V('line')}`,borderRadius:16}}>
                   <div style={{fontSize:38,marginBottom:12,opacity:.3}}>📋</div>
