@@ -44,8 +44,9 @@ const calcAnnual=(profit,capital,days)=>{
 const DEFAULT_COMM=0.65;
 const DEFAULT_US_CLOSED_COST=75500;
 const DEFAULT_US_CLOSED_START='2026-06-01';
+const DEFAULT_US_CASH_FLOWS=[{id:'initial-capital',date:DEFAULT_US_CLOSED_START,type:'deposit',amount:DEFAULT_US_CLOSED_COST,note:'初始基准本金'}];
 const SK={
-  POS:'whl-pos-v2',CLOSED:'whl-closed-v1',STOCKS:'whl-stocks-v1',SGOV:'whl-sgov-v3',CFG:'whl-cfg-v2',
+  POS:'whl-pos-v2',CLOSED:'whl-closed-v1',STOCKS:'whl-stocks-v1',SGOV:'whl-sgov-v3',CFG:'whl-cfg-v2',US_CASH_FLOWS:'whl-us-cash-flows-v1',
   CN_POS:'whl-cn-pos-v1',CN_CLOSED:'whl-cn-closed-v1',CN_STOCKS:'whl-cn-stocks-v1',
   CN_RECOVERY:'whl-cn-pos-recovery-v1',
   KEY:'whl-api-key',FH_KEY:'whl-finnhub-key',THEME:'whl-theme',
@@ -684,6 +685,38 @@ function calcUsStockClosed(c){
   const capital=costPerShare*shares;
   const daysHeld=Math.max(1,daysBetween(c.acquireDate||today(),c.closeDate||today()));
   return{shares,costPerShare,closePrice,fees,gross,profit,capital,daysHeld,annual:calcAnnual(profit,capital,daysHeld),yld:capital?(profit/capital)*100:null};
+}
+
+function calcUsCashFlowAnnual(cashFlows,closedRecords,commPerSide,asOf=today()){
+  const flows=(Array.isArray(cashFlows)?cashFlows:[])
+    .map(flow=>({date:String(flow?.date||''),type:flow?.type==='withdrawal'?'withdrawal':'deposit',amount:Math.max(0,num(flow?.amount)),note:flow?.note||''}))
+    .filter(flow=>/^\d{4}-\d{2}-\d{2}$/.test(flow.date)&&flow.amount>0&&flow.date<=asOf)
+    .sort((a,b)=>a.date.localeCompare(b.date));
+  if(!flows.length)return{annual:null,days:0,capitalDays:0,currentCapital:0,segments:0};
+  const dates=[...new Set([...flows.map(flow=>flow.date),asOf])].sort();
+  let capital=0,capitalDays=0,segments=0;
+  const profitByDate=new Map();
+  (Array.isArray(closedRecords)?closedRecords:[]).forEach(record=>{
+    const date=String(record?.closeDate||'').slice(0,10);
+    if(!date||date>asOf)return;
+    const result=record?.assetType==='stock'?calcUsStockClosed(record):calcClosed(record,commPerSide);
+    profitByDate.set(date,(profitByDate.get(date)||0)+result.profit);
+  });
+  const flowByDate=new Map();
+  flows.forEach(flow=>flowByDate.set(flow.date,(flowByDate.get(flow.date)||0)+(flow.type==='withdrawal'?-flow.amount:flow.amount)));
+  let totalProfit=0;
+  dates.forEach((date,index)=>{
+    capital+=flowByDate.get(date)||0;
+    const nextDate=dates[index+1];
+    if(!nextDate)return;
+    const days=Math.max(0,daysBetween(date,nextDate));
+    capitalDays+=Math.max(0,capital)*days;
+    segments+=days>0?1:0;
+  });
+  profitByDate.forEach(value=>{totalProfit+=value;});
+  const totalDays=Math.max(1,daysBetween(flows[0].date,asOf));
+  const annual=capitalDays>0?totalProfit/(capitalDays/365)*100:null;
+  return{annual,totalProfit,capitalDays,currentCapital:capital,days:totalDays,segments,flows};
 }
 
 function calcExpiryReview(c,r,expiryPrice,comm=DEFAULT_COMM){
@@ -2946,9 +2979,9 @@ function ClosedSummary({closed,commPerSide}){
   );
 }
 
-function UsClosedSummary({optionClosed,stockClosed,commPerSide,costBasis=DEFAULT_US_CLOSED_COST,startDate=DEFAULT_US_CLOSED_START,onBasisChange}){
-  const [basisInput,setBasisInput]=useState(String(costBasis??DEFAULT_US_CLOSED_COST));
-  const [startInput,setStartInput]=useState(startDate||DEFAULT_US_CLOSED_START);
+function UsClosedSummary({optionClosed,stockClosed,commPerSide,cashFlows=DEFAULT_US_CASH_FLOWS,onCashFlowsChange}){
+  const [showFlows,setShowFlows]=useState(false);
+  const [draft,setDraft]=useState({date:today(),type:'deposit',amount:'',note:''});
   const optionRs=optionClosed.map(c=>calcClosed(c,commPerSide));
   const stockRs=stockClosed.map(calcUsStockClosed);
   const optionProfit=optionRs.reduce((sum,r)=>sum+r.profit,0);
@@ -2956,28 +2989,49 @@ function UsClosedSummary({optionClosed,stockClosed,commPerSide,costBasis=DEFAULT
   const totalProfit=optionProfit+stockProfit;
   const all=[...optionRs,...stockRs];
   const wins=all.filter(r=>r.profit>0).length;
-  const basis=num(basisInput,0);
-  const days=Math.max(1,daysBetween(startInput||DEFAULT_US_CLOSED_START,today()));
-  const portfolioAnnual=basis>0?calcAnnual(totalProfit,basis,days):null;
-  const commitBasis=()=>{const next=num(basisInput,0);if(next>0&&onBasisChange)onBasisChange({costBasis:next,startDate:startInput||DEFAULT_US_CLOSED_START});};
-  useEffect(()=>setBasisInput(String(costBasis??DEFAULT_US_CLOSED_COST)),[costBasis]);
-  useEffect(()=>setStartInput(startDate||DEFAULT_US_CLOSED_START),[startDate]);
-  if(!all.length)return null;
+  const stats=calcUsCashFlowAnnual(cashFlows, [...optionClosed,...stockClosed], commPerSide);
+  const updateFlow=(id,patch)=>onCashFlowsChange&&onCashFlowsChange((Array.isArray(cashFlows)?cashFlows:[]).map(flow=>flow.id===id?{...flow,...patch}:flow));
+  const removeFlow=(id)=>onCashFlowsChange&&onCashFlowsChange((Array.isArray(cashFlows)?cashFlows:[]).filter(flow=>flow.id!==id));
+  const addFlow=()=>{
+    const amount=num(draft.amount,0);
+    if(!draft.date||!(amount>0))return;
+    onCashFlowsChange&&onCashFlowsChange([...(Array.isArray(cashFlows)?cashFlows:[]),{id:Date.now(),date:draft.date,type:draft.type,amount,note:String(draft.note||'').trim()}]);
+    setDraft({date:today(),type:'deposit',amount:'',note:''});
+  };
+  if(!all.length&&!((Array.isArray(cashFlows)&&cashFlows.length)))return null;
   return(
     <div className="glass-card anim-in us-closed-summary" style={{padding:'20px 24px',marginBottom:16}}>
       <div className="us-closed-summary-grid">
         <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">期权已实现</span><span style={{fontSize:24,fontWeight:700,color:optionProfit>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(optionProfit)}</span><span style={{fontSize:10,color:V('faint')}}>{optionClosed.length} 笔</span></div>
         <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">股票已实现</span><span style={{fontSize:24,fontWeight:700,color:stockProfit>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(stockProfit)}</span><span style={{fontSize:10,color:V('faint')}}>{stockClosed.length} 笔 · 现金成本口径</span></div>
-        <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">合计已实现</span><span style={{fontSize:28,fontWeight:700,color:totalProfit>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(totalProfit)}</span></div>
-        <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">基准实现年化</span><span style={{fontSize:24,fontWeight:700,color:portfolioAnnual==null?V('dim'):portfolioAnnual>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtA(portfolioAnnual)}</span><span style={{fontSize:10,color:V('faint')}}>{'本金 $'+fmt(basis,0)+' · '+days+' 天'}</span></div>
+        <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">合计已实现</span><span style={{fontSize:28,fontWeight:700,color:totalProfit>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(totalProfit)}</span><span style={{fontSize:10,color:V('faint')}}>{'期权 '+fmtM(optionProfit)+' + 股票 '+fmtM(stockProfit)}</span></div>
+        <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">分段实现年化</span><span style={{fontSize:24,fontWeight:700,color:stats.annual==null?V('dim'):stats.annual>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtA(stats.annual)}</span><span style={{fontSize:10,color:V('faint')}}>{stats.segments+' 个资金区间'}</span></div>
         <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">胜率</span><span style={{fontSize:24,fontWeight:700,color:ACC.blue,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{all.length?((wins/all.length)*100).toFixed(0):'—'}%</span><span style={{fontSize:10,color:V('faint')}}>{wins}/{all.length} 盈利</span></div>
       </div>
       <div className="us-closed-basis">
-        <span className="section-label">年化计算基准</span>
-        <label><span>总成本</span><span className="us-closed-basis-input"><b>$</b><input value={basisInput} inputMode="decimal" onChange={e=>setBasisInput(e.target.value)} onBlur={commitBasis} onKeyDown={e=>{if(e.key==='Enter')commitBasis();}}/></span></label>
-        <label><span>起始日</span><input type="date" value={startInput} onChange={e=>{setStartInput(e.target.value);if(onBasisChange&&e.target.value)onBasisChange({costBasis:basis,startDate:e.target.value});}}/></label>
-        <span className="us-closed-basis-hint">总收益 ÷ 总成本 × 365 ÷ 天数</span>
+        <span className="section-label">分段年化计算</span>
+        <span className="us-closed-basis-hint">{'资金流水 '+(Array.isArray(cashFlows)?cashFlows.length:0)+' 笔 · 资金占用 '+fmt(stats.capitalDays,0)+' 美元·天'}</span>
+        <button className="btn btn-ghost" style={{marginLeft:'auto',padding:'6px 10px',fontSize:10}} onClick={()=>setShowFlows(v=>!v)}>{showFlows?'收起流水':'管理资金流水'}</button>
       </div>
+      {showFlows&&<div className="us-cashflow-editor">
+        <div className="us-cashflow-editor-head"><strong>资金流水</strong><span>入金增加成本基数，出金减少成本基数；年化按各段资金实际占用天数计算。</span></div>
+        <div className="us-cashflow-list">
+          {(Array.isArray(cashFlows)?cashFlows:[]).map(flow=><div className="us-cashflow-row" key={flow.id}>
+            <input type="date" value={flow.date||''} onChange={e=>updateFlow(flow.id,{date:e.target.value})}/>
+            <select value={flow.type==='withdrawal'?'withdrawal':'deposit'} onChange={e=>updateFlow(flow.id,{type:e.target.value})}><option value="deposit">入金</option><option value="withdrawal">出金</option></select>
+            <InlineEdit value={flow.amount} onSave={value=>updateFlow(flow.id,{amount:value})}/>
+            <input value={flow.note||''} placeholder="备注" onChange={e=>updateFlow(flow.id,{note:e.target.value})}/>
+            <button onClick={()=>removeFlow(flow.id)} title="删除流水">×</button>
+          </div>)}
+        </div>
+        <div className="us-cashflow-add">
+          <input type="date" value={draft.date} onChange={e=>setDraft(v=>({...v,date:e.target.value}))}/>
+          <select value={draft.type} onChange={e=>setDraft(v=>({...v,type:e.target.value}))}><option value="deposit">入金</option><option value="withdrawal">出金</option></select>
+          <input type="number" min="0" step="0.01" value={draft.amount} placeholder="金额（美元）" onChange={e=>setDraft(v=>({...v,amount:e.target.value}))}/>
+          <input value={draft.note} placeholder="备注（可选）" onChange={e=>setDraft(v=>({...v,note:e.target.value}))}/>
+          <button className="btn btn-primary" onClick={addFlow} disabled={!draft.date||!(num(draft.amount,0)>0)}>＋ 添加流水</button>
+        </div>
+      </div>}
     </div>
   );
 }
@@ -3593,6 +3647,12 @@ function App(){
   const [stocks,setStocks]=useState(()=>ls(SK.STOCKS,[]).map(normalizeUsStock));
   const [sgov,setSgov]=useState(()=>ls(SK.SGOV,{}));
   const [cfg,setCfg]=useState(()=>ls(SK.CFG,{commPerSide:DEFAULT_COMM}));
+  const [usCashFlows,setUsCashFlows]=useState(()=>{
+    const saved=ls(SK.US_CASH_FLOWS,null);
+    if(Array.isArray(saved))return saved;
+    const oldCfg=ls(SK.CFG,{});
+    return [{...DEFAULT_US_CASH_FLOWS[0],amount:num(oldCfg.usClosedCostBasis,DEFAULT_US_CLOSED_COST),date:oldCfg.usClosedStartDate||DEFAULT_US_CLOSED_START}];
+  });
   const [cnPositions,setCnPositions]=useState(()=>ls(SK.CN_POS,[]));
   const [cnClosed,setCnClosed]=useState(()=>ls(SK.CN_CLOSED,[]));
   const [cnStocks,setCnStocks]=useState(()=>ls(SK.CN_STOCKS,[]));
@@ -3624,13 +3684,14 @@ function App(){
   const [lastRefresh,setLastRefresh]=useState(null);
   const [toast,setToast]=useState(null);
 
-  latestData.current={positions,closed,stocks,sgov,cfg,cnPositions,cnClosed,cnStocks};
+  latestData.current={positions,closed,stocks,sgov,cfg,usCashFlows,cnPositions,cnClosed,cnStocks};
 
-  const hasRemoteSchema=(remote)=>['positions','closed','stocks','sgov','cfg','cnPositions','cnClosed','cnStocks']
+  const hasRemoteSchema=(remote)=>['positions','closed','stocks','sgov','cfg','usCashFlows','cnPositions','cnClosed','cnStocks']
     .some(key=>Object.prototype.hasOwnProperty.call(remote||{},key));
   const buildPayload=(patch={})=>({...latestData.current,...patch,updatedAt:Date.now()});
   const persistLocal=(data)=>{
     lss(SK.POS,data.positions);lss(SK.CLOSED,data.closed);lss(SK.STOCKS,data.stocks);lss(SK.SGOV,data.sgov);lss(SK.CFG,data.cfg);
+    lss(SK.US_CASH_FLOWS,data.usCashFlows);
     lss(SK.CN_POS,data.cnPositions);lss(SK.CN_CLOSED,data.cnClosed);lss(SK.CN_STOCKS,data.cnStocks);
   };
   const applyRemote=(remote)=>{
@@ -3641,6 +3702,11 @@ function App(){
       stocks:Array.isArray(remote.stocks)?remote.stocks.map(normalizeUsStock):local.stocks.map(normalizeUsStock),
       sgov:remote.sgov&&typeof remote.sgov==='object'?remote.sgov:local.sgov,
       cfg:remote.cfg&&typeof remote.cfg==='object'?remote.cfg:local.cfg,
+      usCashFlows:Array.isArray(remote.usCashFlows)?remote.usCashFlows:(
+        remote.cfg&&remote.cfg.usClosedCostBasis?[
+          {...DEFAULT_US_CASH_FLOWS[0],amount:num(remote.cfg.usClosedCostBasis,DEFAULT_US_CLOSED_COST),date:remote.cfg.usClosedStartDate||DEFAULT_US_CLOSED_START}
+        ]:local.usCashFlows
+      ),
       cnPositions:Array.isArray(remote.cnPositions)?remote.cnPositions:local.cnPositions,
       cnClosed:Array.isArray(remote.cnClosed)?remote.cnClosed:local.cnClosed,
       cnStocks:Array.isArray(remote.cnStocks)?remote.cnStocks:local.cnStocks,
@@ -3657,7 +3723,7 @@ function App(){
     const recovery=Array.isArray(remote.cnPositions)&&remote.cnPositions.length===0?[...recoveryMap.values()]:[];
     setCnRecovery(recovery);lss(SK.CN_RECOVERY,recovery);
     latestData.current=next;
-    setPositions(next.positions);setClosed(next.closed);setStocks(next.stocks);setSgov(next.sgov);setCfg(next.cfg);
+    setPositions(next.positions);setClosed(next.closed);setStocks(next.stocks);setSgov(next.sgov);setCfg(next.cfg);setUsCashFlows(next.usCashFlows);
     setCnPositions(next.cnPositions);setCnClosed(next.cnClosed);setCnStocks(next.cnStocks);
     persistLocal(next);
     return next;
@@ -3772,6 +3838,18 @@ function App(){
   const mutateCfg=(next)=>{
     setCfg(next);lss(SK.CFG,next);
     persistPatch({cfg:next});
+  };
+  const mutateUsCashFlows=(next)=>{
+    const normalized=(Array.isArray(next)?next:[]).map((flow,index)=>({
+      ...flow,
+      id:flow.id??('cash-flow-'+Date.now()+'-'+index),
+      date:String(flow.date||today()),
+      type:flow.type==='withdrawal'?'withdrawal':'deposit',
+      amount:Math.max(0,num(flow.amount,0)),
+      note:String(flow.note||''),
+    })).filter(flow=>/^\d{4}-\d{2}-\d{2}$/.test(flow.date)&&flow.amount>0);
+    setUsCashFlows(normalized);lss(SK.US_CASH_FLOWS,normalized);
+    persistPatch({usCashFlows:normalized});
   };
   const mutateCnPositions=(next)=>{
     setCnPositions(next);lss(SK.CN_POS,next);
@@ -4169,9 +4247,8 @@ function App(){
           {tab==='closed'&&(
             <>
               <UsClosedSummary optionClosed={usOptionClosed} stockClosed={usStockClosed} commPerSide={commPerSide}
-                costBasis={cfg.usClosedCostBasis??DEFAULT_US_CLOSED_COST}
-                startDate={cfg.usClosedStartDate||DEFAULT_US_CLOSED_START}
-                onBasisChange={({costBasis,startDate})=>mutateCfg({...cfg,usClosedCostBasis:costBasis,usClosedStartDate:startDate})}/>
+                cashFlows={usCashFlows}
+                onCashFlowsChange={mutateUsCashFlows}/>
               {closed.length===0?(
                 <div style={{textAlign:'center',padding:'70px 20px',color:V('faint'),border:`1.5px dashed ${V('line')}`,borderRadius:16}}>
                   <div style={{fontSize:38,marginBottom:12,opacity:.3}}>📋</div>
