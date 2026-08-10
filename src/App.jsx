@@ -18,12 +18,17 @@ const finitePrice=(value)=>{
   const n=Number(raw);
   return Number.isFinite(n)&&n>0?n:null;
 };
+// 美股股票统一按现金成本核算。接货仓位同时保留权利金摊薄后的净成本，
+// 但净成本只作为参考展示，不能再用于股票浮盈，否则会把期权收益算两次。
+const usStockCashCost=(stock)=>finitePrice(stock?.cashCostPerShare)??finitePrice(stock?.costPerShare)??0;
 const normalizeUsStock=(stock)=>{
   if(!stock||typeof stock!=='object')return stock;
   const quote=stock.currentPrice&&typeof stock.currentPrice==='object'?stock.currentPrice:null;
   return{
     ...stock,
     currentPrice:finitePrice(stock.currentPrice),
+    cashCostPerShare:finitePrice(stock.cashCostPerShare),
+    netCostPerShare:finitePrice(stock.netCostPerShare),
     quoteSource:stock.quoteSource||quote?.source||null,
     quoteTime:stock.quoteTime||quote?.quoteTime||null,
     quoteFreshness:stock.quoteFreshness||quote?.freshness||null,
@@ -667,6 +672,18 @@ function calcClosed(c,comm=DEFAULT_COMM){
   return{qty,openPrem,closePrem,profit,capital,daysHeld,annual,yld,commUsed};
 }
 
+function calcUsStockClosed(c){
+  const shares=Math.max(1,num(c.closeShares??c.shares,1));
+  const costPerShare=usStockCashCost(c);
+  const closePrice=finitePrice(c.closePrice)??0;
+  const fees=Math.max(0,num(c.closeFees));
+  const gross=(closePrice-costPerShare)*shares;
+  const profit=gross-fees;
+  const capital=costPerShare*shares;
+  const daysHeld=Math.max(1,daysBetween(c.acquireDate||today(),c.closeDate||today()));
+  return{shares,costPerShare,closePrice,fees,gross,profit,capital,daysHeld,annual:calcAnnual(profit,capital,daysHeld),yld:capital?(profit/capital)*100:null};
+}
+
 function calcExpiryReview(c,r,expiryPrice,comm=DEFAULT_COMM){
   // 股票价格不可能为 0；0 通常代表历史接口没有返回数据，不能拿来判断行权。
   if(!(Number(expiryPrice)>0))return null;
@@ -960,9 +977,10 @@ function CloseModal({pos,commPerSide,onConfirm,onClose,initialCloseType='manual'
   const daysHeld=Math.max(1,daysBetween(pos.openDate,closeDate||today()));
   const annual=calcAnnual(profit,capital,daysHeld);
 
-  // 接货场景：股票成本 = 行权价 - 已收权利金/股（权利金摊到每股）
+  // 接货场景：现金成本是实际支付的行权价；净成本仅作为权利金摊薄后的参考值。
   const premPerShare=pos.premium-(commPerSide/100); // 每股净权利金
-  const effectiveCost=pos.strike-premPerShare;      // 实际每股成本
+  const effectiveCost=pos.strike-premPerShare;      // 权利金摊薄后净成本（参考）
+  const cashCost=pos.strike;                        // 实际现金每股成本
   const assignedMarketValue=pos.strike*shares;      // 接货占用资金（从SGOV扣）
 
   const valid=closeType==='expired'||closeType==='assigned'
@@ -1001,11 +1019,11 @@ function CloseModal({pos,commPerSide,onConfirm,onClose,initialCloseType='manual'
           <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14}}>
             <Stat label={pos.type==='P'?'接货股数':'交割股数'} value={`${shares} 股`} color={V('ink')} sub={`${qty}手 × 100`}/>
             <Stat label={pos.type==='P'?'行权价（买入价）':'行权价（卖出价）'} value={`$${fmt(pos.strike,0)}`} color={ACC.amber}/>
-            <Stat label={pos.type==='P'?'实际每股成本':'股票交割价'} value={`$${fmt(pos.type==='P'?effectiveCost:pos.strike,2)}`} color={ACC.profit} sub={pos.type==='P'?'行权价 − 净权利金':'从股票持仓扣减'}/>
+            <Stat label={pos.type==='P'?'现金每股成本':'股票交割价'} value={`$${fmt(cashCost,2)}`} color={ACC.profit} sub={pos.type==='P'?'实际支付的行权价':'从股票持仓扣减'}/>
           </div>
           <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${ACC.amber}22`,display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
             <Stat label={pos.type==='P'?'接货占用资金':'交割名义金额'} value={`$${fmt(assignedMarketValue,0)}`} color={ACC.loss} sub={pos.type==='P'?'将从 SGOV 扣减':'不扣减 SGOV'}/>
-            <Stat label="期权收益（已锁定）" value={fmtM(profit)} color={ACC.profit} sub="权利金 − 手续费"/>
+            <Stat label="期权收益（已锁定）" value={fmtM(profit)} color={ACC.profit} sub={`净成本参考 $${fmt(effectiveCost,2)}/股`}/>
           </div>
         </div>
       )}
@@ -1033,7 +1051,10 @@ function CloseModal({pos,commPerSide,onConfirm,onClose,initialCloseType='manual'
           // 接货额外信息
           ...(closeType==='assigned'?{
             assignedShares:shares,
-            assignedCostPerShare:pos.type==='P'?effectiveCost:pos.strike,
+            assignedCostPerShare:cashCost,
+            assignedNetCostPerShare:pos.type==='P'?effectiveCost:pos.strike,
+            assignedStrike:pos.strike,
+            assignedPremiumPerShare:pos.type==='P'?premPerShare:0,
             assignedMarketValue,
             assignedTicker:pos.ticker,
           }:{}),
@@ -2606,7 +2627,8 @@ function ClosedRow({c,commPerSide,onDelete,onUpdateExpiryReview,positions=[],clo
   const holdProfit=holdBuyback!=null?r.openPrem-holdBuyback-r.commUsed:null;
   const expiryPrice=expiryQuote.data?.price??null;
   const expiryReview=calcExpiryReview(c,r,expiryPrice,commPerSide);
-  const detailNet=isAssigned?r.openPrem-(c.assignedMarketValue||0)-r.commUsed:r.profit;
+  // 接货现金是股票的买入成本，不应从期权已实现收益中再次扣除。
+  const detailNet=r.profit;
   const badgeStyle=isRoll
     ?{color:ACC.purple,background:ACC.purpleBg,borderColor:`${ACC.purple}44`}
     :isAssigned
@@ -2651,12 +2673,12 @@ function ClosedRow({c,commPerSide,onDelete,onUpdateExpiryReview,positions=[],clo
           <div style={{display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'}}>
             <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.amber,fontWeight:600}}>{'$'+fmt(r.openPrem)}</span>
             {!isExpired&&!isAssigned&&<><span style={{color:V('faint'),fontSize:11}}>{'−'}</span><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.loss}}>{'$'+fmt(r.closePrem)}</span></>}
-            {isAssigned&&<><span style={{color:V('faint'),fontSize:11}}>{'−'}</span><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.loss}}>{'$'+fmt(c.assignedMarketValue,0)}</span></>}
+            {isAssigned&&<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('faint')}}>{` · 接货现金 $${fmt(c.assignedMarketValue,0)}`}</span>}
             <span style={{color:V('faint'),fontSize:11}}>{'−'}</span>
             <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.loss}}>{'$'+fmt(r.commUsed)}</span>
           </div>
           <div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint'),letterSpacing:'.04em'}}>
-            {isExpired?'权利金 − 手续费':(isAssigned?'权利金 − 接货 − 费用':(isRoll?'旧仓权利金 − 买回 − 费用':'权利金 − 买回 − 费用'))}
+            {isExpired?'权利金 − 手续费':(isAssigned?'权利金 − 手续费（接货现金计入股票成本）':(isRoll?'旧仓权利金 − 买回 − 费用':'权利金 − 买回 − 费用'))}
           </div>
           <div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:detailNet>=0?ACC.profit:ACC.loss,letterSpacing:'.04em',fontWeight:700}}>
             相减 = {fmtM(detailNet)}
@@ -2742,9 +2764,12 @@ function ClosedRow({c,commPerSide,onDelete,onUpdateExpiryReview,positions=[],clo
 }
 
 /* ══ 股票仓位组件 ══════════════════════════════════════ */
-function StockRow({s,onUpdatePrice,onDelete}){
+function StockRow({s,onUpdatePrice,onClose,onDelete}){
+  const [mode,setMode]=useState('');
+  const [close,setClose]=useState({closePrice:finitePrice(s.currentPrice)==null?'':String(finitePrice(s.currentPrice)),closeShares:String(s.shares||''),closeDate:today(),closeFees:'0'});
   const shares=num(s.shares);
-  const costPerShare=finitePrice(s.costPerShare)??0;
+  const costPerShare=usStockCashCost(s);
+  const netCostPerShare=finitePrice(s.netCostPerShare);
   const currentPrice=finitePrice(s.currentPrice);
   const costBasis=costPerShare*shares;
   const currentValue=currentPrice!=null?currentPrice*shares:null;
@@ -2753,7 +2778,7 @@ function StockRow({s,onUpdatePrice,onDelete}){
   const daysHeld=s.acquireDate?Math.max(1,daysBetween(s.acquireDate,today())):null;
   return(
     <div className="row-click" style={{borderBottom:'1px solid '+V('line'),overflow:'hidden'}}>
-      <div className="stock-row-inner" style={{display:'grid',gridTemplateColumns:'3px 130px 120px 120px 1fr 130px 130px 36px',alignItems:'center',minHeight:54,padding:'4px 0'}}>
+      <div className="stock-row-inner" style={{display:'grid',gridTemplateColumns:'3px 130px 120px 120px 1fr 130px 130px 104px',alignItems:'center',minHeight:54,padding:'4px 0'}}>
         <div style={{background:unrealized==null?V('line'):(unrealized>=0?ACC.profit:ACC.loss),height:'100%',minHeight:48,borderRadius:2,opacity:.7}}/>
         <div style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:2}}>
           <span className="pos-ticker" style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:15,color:V('ink'),transition:'color .18s'}}>{s.ticker}</span>
@@ -2763,7 +2788,8 @@ function StockRow({s,onUpdatePrice,onDelete}){
         </div>
         <div style={{display:'flex',flexDirection:'column',gap:2}}>
             <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,color:V('ink'),fontWeight:600}}>{shares+' 股'}</span>
-          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{'成本 $'+fmt(costPerShare)+'/股'}</span>
+          <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{'现金成本 $'+fmt(costPerShare)+'/股'}</span>
+          {netCostPerShare!=null&&Math.abs(netCostPerShare-costPerShare)>0.005&&<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:9,color:ACC.amber}}>{'净成本参考 $'+fmt(netCostPerShare)}</span>}
         </div>
         <div>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,color:ACC.amber,fontWeight:600}}>{'$'+fmt(costBasis,0)}</span>
@@ -2784,10 +2810,24 @@ function StockRow({s,onUpdatePrice,onDelete}){
           </span>
           {unrealizedPct!=null&&<span className={'risk-badge '+(unrealizedPct>=0?'risk-safe':'risk-itm')}>{fmtA(unrealizedPct)}</span>}
         </div>
-        <div style={{display:'flex',justifyContent:'center'}}>
-          <button onClick={()=>onDelete(s.id)} style={{background:'none',border:'none',color:V('faint'),cursor:'pointer',fontSize:13,padding:4,opacity:.5}}>{'×'}</button>
+        <div style={{display:'flex',justifyContent:'center',gap:5,paddingRight:6}}>
+          <button className="btn btn-ghost" onClick={()=>setMode(mode==='close'?'':'close')} style={{fontSize:10,padding:'5px 7px',color:mode==='close'?ACC.amber:ACC.teal,borderColor:`${mode==='close'?ACC.amber:ACC.teal}44`}}>{mode==='close'?'取消':'平仓'}</button>
+          <button onClick={()=>onDelete(s.id)} style={{background:'none',border:'none',color:V('faint'),cursor:'pointer',fontSize:13,padding:4,opacity:.5}} title="删除持仓">×</button>
         </div>
       </div>
+      {mode==='close'&&<div className="cn-inline-panel close" style={{margin:'0 10px 10px 10px'}}>
+        <div><strong>确认股票平仓</strong><p>按现金成本计算实现收益，支持部分平仓；已收期权权利金不会再次并入股票收益。</p></div>
+        <div className="cn-inline-grid compact">
+          <NumField label="平仓价" prefix="$" value={close.closePrice} onChange={v=>setClose(prev=>({...prev,closePrice:v}))}/>
+          <NumField label="平仓股数" value={close.closeShares} onChange={v=>setClose(prev=>({...prev,closeShares:v}))} suffix="股"/>
+          <DateField label="平仓日期" value={close.closeDate} onChange={v=>setClose(prev=>({...prev,closeDate:v}))}/>
+          <NumField label="平仓费用" prefix="$" value={close.closeFees} onChange={v=>setClose(prev=>({...prev,closeFees:v}))}/>
+        </div>
+        <div className="cn-form-actions">
+          <button className="btn btn-primary" disabled={!(close.closePrice!==''&&finitePrice(close.closePrice)!=null&&num(close.closeShares)>0&&num(close.closeShares)<=shares&&close.closeDate)} onClick={()=>{onClose(s,{closeShares:num(close.closeShares),closePrice:num(close.closePrice),closeDate:close.closeDate,closeFees:num(close.closeFees)});setMode('');}}>计入已平仓</button>
+          <button className="btn btn-ghost" onClick={()=>setMode('')}>取消</button>
+        </div>
+      </div>}
     </div>
   );
 }
@@ -2795,7 +2835,7 @@ function StockRow({s,onUpdatePrice,onDelete}){
 function StocksTableHeader(){
   const H=({t,right})=><div style={{fontSize:10,color:V('faint'),letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',textAlign:right?'right':'left',padding:'0 4px'}}>{t}</div>;
   return(
-    <div className="stock-table-header" style={{display:'grid',gridTemplateColumns:'4px 130px 120px 120px 1fr 130px 130px 36px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
+    <div className="stock-table-header" style={{display:'grid',gridTemplateColumns:'4px 130px 120px 120px 1fr 130px 130px 104px',alignItems:'center',padding:'0 0 8px 0',marginBottom:4}}>
       <div/><H t="标的"/><H t="持仓"/><H t="成本基础"/><H t="现价"/><H t="当前市值" right/><H t="浮动盈亏" right/><div/>
     </div>
   );
@@ -2805,7 +2845,7 @@ function StocksSummary({stocks}){
   if(!stocks.length)return null;
   const priced=stocks.map(st=>({
     shares:num(st.shares),
-    costPerShare:finitePrice(st.costPerShare)??0,
+    costPerShare:usStockCashCost(st),
     currentPrice:finitePrice(st.currentPrice),
   }));
   const totalCost=priced.reduce((s,st)=>s+st.costPerShare*st.shares,0);
@@ -2899,6 +2939,54 @@ function ClosedSummary({closed,commPerSide}){
           <span className="section-label">总笔数</span>
           <span style={{fontSize:28,fontWeight:700,color:V('dim'),fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{closed.length}</span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function UsClosedSummary({optionClosed,stockClosed,commPerSide}){
+  const optionRs=optionClosed.map(c=>calcClosed(c,commPerSide));
+  const stockRs=stockClosed.map(calcUsStockClosed);
+  const optionProfit=optionRs.reduce((sum,r)=>sum+r.profit,0);
+  const stockProfit=stockRs.reduce((sum,r)=>sum+r.profit,0);
+  const totalProfit=optionProfit+stockProfit;
+  const all=[...optionRs,...stockRs];
+  const wins=all.filter(r=>r.profit>0).length;
+  const annual=all.filter(r=>r.annual!=null);
+  const avgAnnual=annual.length?annual.reduce((sum,r)=>sum+r.annual,0)/annual.length:null;
+  if(!all.length)return null;
+  return(
+    <div className="glass-card anim-in" style={{padding:'20px 24px',marginBottom:16}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:20,alignItems:'end'}}>
+        <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">期权已实现</span><span style={{fontSize:24,fontWeight:700,color:optionProfit>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(optionProfit)}</span><span style={{fontSize:10,color:V('faint')}}>{optionClosed.length} 笔</span></div>
+        <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">股票已实现</span><span style={{fontSize:24,fontWeight:700,color:stockProfit>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(stockProfit)}</span><span style={{fontSize:10,color:V('faint')}}>{stockClosed.length} 笔 · 现金成本口径</span></div>
+        <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">合计已实现</span><span style={{fontSize:28,fontWeight:700,color:totalProfit>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtM(totalProfit)}</span></div>
+        <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">平均实现年化</span><span style={{fontSize:24,fontWeight:700,color:avgAnnual==null?V('dim'):avgAnnual>=0?ACC.profit:ACC.loss,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtA(avgAnnual)}</span></div>
+        <div style={{display:'flex',flexDirection:'column',gap:4}}><span className="section-label">胜率</span><span style={{fontSize:24,fontWeight:700,color:ACC.blue,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{all.length?((wins/all.length)*100).toFixed(0):'—'}%</span><span style={{fontSize:10,color:V('faint')}}>{wins}/{all.length} 盈利</span></div>
+      </div>
+    </div>
+  );
+}
+
+function StockClosedTableHeader(){
+  const H=({t,right})=><div style={{fontSize:10,color:V('faint'),letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'IBM Plex Mono,monospace',textAlign:right?'right':'left',padding:'0 4px'}}>{t}</div>;
+  return <div style={{display:'grid',gridTemplateColumns:'3px minmax(140px,.9fr) minmax(118px,.8fr) minmax(118px,.8fr) minmax(180px,1.1fr) minmax(130px,.8fr) minmax(112px,.7fr) 32px',alignItems:'center',padding:'0 0 8px',marginBottom:4}}><div/><H t="标的"/><H t="持仓"/><H t="买入 / 平仓日"/><H t="收支明细"/><H t="净利润" right/><H t="实现年化" right/><div/></div>;
+}
+
+function StockClosedRow({c,onDelete}){
+  const r=calcUsStockClosed(c);
+  const positive=r.profit>=0;
+  return(
+    <div className="row-click" style={{borderBottom:'1px solid '+V('line'),overflow:'hidden'}}>
+      <div style={{display:'grid',gridTemplateColumns:'3px minmax(140px,.9fr) minmax(118px,.8fr) minmax(118px,.8fr) minmax(180px,1.1fr) minmax(130px,.8fr) minmax(112px,.7fr) 32px',alignItems:'center',minHeight:58,padding:'4px 0'}}>
+        <div style={{background:positive?ACC.profit:ACC.loss,height:'100%',minHeight:50,borderRadius:2,opacity:.65}}/>
+        <div style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:3}}><span style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:14,color:V('dim')}}>{c.ticker}</span><span className="badge" style={{color:ACC.teal,background:ACC.tealBg,borderColor:ACC.teal+'44'}}>股票</span></div>
+        <div><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:V('ink'),fontWeight:600}}>{fmt(r.shares,0)} 股</span><div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{'现金成本 $'+fmt(r.costPerShare,2)+'/股'}</div></div>
+        <div><div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('dim')}}>{c.acquireDate||'—'}</div><div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('faint')}}>→ {c.closeDate||'—'}</div><div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{r.daysHeld} 天</div></div>
+        <div style={{padding:'0 10px',display:'flex',flexDirection:'column',gap:3}}><div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13}}><span style={{color:ACC.amber}}>{'$'+fmt(r.costPerShare*r.shares,0)}</span><span style={{color:V('faint')}}> → </span><span style={{color:V('ink')}}>{'$'+fmt(r.closePrice*r.shares,0)}</span></div><div style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>卖出金额 − 成本 − 费用 {'$'+fmt(r.fees,2)}</div></div>
+        <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',paddingRight:8}}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:16,fontWeight:700,color:positive?ACC.profit:ACC.loss}}>{fmtM(r.profit)}</span></div>
+        <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',paddingRight:8}}><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:14,fontWeight:700,color:positive?ACC.profit:ACC.loss}}>{fmtA(r.annual)}</span></div>
+        <div style={{display:'flex',justifyContent:'center'}}><button onClick={onDelete} style={{background:'none',border:'none',color:V('faint'),cursor:'pointer',fontSize:14,padding:4}} title="删除记录">×</button></div>
       </div>
     </div>
   );
@@ -3518,6 +3606,7 @@ function App(){
   const [loading,setLoading]=useState(false);
   const [refreshingStocks,setRefreshingStocks]=useState(false);
   const [closedQuoteRefreshKey,setClosedQuoteRefreshKey]=useState(0);
+  const [usClosedFilter,setUsClosedFilter]=useState('ALL');
   const [lastRefresh,setLastRefresh]=useState(null);
   const [toast,setToast]=useState(null);
 
@@ -3639,6 +3728,29 @@ function App(){
     setStocks(normalized);lss(SK.STOCKS,normalized);
     persistPatch({stocks:normalized});
   };
+  // 兼容旧版本：此前接货仓位把净成本直接写入 costPerShare（例如 $75.86）。
+  // 只对能从已平仓接货记录还原完整行权现金的仓位迁移，保留旧值为净成本参考。
+  useEffect(()=>{
+    const lots={};
+    closed.filter(c=>c?.closeType==='assigned'&&c?.type==='P'&&num(c.assignedShares)>0&&num(c.assignedMarketValue)>0).forEach(c=>{
+      const key=String(c.assignedTicker||c.ticker||'').trim().toUpperCase();
+      if(!key)return;
+      lots[key]=lots[key]||{shares:0,cash:0};
+      lots[key].shares+=num(c.assignedShares);
+      lots[key].cash+=num(c.assignedMarketValue);
+    });
+    let changed=false;
+    const next=stocks.map(stock=>{
+      const key=String(stock.ticker||'').trim().toUpperCase();
+      const lot=lots[key];
+      if(stock.source!=='assigned'||finitePrice(stock.cashCostPerShare)!=null||!lot||lot.shares<num(stock.shares)||!(lot.cash>0))return stock;
+      const cashCost=lot.cash/lot.shares;
+      const netCost=finitePrice(stock.netCostPerShare)??finitePrice(stock.costPerShare)??cashCost;
+      changed=true;
+      return{...stock,costPerShare:cashCost,cashCostPerShare:cashCost,netCostPerShare:netCost,accountingVersion:2};
+    });
+    if(changed)mutateStocks(next);
+  },[closed,stocks]);
   const mutateSgov=(next)=>{
     setSgov(next);lss(SK.SGOV,next);
     persistPatch({sgov:next});
@@ -3762,8 +3874,8 @@ function App(){
     setExpanded(null);
   };
   const confirmClose=(pos,data)=>{
-    const {closePrice,closeDate,closeType,assignedShares,assignedCostPerShare,assignedMarketValue,assignedTicker}=data;
-    const record={...pos,closePrice,closeDate,closeType,closedAt:Date.now(),...(closeType==='assigned'?{assignedShares,assignedCostPerShare,assignedMarketValue}:{})};
+    const {closePrice,closeDate,closeType,assignedShares,assignedCostPerShare,assignedNetCostPerShare,assignedStrike,assignedPremiumPerShare,assignedMarketValue,assignedTicker}=data;
+    const record={...pos,closePrice,closeDate,closeType,closedAt:Date.now(),...(closeType==='assigned'?{assignedShares,assignedCostPerShare,assignedNetCostPerShare,assignedStrike,assignedPremiumPerShare,assignedMarketValue}:{})};
     mutateClosed([record,...closed]);
     mutate(positions.filter(p=>p.id!==pos.id));
 
@@ -3777,12 +3889,15 @@ function App(){
           const oldShares=Number(existing.shares)||0;
           const addedShares=Number(assignedShares)||0;
           const totalShares=oldShares+addedShares;
-          const totalCost=oldShares*(Number(existing.costPerShare)||0)+addedShares*(Number(assignedCostPerShare)||0);
+          const existingCashCost=usStockCashCost(existing);
+          const existingNetCost=finitePrice(existing.netCostPerShare)??existingCashCost;
+          const totalCost=oldShares*existingCashCost+addedShares*(Number(assignedCostPerShare)||0);
+          const totalNetCost=oldShares*existingNetCost+addedShares*(Number(assignedNetCostPerShare)||Number(assignedCostPerShare)||0);
           const nextStocks=[...stocks];
-          nextStocks[existingIndex]={...existing,shares:totalShares,costPerShare:totalShares?totalCost/totalShares:0,source:'assigned',currentPrice:pos.currentPrice??existing.currentPrice};
+          nextStocks[existingIndex]={...existing,shares:totalShares,costPerShare:totalShares?totalCost/totalShares:0,cashCostPerShare:totalShares?totalCost/totalShares:0,netCostPerShare:totalShares?totalNetCost/totalShares:0,source:'assigned',currentPrice:pos.currentPrice??existing.currentPrice};
           mutateStocks(nextStocks);
         }else{
-          mutateStocks([...stocks,{id:Date.now(),ticker:symbol,shares:assignedShares,costPerShare:assignedCostPerShare,acquireDate:closeDate,source:'assigned',currentPrice:pos.currentPrice||null,fromOptionId:pos.id}]);
+          mutateStocks([...stocks,{id:Date.now(),ticker:symbol,shares:assignedShares,costPerShare:assignedCostPerShare,cashCostPerShare:assignedCostPerShare,netCostPerShare:assignedNetCostPerShare??assignedCostPerShare,acquireDate:closeDate,source:'assigned',currentPrice:pos.currentPrice||null,fromOptionId:pos.id}]);
         }
         // Put 接货资金从 SGOV 扣减；Covered Call 交割不涉及现金接货。
         if(sgov?.marketValue){
@@ -3811,6 +3926,20 @@ function App(){
     }
     setExpanded(null);setCloseTarget(null);
   };
+  const closeStockPosition=(stock,data)=>{
+    const heldShares=Math.max(0,num(stock.shares));
+    const closeShares=Math.min(heldShares,Math.max(0,num(data.closeShares)));
+    const closePrice=finitePrice(data.closePrice);
+    if(!(closeShares>0)&&closePrice==null)return;
+    if(!(closeShares>0)||closePrice==null||closeShares>heldShares)return;
+    const cashCost=usStockCashCost(stock);
+    const record={...stock,assetType:'stock',shares:closeShares,closeShares,closePrice,closeDate:data.closeDate||today(),closeFees:Math.max(0,num(data.closeFees)),cashCostPerShare:cashCost,costPerShare:cashCost,closedAt:Date.now()};
+    const remaining=heldShares-closeShares;
+    mutateStocks(remaining>0?stocks.map(item=>item.id===stock.id?{...item,shares:remaining}:item):stocks.filter(item=>item.id!==stock.id));
+    mutateClosed([record,...closed]);
+    const result=calcUsStockClosed(record);
+    showToast(`${stock.ticker} 股票已平仓，收益 ${fmtM(result.profit)}`,result.profit>=0?ACC.profit:ACC.loss);
+  };
   const confirmRoll=(pos,data)=>{
     const {buybackPrice,rollDate,newExpiry,newStrike,newPremium,netCredit,rollComm}=data;
     const newId=Date.now();
@@ -3838,6 +3967,9 @@ function App(){
   const removeClosedRecord=(id)=>{mutateClosed(closed.filter(c=>c.id!==id));showToast('已删除记录',ACC.loss);};
   const updateStockPrice=(id,price)=>mutateStocks(stocks.map(s=>s.id===id?{...s,currentPrice:price}:s));
   const removeStock=(id)=>{mutateStocks(stocks.filter(s=>s.id!==id));showToast('已删除股票仓位',ACC.loss);};
+  const usOptionClosed=closed.filter(c=>c?.assetType!=='stock');
+  const usStockClosed=closed.filter(c=>c?.assetType==='stock');
+  const filteredUsClosed=usClosedFilter==='OPTION'?usOptionClosed:usClosedFilter==='STOCK'?usStockClosed:closed;
 
   const totalMarginUsed=positions.reduce((s,p)=>s+positionMargin(p),0);
 
@@ -3956,7 +4088,7 @@ function App(){
                 <div className="market-account-tabs">
                   {[
                     ['active','活跃期权',positions.length],['stocks','股票持仓',stocks.length],
-                    ['closed','期权已平仓',closed.length],['sgov','SGOV 底仓',null],
+                    ['closed','已平仓',closed.length],['sgov','SGOV 底仓',null],
                   ].map(([key,label,count])=><button key={key} className={tab===key?'active':''} onClick={()=>setTab(key)}><span>{label}</span>{count!=null&&<b>{count}</b>}</button>)}
                 </div>
                 {(tab==='active'||tab==='closed'||tab==='stocks')&&(
@@ -4017,16 +4149,18 @@ function App(){
           {/* 已平仓 Tab */}
           {tab==='closed'&&(
             <>
-              <ClosedSummary closed={closed} commPerSide={commPerSide}/>
+              <UsClosedSummary optionClosed={usOptionClosed} stockClosed={usStockClosed} commPerSide={commPerSide}/>
               {closed.length===0?(
                 <div style={{textAlign:'center',padding:'70px 20px',color:V('faint'),border:`1.5px dashed ${V('line')}`,borderRadius:16}}>
                   <div style={{fontSize:38,marginBottom:12,opacity:.3}}>📋</div>
                   <div style={{fontSize:15,marginBottom:6,color:V('dim')}}>暂无平仓记录</div>
-                  <div style={{fontSize:13}}>在「活跃期权」展开一笔，点击「↩ 平仓」</div>
+                  <div style={{fontSize:13}}>在「活跃期权」或「股票持仓」中点击「平仓」</div>
                 </div>
               ):(<>
-                <ClosedTableHeader/>
-                {closed.map(c=><ClosedRow key={c.id} c={c} commPerSide={commPerSide} positions={positions} closed={closed} quoteRefreshKey={closedQuoteRefreshKey} onUpdateExpiryReview={updateClosedExpiryReview} onDelete={()=>removeClosedRecord(c.id)}/>)}
+                <div className="cnopt-segmented" style={{display:'inline-flex',marginBottom:12}}>
+                  {[['ALL','全部'],['OPTION','期权'],['STOCK','股票']].map(([value,label])=><button key={value} className={usClosedFilter===value?'active':''} onClick={()=>setUsClosedFilter(value)}>{label} <span style={{opacity:.65}}>{value==='ALL'?closed.length:value==='OPTION'?usOptionClosed.length:usStockClosed.length}</span></button>)}
+                </div>
+                {usClosedFilter==='STOCK'?<><StockClosedTableHeader/>{filteredUsClosed.map(c=><StockClosedRow key={c.id} c={c} onDelete={()=>removeClosedRecord(c.id)}/>)}</>:usClosedFilter==='OPTION'?<><ClosedTableHeader/>{filteredUsClosed.map(c=><ClosedRow key={c.id} c={c} commPerSide={commPerSide} positions={positions} closed={closed} quoteRefreshKey={closedQuoteRefreshKey} onUpdateExpiryReview={updateClosedExpiryReview} onDelete={()=>removeClosedRecord(c.id)}/>)}</>:<>{usOptionClosed.length>0&&<><ClosedTableHeader/>{usOptionClosed.map(c=><ClosedRow key={c.id} c={c} commPerSide={commPerSide} positions={positions} closed={closed} quoteRefreshKey={closedQuoteRefreshKey} onUpdateExpiryReview={updateClosedExpiryReview} onDelete={()=>removeClosedRecord(c.id)}/>)}</>}{usStockClosed.length>0&&<><StockClosedTableHeader/>{usStockClosed.map(c=><StockClosedRow key={c.id} c={c} onDelete={()=>removeClosedRecord(c.id)}/>)}</>}</>}
               </>)}
             </>
           )}
@@ -4046,7 +4180,7 @@ function App(){
                 </div>
               ):(stocks.length>0&&<>
                 <StocksTableHeader/>
-                {stocks.map(s=><StockRow key={s.id} s={s} onUpdatePrice={updateStockPrice} onDelete={removeStock}/>)}
+                {stocks.map(s=><StockRow key={s.id} s={s} onUpdatePrice={updateStockPrice} onClose={closeStockPosition} onDelete={removeStock}/>)}
               </>)}
             </>
           )}
