@@ -1120,7 +1120,7 @@ module.exports = async function handler(req, res) {
   }
 
   // ══════════════════════════════════════════════════
-  // 历史收盘价代理（用于已平仓到期复盘）
+  // 历史收盘价代理（用于到期自动结算和已平仓到期复盘）
   // /api/history/:ticker?date=YYYY-MM-DD
   // ══════════════════════════════════════════════════
   if (reqUrl.startsWith('/api/history/')) {

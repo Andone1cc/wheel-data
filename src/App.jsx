@@ -354,10 +354,13 @@ async function fetchCnStockQuoteCached(market,ticker,force=false){
   return quote;
 }
 
-async function fetchStockCloseOnDate(ticker,date){
+async function fetchStockCloseOnDate(ticker,date,{force=false}={}){
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
   try{
-    const res=await fetch(`${proxyBase}/api/history/${encodeURIComponent(ticker)}?date=${encodeURIComponent(date)}`,{signal:AbortSignal.timeout(10000)});
+    const params=new URLSearchParams({date:String(date)});
+    // 到期日当天可能先拿到前一交易日收盘价；自动结算重试时绕过 CDN/浏览器缓存。
+    if(force)params.set('refresh',String(Math.floor(Date.now()/300000)));
+    const res=await fetch(`${proxyBase}/api/history/${encodeURIComponent(ticker)}?${params.toString()}`,{signal:AbortSignal.timeout(10000),cache:force?'no-store':'default'});
     if(!res.ok)return null;
     const data=await res.json();
     const price=Number(data?.price);
@@ -666,7 +669,7 @@ function calcClosed(c,comm=DEFAULT_COMM){
   const openPrem=c.premium*100*qty;
   const capital=positionCapital(c);
   const closeType=c.closeType||'manual'; // manual | expired | assigned | roll
-  const commUsed=closeType==='expired'?comm*qty:comm*qty*2;
+  const commUsed=closeType==='expired'||closeType==='assigned'?comm*qty:comm*qty*2;
   const closePrem=(c.closePrice||0)*100*qty;
   const profit=openPrem-closePrem-commUsed;
   const daysHeld=Math.max(1,daysBetween(c.openDate,c.closeDate||today()));
@@ -733,6 +736,78 @@ function calcExpiryReview(c,r,expiryPrice,comm=DEFAULT_COMM){
   const netDiff=expiryMarkProfit-r.profit;
   const lostPremium=Math.max(0,r.closePrem);
   return{wouldAssign,intrinsicPerShare,intrinsicValue,expiryMarkProfit,netDiff,lostPremium};
+}
+
+function calcExpiryDecision(position,expiryPrice){
+  const price=Number(expiryPrice);
+  if(!(price>0))return null;
+  const intrinsicPerShare=position.type==='P'
+    ?Math.max(0,Number(position.strike)-price)
+    :Math.max(0,price-Number(position.strike));
+  return{
+    expiryStockPrice:price,
+    intrinsicPerShare,
+    wouldAssign:intrinsicPerShare>0.005,
+  };
+}
+
+// 统一处理被行权后的股票/SGOV 变化，手动和自动到期结算共用。
+function applyAssignedSettlement(position,data,stocks,sgov){
+  const symbol=String(data.assignedTicker||position.ticker).trim().toUpperCase();
+  const assignedShares=Number(data.assignedShares)||0;
+  const assignedCostPerShare=Number(data.assignedCostPerShare)||0;
+  const assignedNetCostPerShare=Number(data.assignedNetCostPerShare)||assignedCostPerShare;
+  let nextStocks=[...stocks];
+  let nextSgov=sgov;
+  let shortfall=0;
+
+  if(position.type==='P'){
+    const existingIndex=nextStocks.findIndex(s=>String(s.ticker||'').trim().toUpperCase()===symbol);
+    if(existingIndex>=0){
+      const existing=nextStocks[existingIndex];
+      const oldShares=Number(existing.shares)||0;
+      const totalShares=oldShares+assignedShares;
+      const existingCashCost=usStockCashCost(existing);
+      const existingNetCost=finitePrice(existing.netCostPerShare)??existingCashCost;
+      const totalCost=oldShares*existingCashCost+assignedShares*assignedCostPerShare;
+      const totalNetCost=oldShares*existingNetCost+assignedShares*assignedNetCostPerShare;
+      nextStocks[existingIndex]={...existing,
+        shares:totalShares,
+        costPerShare:totalShares?totalCost/totalShares:0,
+        cashCostPerShare:totalShares?totalCost/totalShares:0,
+        netCostPerShare:totalShares?totalNetCost/totalShares:0,
+        source:'assigned',
+        currentPrice:position.currentPrice??existing.currentPrice,
+      };
+    }else{
+      nextStocks.push({
+        id:Date.now(),ticker:symbol,shares:assignedShares,
+        costPerShare:assignedCostPerShare,
+        cashCostPerShare:assignedCostPerShare,
+        netCostPerShare:assignedNetCostPerShare,
+        acquireDate:data.closeDate,source:'assigned',
+        currentPrice:position.currentPrice||null,fromOptionId:position.id,
+      });
+    }
+    if(sgov?.marketValue){
+      nextSgov={...sgov,marketValue:Math.max(0,(sgov.marketValue||0)-Number(data.assignedMarketValue||0))};
+    }
+  }else{
+    let remaining=assignedShares;
+    nextStocks=[];
+    stocks.forEach(stock=>{
+      const same=String(stock.ticker||'').trim().toUpperCase()===symbol;
+      const shares=Number(stock.shares)||0;
+      if(!same||remaining<=0){nextStocks.push(stock);return;}
+      const delivered=Math.min(shares,remaining);
+      const left=shares-delivered;
+      if(left>0)nextStocks.push({...stock,shares:left});
+      remaining-=delivered;
+    });
+    shortfall=remaining;
+  }
+
+  return{stocks:nextStocks,sgov:nextSgov,shortfall};
 }
 
 function calcSgov(s){
@@ -1024,7 +1099,7 @@ function CloseModal({pos,commPerSide,onConfirm,onClose,initialCloseType='manual'
   const typeOptions=[
     {value:'manual',label:'主动平仓（买回期权）'},
     {value:'expired',label:'到期归零（价外失效）'},
-    {value:'assigned',label:'被行权接货（买入股票）'},
+    {value:'assigned',label:pos.type==='P'?'被行权接货（买入股票）':'被行权交割（卖出股票）'},
   ];
 
   return(
@@ -2593,6 +2668,7 @@ function ClosedRow({c,commPerSide,onDelete,onUpdateExpiryReview,positions=[],clo
   const isExpired=c.closeType==='expired';
   const isAssigned=c.closeType==='assigned';
   const isRoll=c.closeType==='roll';
+  const isAutoExpiry=!!c.autoExpiry;
   const isManual=!isRoll&&!isAssigned&&!isExpired;
   const canEstimateHold=isManual&&c.expDate&&c.expDate>=today();
   const canReviewExpiry=!!(c.expDate&&c.expDate<today()&&!isExpired&&!isAssigned);
@@ -2690,12 +2766,13 @@ function ClosedRow({c,commPerSide,onDelete,onUpdateExpiryReview,positions=[],clo
         </div>
         <div style={{paddingRight:8}}>
           <span className="badge" style={badgeStyle}>
-            {isRoll?'↻ Roll':isAssigned?'📦 接货':isExpired?'到期归零':'主动平仓'}
+            {isRoll?'↻ Roll':isAssigned?(isAutoExpiry?'⏱ 到期行权':'📦 接货'):isExpired?(isAutoExpiry?'⏱ 到期归零':'到期归零'):'主动平仓'}
           </span>
           {!isRoll&&!isAssigned&&!isExpired&&c.expDate&&(
             <div style={{fontSize:10,color:V('faint'),fontFamily:'IBM Plex Mono,monospace',marginTop:3}}>原到期 {c.expDate}</div>
           )}
           {isAssigned&&<div style={{fontSize:10,color:V('faint'),fontFamily:'IBM Plex Mono,monospace',marginTop:3}}>{c.assignedShares}股 @ ${fmt(c.assignedCostPerShare)}</div>}
+          {isAutoExpiry&&<div style={{fontSize:10,color:ACC.amber,fontFamily:'IBM Plex Mono,monospace',marginTop:3}}>到期价 ${fmt(c.expiryStockPrice)} · {c.expiryPriceDate||c.expDate}</div>}
           {isRoll&&(
             <div style={{fontSize:10,color:V('faint'),fontFamily:'IBM Plex Mono,monospace',marginTop:3,lineHeight:1.45}}>
               {rollTo.strike!=null&&<div>续仓 ${fmt(rollTo.strike,0)}{rollTo.expiry?` · ${rollTo.expiry}`:''}</div>}
@@ -2708,7 +2785,7 @@ function ClosedRow({c,commPerSide,onDelete,onUpdateExpiryReview,positions=[],clo
           <div style={{display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'}}>
             <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.amber,fontWeight:600}}>{'$'+fmt(r.openPrem)}</span>
             {!isExpired&&!isAssigned&&<><span style={{color:V('faint'),fontSize:11}}>{'−'}</span><span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.loss}}>{'$'+fmt(r.closePrem)}</span></>}
-            {isAssigned&&<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('faint')}}>{` · 接货现金 $${fmt(c.assignedMarketValue,0)}`}</span>}
+            {isAssigned&&<span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:11,color:V('faint')}}>{` · ${isCall?'交割名义':'接货现金'} $${fmt(c.assignedMarketValue,0)}`}</span>}
             <span style={{color:V('faint'),fontSize:11}}>{'−'}</span>
             <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:ACC.loss}}>{'$'+fmt(r.commUsed)}</span>
           </div>
@@ -2725,7 +2802,18 @@ function ClosedRow({c,commPerSide,onDelete,onUpdateExpiryReview,positions=[],clo
           )}
         </div>
         <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-end',paddingRight:8}}>
-          {canReviewExpiry?(
+          {isAutoExpiry?(
+            <>
+              <span className="section-label">到期自动处理</span>
+              <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:13,color:isAssigned?ACC.loss:ACC.teal,fontWeight:700}}>
+                {isAssigned?'收盘价 ITM · 已行权':'收盘价 OTM · 已归零'}
+              </span>
+              <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:12,color:ACC.amber,fontWeight:600}}>
+                ${fmt(c.expiryStockPrice)} · {c.expiryPriceDate||c.expDate}
+              </span>
+              <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint')}}>{c.expiryPriceSource||'History'}</span>
+            </>
+          ):canReviewExpiry?(
             expiryQuote.loading?(
               <>
                 <span className="section-label">到期复盘</span>
@@ -3667,6 +3755,7 @@ function App(){
   const cloudLoaded=React.useRef(false); // 防止初始化期间空数据覆盖云端 // idle | syncing | ok | err
   const cloudWriteQueue=React.useRef(Promise.resolve(true));
   const latestData=React.useRef(null);
+  const expiryAutoRun=React.useRef(false);
   const [showCloudModal,setShowCloudModal]=useState(false);
 
   const [tab,setTab]=useState('active');
@@ -3836,6 +3925,110 @@ function App(){
     setSgov(next);lss(SK.SGOV,next);
     persistPatch({sgov:next});
   };
+  const autoCloseExpiredPositions=useCallback(async()=>{
+    if(expiryAutoRun.current)return;
+    // 云端数据尚未加载完成时不能处理本机初始数据，否则可能把远程仓位重复结算。
+    if(cloudPwd&&!cloudLoaded.current)return;
+    const asOf=today();
+    const due=positions.filter(p=>p?.expDate&&String(p.expDate).slice(0,10)<=asOf);
+    if(!due.length){expiryAutoRun.current=false;return;}
+    expiryAutoRun.current=true;
+
+    const checked=await Promise.all(due.map(async position=>{
+      const quote=await fetchStockCloseOnDate(position.ticker,position.expDate,{force:String(position.expDate).slice(0,10)===asOf});
+      if(!quote?.price)return null;
+      // 到期日当天必须拿到当天收盘价，避免盘中启动时误用前一交易日价格。
+      if(String(position.expDate).slice(0,10)===asOf&&String(quote.date)!==String(position.expDate))return null;
+      const decision=calcExpiryDecision(position,quote.price);
+      if(!decision)return null;
+      return{position,quote,decision};
+    }));
+    const ready=checked.filter(Boolean);
+    if(!ready.length){
+      // 到期日当天收盘价还没发布时，下一次行情刷新或重新打开页面会重试。
+      expiryAutoRun.current=false;
+      return;
+    }
+
+    let nextPositions=[...positions];
+    let nextClosed=[...closed];
+    let nextStocks=[...stocks];
+    let nextSgov=sgov;
+    let assignedCount=0;
+    let expiredCount=0;
+    let assignmentShortfall=0;
+
+    ready.forEach(({position,quote,decision})=>{
+      const qty=Number(position.qty)||1;
+      const shares=qty*100;
+      const closeType=decision.wouldAssign?'assigned':'expired';
+      const premPerShare=position.type==='P'?Number(position.premium||0)-(commPerSide/100):0;
+      const assignedMarketValue=Number(position.strike||0)*shares;
+      const settlement={
+        assignedShares:shares,
+        assignedCostPerShare:Number(position.strike)||0,
+        assignedNetCostPerShare:position.type==='P'?Number(position.strike||0)-premPerShare:Number(position.strike)||0,
+        assignedMarketValue,
+        assignedTicker:position.ticker,
+        closeDate:position.expDate,
+      };
+      const record={
+        ...position,
+        closePrice:0,
+        closeDate:position.expDate,
+        closeType,
+        closedAt:Date.now(),
+        autoExpiry:true,
+        expiryDecision:decision.wouldAssign?'assigned':'expired',
+        expiryStockPrice:decision.expiryStockPrice,
+        expiryPriceDate:quote.date||position.expDate,
+        expiryPriceSource:quote.source||'History',
+        expiryIntrinsicPerShare:decision.intrinsicPerShare,
+        expiryReviewPrice:decision.expiryStockPrice,
+        expiryReviewDate:quote.date||position.expDate,
+        expiryReviewSource:quote.source||'History',
+        expiryReviewManual:false,
+        ...(decision.wouldAssign?settlement:{}),
+      };
+      nextPositions=nextPositions.filter(item=>item.id!==position.id);
+      nextClosed=[record,...nextClosed];
+      if(decision.wouldAssign){
+        assignedCount++;
+        const applied=applyAssignedSettlement(position,settlement,nextStocks,nextSgov);
+        nextStocks=applied.stocks;
+        nextSgov=applied.sgov;
+        assignmentShortfall+=applied.shortfall||0;
+      }else{
+        expiredCount++;
+      }
+    });
+
+    const patch={positions:nextPositions,closed:nextClosed,stocks:nextStocks};
+    const sgovChanged=nextSgov!==sgov;
+    if(sgovChanged)patch.sgov=nextSgov;
+    setPositions(nextPositions);setClosed(nextClosed);setStocks(nextStocks);
+    if(sgovChanged)setSgov(nextSgov);
+    persistLocal({...latestData.current,...patch});
+    latestData.current={...latestData.current,...patch};
+    pushCloud({...latestData.current,updatedAt:Date.now()});
+    // 仍有未拿到到期价的仓位时，允许下一次刷新继续尝试。
+    expiryAutoRun.current=ready.length===due.length;
+    const warning=assignmentShortfall?`，Call 股票短缺 ${assignmentShortfall}股`:'';
+    showToast(`自动到期处理：${assignedCount} 笔行权、${expiredCount} 笔归零${warning}`,assignmentShortfall?ACC.loss:ACC.amber);
+  },[positions,closed,stocks,sgov,commPerSide,cloudPwd,pushCloud]);
+
+  useEffect(()=>{
+    autoCloseExpiredPositions();
+  },[autoCloseExpiredPositions,cloudStatus,lastRefresh]);
+  useEffect(()=>{
+    const hasDue=positions.some(p=>p?.expDate&&String(p.expDate).slice(0,10)<=today());
+    if(!hasDue)return undefined;
+    const timer=window.setInterval(()=>{
+      expiryAutoRun.current=false;
+      autoCloseExpiredPositions();
+    },5*60*1000);
+    return()=>window.clearInterval(timer);
+  },[positions,autoCloseExpiredPositions]);
   const mutateCfg=(next)=>{
     setCfg(next);lss(SK.CFG,next);
     persistPatch({cfg:next});
@@ -3974,45 +4167,13 @@ function App(){
 
     if(closeType==='assigned'){
       const symbol=String(assignedTicker||pos.ticker).trim().toUpperCase();
+      const applied=applyAssignedSettlement(pos,{assignedShares,assignedCostPerShare,assignedNetCostPerShare,assignedMarketValue,assignedTicker:symbol,closeDate},stocks,sgov);
+      mutateStocks(applied.stocks);
+      if(applied.sgov!==sgov)mutateSgov(applied.sgov);
       if(pos.type==='P'){
-        // Put 接货：同标的合并到现有股票仓位，并按总成本重新计算均价。
-        const existingIndex=stocks.findIndex(s=>String(s.ticker||'').trim().toUpperCase()===symbol);
-        if(existingIndex>=0){
-          const existing=stocks[existingIndex];
-          const oldShares=Number(existing.shares)||0;
-          const addedShares=Number(assignedShares)||0;
-          const totalShares=oldShares+addedShares;
-          const existingCashCost=usStockCashCost(existing);
-          const existingNetCost=finitePrice(existing.netCostPerShare)??existingCashCost;
-          const totalCost=oldShares*existingCashCost+addedShares*(Number(assignedCostPerShare)||0);
-          const totalNetCost=oldShares*existingNetCost+addedShares*(Number(assignedNetCostPerShare)||Number(assignedCostPerShare)||0);
-          const nextStocks=[...stocks];
-          nextStocks[existingIndex]={...existing,shares:totalShares,costPerShare:totalShares?totalCost/totalShares:0,cashCostPerShare:totalShares?totalCost/totalShares:0,netCostPerShare:totalShares?totalNetCost/totalShares:0,source:'assigned',currentPrice:pos.currentPrice??existing.currentPrice};
-          mutateStocks(nextStocks);
-        }else{
-          mutateStocks([...stocks,{id:Date.now(),ticker:symbol,shares:assignedShares,costPerShare:assignedCostPerShare,cashCostPerShare:assignedCostPerShare,netCostPerShare:assignedNetCostPerShare??assignedCostPerShare,acquireDate:closeDate,source:'assigned',currentPrice:pos.currentPrice||null,fromOptionId:pos.id}]);
-        }
-        // Put 接货资金从 SGOV 扣减；Covered Call 交割不涉及现金接货。
-        if(sgov?.marketValue){
-          const newMV=Math.max(0,(sgov.marketValue||0)-assignedMarketValue);
-          mutateSgov({...sgov,marketValue:newMV});
-        }
-        showToast(`📦 ${symbol} 接货 ${assignedShares}股，股票持仓已增加，SGOV 已扣减 $${fmt(assignedMarketValue,0)}`,ACC.amber);
+        showToast(`📦 ${symbol} 接货 ${assignedShares}股，股票持仓已增加${applied.sgov!==sgov?'，SGOV 已扣减 $'+fmt(assignedMarketValue,0):''}`,ACC.amber);
       }else{
-        // Call 被行权：交割股票，从同标的现有持仓中扣除，而不是新增股票。
-        let remaining=Number(assignedShares)||0;
-        const nextStocks=[];
-        stocks.forEach(stock=>{
-          const same=String(stock.ticker||'').trim().toUpperCase()===symbol;
-          const shares=Number(stock.shares)||0;
-          if(!same||remaining<=0){nextStocks.push(stock);return;}
-          const delivered=Math.min(shares,remaining);
-          const left=shares-delivered;
-          if(left>0)nextStocks.push({...stock,shares:left});
-          remaining-=delivered;
-        });
-        mutateStocks(nextStocks);
-        showToast(remaining>0?`📤 ${symbol} 已登记被行权，但股票不足 ${remaining}股，请检查持仓`:`📤 ${symbol} 已交割 ${assignedShares}股，股票持仓已扣减`,remaining>0?ACC.loss:ACC.amber);
+        showToast(applied.shortfall>0?`📤 ${symbol} 已登记被行权，但股票不足 ${applied.shortfall}股，请检查持仓`:`📤 ${symbol} 已交割 ${assignedShares}股，股票持仓已扣减`,applied.shortfall>0?ACC.loss:ACC.amber);
       }
     }else{
       showToast(`${pos.ticker} 已平仓，收益 ${fmtM(calcClosed(record,commPerSide).profit)}`);
