@@ -795,7 +795,11 @@ function applyAssignedSettlement(position,data,stocks,sgov){
       const currentShares=sgovCurrentShares(sgov);
       const currentPrice=sgovCurrentPrice(sgov);
       const soldShares=currentPrice>0?Math.min(currentShares,assignedValue/currentPrice):0;
-      const nextShares=Math.max(0,currentShares-soldShares);
+      const existingEventDelta=sgovUnappliedEventDelta(sgov);
+      const nextEffectiveShares=Math.max(0,currentShares-soldShares);
+      // 基础份额只保存未被手工事件调整前的基准，手工事件仍由
+      // sgovCurrentShares 统一叠加；这样行权不会把事件份额重复计算。
+      const nextBaseShares=Math.max(0,nextEffectiveShares-existingEventDelta);
       const event={
         id:`assignment-${position.id}-${data.closeDate||today()}-${Date.now()}`,
         date:data.closeDate||today(),
@@ -805,13 +809,15 @@ function applyAssignedSettlement(position,data,stocks,sgov){
         amount:assignedValue,
         note:`${symbol} Put 行权接货，卖出 SGOV 补充现金`,
         source:'option-assignment',
+        sharesAppliedToBase:true,
       };
+      const nextEvents=[...sgovEvents(sgov),event];
       nextSgov={
         ...sgov,
-        shares:nextShares,
+        shares:nextBaseShares,
         currentPrice,
-        marketValue:nextShares*currentPrice,
-        events:[...sgovEvents(sgov),event],
+        marketValue:nextEffectiveShares*currentPrice,
+        events:nextEvents,
       };
     }
   }else{
@@ -871,10 +877,12 @@ const sgovCurrentPrice=(value)=>{
 const sgovCurrentShares=(value)=>{
   const s=value||{};
   const explicit=Number(s.shares);
-  if(Number.isFinite(explicit)&&explicit>=0)return explicit;
+  const baseShares=Number.isFinite(explicit)&&explicit>=0?explicit:null;
   const latest=[...sgovMonthlyRecords(s)].filter(row=>/^\d{4}-\d{2}$/.test(String(row?.month||''))&&Number(row?.shares)>0)
     .sort((a,b)=>String(a.month).localeCompare(String(b.month))).pop();
-  return latest?Math.max(0,Number(latest.shares)||0):0;
+  const baseline=baseShares??(latest?Math.max(0,Number(latest.shares)||0):0);
+  const eventDelta=sgovUnappliedEventDelta(s);
+  return Math.max(0,baseline+eventDelta);
 };
 const sgovCurrentMarketValue=(value)=>{
   const shares=sgovCurrentShares(value);
@@ -885,6 +893,10 @@ const sgovEventDelta=(event)=>{
   const shares=Math.max(0,Number(event?.shares)||0);
   return event?.type==='sell'||event?.type==='assignment'?-shares:shares;
 };
+const sgovUnappliedEventDelta=(value)=>sgovEvents(value).reduce((sum,event)=>{
+  if(event?.sharesAppliedToBase||event?.source==='option-assignment')return sum;
+  return sum+sgovEventDelta(event);
+},0);
 function calcSgovEvents(sgov,currentShares,currentPrice){
   const events=sgovEvents(sgov).filter(event=>/^\d{4}-\d{2}-\d{2}$/.test(String(event?.date||'')))
     .sort((a,b)=>String(a.date).localeCompare(String(b.date)));
@@ -982,7 +994,7 @@ function calcSgovMonthly(sgov){
     annualBasisMonth:latestIncomeRow?.month||null,
     currentShares:fallbackShares||(currentRecord?.shares||0),
     currentPrice:fallbackPrice,
-    currentMarketValue:sgovCurrentMarketValue({...s,shares:fallbackShares,currentPrice:fallbackPrice}),
+    currentMarketValue:fallbackShares>0&&fallbackPrice>0?fallbackShares*fallbackPrice:null,
     events,
     referencePrice:fallbackPrice,
   };
@@ -2409,7 +2421,7 @@ function SgovMonthlyPanel({sgov,onUpdate,totalMarginUsed,showToast}){
   const stats=calcSgovMonthly({...s,monthlyRecords:records});
   const currentPrice=stats.currentPrice;
   const currentShares=stats.currentShares;
-  const currentMarketValue=sgovCurrentMarketValue({...s,currentPrice,shares:currentShares});
+  const currentMarketValue=currentShares>0&&currentPrice>0?currentShares*currentPrice:null;
   const [detailsOpen,setDetailsOpen]=useState(false);
   const [eventsOpen,setEventsOpen]=useState(false);
   const [refreshingPrice,setRefreshingPrice]=useState(false);
@@ -2461,7 +2473,10 @@ function SgovMonthlyPanel({sgov,onUpdate,totalMarginUsed,showToast}){
       <div className="sgov-form-grid" style={{display:'grid',gridTemplateColumns:'1.1fr 1fr 1fr .8fr',gap:12,marginBottom:14}}>
         <NumField label="当前市值（自动）" prefix="$" value={currentMarketValue??''} readOnly/>
         <NumField label="当前价格" prefix="$" value={currentPrice??''} readOnly/>
-        <NumField label="当前份额" suffix="股" value={s.shares??stats.currentShares??''} placeholder="1000" onChange={v=>update({shares:parseFloat(v)||0})}/>
+        <NumField label="当前份额（含事件）" suffix="股" value={currentShares??''} placeholder="1000" onChange={v=>{
+          const desired=Math.max(0,parseFloat(v)||0);
+          update({shares:Math.max(0,desired-sgovUnappliedEventDelta(s))});
+        }}/>
         <NumField label="默认税率" hint="输入税前" suffix="%" value={s.dividendTaxRate??DEFAULT_SGOV_TAX_RATE} onChange={v=>update({dividendTaxRate:parseFloat(v)||0})}/>
       </div>
       <div style={{display:'flex',justifyContent:'flex-end',marginTop:-6,marginBottom:12}}>
