@@ -966,11 +966,14 @@ function calcSgovMonthly(sgov){
     ?preEventRows.reduce((sum,row)=>sum+row.days,0)+events.eventDays
     :validRows.reduce((sum,row)=>sum+row.days,0);
   const latestIncomeRow=[...rows]
-    .filter(row=>row.month<=today().slice(0,7)&&row.shares>0&&row.annualIncome>0)
+    .filter(row=>row.month<=today().slice(0,7)&&row.shares>0&&row.annualIncome>0
+      &&(row.month<today().slice(0,7)||row.grossDividend>0))
     .sort((a,b)=>a.month.localeCompare(b.month)).pop();
-  const usesCurrentBasis=fallbackShares>0&&fallbackPrice>0;
-  const annualBasisShares=usesCurrentBasis?fallbackShares:(latestIncomeRow?.shares||0);
-  const annualBasisPrice=usesCurrentBasis?fallbackPrice:(latestIncomeRow?.referencePrice||fallbackPrice);
+  // 年化收益只使用最近一个已经发放/录入年收入的月份作为基准。
+  // 当前月可能只有新增份额、尚未发放分红，不能直接拿当前持仓做分母。
+  const usesCurrentBasis=!latestIncomeRow&&fallbackShares>0&&fallbackPrice>0;
+  const annualBasisShares=latestIncomeRow?.shares|| (usesCurrentBasis?fallbackShares:0);
+  const annualBasisPrice=latestIncomeRow?.referencePrice|| (usesCurrentBasis?fallbackPrice:0);
   const annualBasisValue=annualBasisShares*annualBasisPrice;
   const grossAnnualIncome=latestIncomeRow?.annualIncome||0;
   const netAnnualIncome=latestIncomeRow?.netAnnualIncome||0;
@@ -2471,7 +2474,7 @@ function SgovMonthlyPanel({sgov,onUpdate,totalMarginUsed,showToast}){
         <span style={{fontSize:11,color:V('faint'),fontFamily:'IBM Plex Mono,monospace'}}>资金事件 · 月度分红</span>
       </div>
       <div className="sgov-form-grid" style={{display:'grid',gridTemplateColumns:'1.1fr 1fr 1fr .8fr',gap:12,marginBottom:14}}>
-        <NumField label="当前市值（自动）" prefix="$" value={currentMarketValue??''} readOnly/>
+        <NumField label="当前市值（自动）" prefix="$" value={currentMarketValue==null?'':currentMarketValue.toFixed(2)} readOnly/>
         <NumField label="当前价格" prefix="$" value={currentPrice??''} readOnly/>
         <NumField label="当前份额（含事件）" suffix="股" value={currentShares??''} placeholder="1000" onChange={v=>{
           const desired=Math.max(0,parseFloat(v)||0);
