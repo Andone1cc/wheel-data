@@ -646,7 +646,8 @@ function scorePosition(p,r,ctx={}){
     else if(r.annualExp>90)add(-5,'年化异常偏高，通常意味着风险也高');
   }
 
-  const marginRatio=ctx.sgov?.marketValue&&ctx.totalMargin>0?(ctx.totalMargin/ctx.sgov.marketValue)*100:null;
+  const sgovValue=sgovCurrentMarketValue(ctx.sgov);
+  const marginRatio=sgovValue&&ctx.totalMargin>0?(ctx.totalMargin/sgovValue)*100:null;
   if(marginRatio!=null){
     if(marginRatio>90)add(-14,'组合保证金/SGOV 超过 90%');
     else if(marginRatio>75)add(-8,'组合保证金/SGOV 偏高');
@@ -789,8 +790,29 @@ function applyAssignedSettlement(position,data,stocks,sgov){
         currentPrice:position.currentPrice||null,fromOptionId:position.id,
       });
     }
-    if(sgov?.marketValue){
-      nextSgov={...sgov,marketValue:Math.max(0,(sgov.marketValue||0)-Number(data.assignedMarketValue||0))};
+    if(sgov){
+      const assignedValue=Math.max(0,Number(data.assignedMarketValue)||0);
+      const currentShares=sgovCurrentShares(sgov);
+      const currentPrice=sgovCurrentPrice(sgov);
+      const soldShares=currentPrice>0?Math.min(currentShares,assignedValue/currentPrice):0;
+      const nextShares=Math.max(0,currentShares-soldShares);
+      const event={
+        id:`assignment-${position.id}-${data.closeDate||today()}-${Date.now()}`,
+        date:data.closeDate||today(),
+        type:'assignment',
+        shares:soldShares,
+        price:currentPrice,
+        amount:assignedValue,
+        note:`${symbol} Put 行权接货，卖出 SGOV 补充现金`,
+        source:'option-assignment',
+      };
+      nextSgov={
+        ...sgov,
+        shares:nextShares,
+        currentPrice,
+        marketValue:nextShares*currentPrice,
+        events:[...sgovEvents(sgov),event],
+      };
     }
   }else{
     let remaining=assignedShares;
@@ -821,6 +843,11 @@ function calcSgov(s){
 
 const DEFAULT_SGOV_TAX_RATE=10;
 const DEFAULT_SGOV_UNIT_PRICE=100.67;
+const SGOV_EVENT_TYPES=[
+  {value:'buy',label:'买入 SGOV'},
+  {value:'sell',label:'卖出 SGOV'},
+  {value:'assignment',label:'卖出补接货'},
+];
 const DEFAULT_SGOV_MONTHLY=[
   {month:'2026-03',shares:0,grossDividend:0,referencePrice:DEFAULT_SGOV_UNIT_PRICE,source:'statement'},
   {month:'2026-04',shares:145,grossDividend:0,referencePrice:100.67,source:'statement'},
@@ -834,6 +861,51 @@ const sgovMonthlyRecords=(value)=>(
     ?value.monthlyRecords
     :DEFAULT_SGOV_MONTHLY
 );
+const sgovEvents=(value)=>Array.isArray(value?.events)?value.events:[];
+const sgovCurrentPrice=(value)=>{
+  const s=value||{};
+  return finitePrice(s.currentPrice)??finitePrice(s.lastPrice)??DEFAULT_SGOV_UNIT_PRICE;
+};
+const sgovCurrentShares=(value)=>{
+  const s=value||{};
+  const explicit=Number(s.shares);
+  if(Number.isFinite(explicit)&&explicit>=0)return explicit;
+  const latest=[...sgovMonthlyRecords(s)].filter(row=>/^\d{4}-\d{2}$/.test(String(row?.month||''))&&Number(row?.shares)>0)
+    .sort((a,b)=>String(a.month).localeCompare(String(b.month))).pop();
+  return latest?Math.max(0,Number(latest.shares)||0):0;
+};
+const sgovCurrentMarketValue=(value)=>{
+  const shares=sgovCurrentShares(value);
+  const price=sgovCurrentPrice(value);
+  return shares>0&&price>0?shares*price:null;
+};
+const sgovEventDelta=(event)=>{
+  const shares=Math.max(0,Number(event?.shares)||0);
+  return event?.type==='sell'||event?.type==='assignment'?-shares:shares;
+};
+function calcSgovEvents(sgov,currentShares,currentPrice){
+  const events=sgovEvents(sgov).filter(event=>/^\d{4}-\d{2}-\d{2}$/.test(String(event?.date||'')))
+    .sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  if(!events.length)return{rows:[],capitalDays:0,eventCount:0};
+  let balance=Math.max(0,Number(currentShares)||0);
+  const rows=new Array(events.length);
+  for(let i=events.length-1;i>=0;i--){
+    const delta=sgovEventDelta(events[i]);
+    const sharesAfter=Math.max(0,balance);
+    const sharesBefore=Math.max(0,sharesAfter-delta);
+    rows[i]={...events[i],delta,sharesBefore,sharesAfter,
+      price:finitePrice(events[i].price)??currentPrice};
+    balance=sharesBefore;
+  }
+  const asOf=today();
+  const capitalDays=rows.reduce((sum,row,index)=>{
+    const end=rows[index+1]?.date||asOf;
+    const days=Math.max(0,daysBetween(row.date,end));
+    return sum+row.sharesAfter*(row.price||currentPrice||DEFAULT_SGOV_UNIT_PRICE)*days;
+  },0);
+  const eventDays=rows.reduce((sum,row,index)=>sum+Math.max(0,daysBetween(row.date,rows[index+1]?.date||asOf)),0);
+  return{rows,capitalDays,eventDays,eventCount:rows.length,openingShares:balance};
+}
 const sgovDaysInPeriod=(month,asOf=today())=>{
   if(!/^\d{4}-\d{2}$/.test(month))return 0;
   const [year,monthNo]=month.split('-').map(Number);
@@ -850,8 +922,8 @@ function calcSgovMonthly(sgov){
   const s=sgov||{};
   const taxRate=Number.isFinite(Number(s.dividendTaxRate))?Math.max(0,Number(s.dividendTaxRate)):DEFAULT_SGOV_TAX_RATE;
   const rawRows=sgovMonthlyRecords(s);
-  const fallbackShares=Number(s.shares)>0?Number(s.shares):0;
-  const fallbackPrice=Number(s.marketValue)>0&&fallbackShares>0?Number(s.marketValue)/fallbackShares:DEFAULT_SGOV_UNIT_PRICE;
+  const fallbackShares=sgovCurrentShares(s);
+  const fallbackPrice=sgovCurrentPrice(s);
   const rows=rawRows.map(row=>{
     const shares=Math.max(0,Number(row?.shares)||0);
     const gross=Math.max(0,Number(row?.grossDividend??row?.dividend)||0);
@@ -866,8 +938,15 @@ function calcSgovMonthly(sgov){
   const totalGross=validRows.reduce((sum,row)=>sum+row.grossDividend,0);
   const totalTax=validRows.reduce((sum,row)=>sum+row.tax,0);
   const totalNet=validRows.reduce((sum,row)=>sum+row.net,0);
-  const capitalDays=validRows.reduce((sum,row)=>sum+row.capital*row.days,0);
-  const totalDays=validRows.reduce((sum,row)=>sum+row.days,0);
+  const monthlyCapitalDays=validRows.reduce((sum,row)=>sum+row.capital*row.days,0);
+  const events=calcSgovEvents(s,fallbackShares,fallbackPrice);
+  const firstEventMonth=events.rows[0]?.date?.slice(0,7);
+  const preEventRows=firstEventMonth?validRows.filter(row=>row.month<firstEventMonth):validRows;
+  const preEventCapitalDays=preEventRows.reduce((sum,row)=>sum+row.capital*row.days,0);
+  const capitalDays=events.eventCount?preEventCapitalDays+events.capitalDays:monthlyCapitalDays;
+  const totalDays=events.eventCount
+    ?preEventRows.reduce((sum,row)=>sum+row.days,0)+events.eventDays
+    :validRows.reduce((sum,row)=>sum+row.days,0);
   const annual=capitalDays>0?totalNet/(capitalDays/365)*100:null;
   const currentRecord=[...rows].filter(row=>row.month<=today().slice(0,7)&&row.shares>0).sort((a,b)=>a.month.localeCompare(b.month)).pop();
   return{
@@ -880,7 +959,10 @@ function calcSgovMonthly(sgov){
     totalDays,
     averageCapital:totalDays>0?capitalDays/totalDays:null,
     annual,
-    currentShares:Number(s.shares)>0?Number(s.shares):(currentRecord?.shares||0),
+    currentShares:fallbackShares||(currentRecord?.shares||0),
+    currentPrice:fallbackPrice,
+    currentMarketValue:sgovCurrentMarketValue({...s,shares:fallbackShares,currentPrice:fallbackPrice}),
+    events,
     referencePrice:fallbackPrice,
   };
 }
@@ -2299,15 +2381,30 @@ function LinkHubPanel(){
 }
 
 /* ══ SGOV 面板 ══════════════════════════════════════ */
-function SgovMonthlyPanel({sgov,onUpdate,totalMarginUsed}){
+function SgovMonthlyPanel({sgov,onUpdate,totalMarginUsed,showToast}){
   const s=sgov||{};
   const records=sgovMonthlyRecords(s);
+  const eventRecords=sgovEvents(s);
   const stats=calcSgovMonthly({...s,monthlyRecords:records});
-  const legacy=calcSgov(s);
-  const sgovVsMargin=(legacy?.total&&totalMarginUsed>0)?calcAnnual(legacy.total,totalMarginUsed,legacy.days):null;
-  const update=(patch)=>onUpdate({...s,...patch,monthlyRecords:records});
+  const currentPrice=stats.currentPrice;
+  const currentShares=stats.currentShares;
+  const currentMarketValue=sgovCurrentMarketValue({...s,currentPrice,shares:currentShares});
+  const [detailsOpen,setDetailsOpen]=useState(false);
+  const [eventsOpen,setEventsOpen]=useState(false);
+  const [refreshingPrice,setRefreshingPrice]=useState(false);
+  const update=(patch)=>{
+    const next={...s,...patch,
+      monthlyRecords:Array.isArray(patch.monthlyRecords)?patch.monthlyRecords:records,
+      events:Array.isArray(patch.events)?patch.events:eventRecords};
+    const shares=sgovCurrentShares(next);
+    const price=sgovCurrentPrice(next);
+    if(shares>0&&price>0)next.marketValue=shares*price;
+    onUpdate(next);
+  };
   const updateRow=(month,patch)=>update({monthlyRecords:records.map(row=>row.month===month?{...row,...patch}:row)});
   const removeRow=(month)=>update({monthlyRecords:records.filter(row=>row.month!==month)});
+  const updateEvent=(id,patch)=>update({events:eventRecords.map(event=>event.id===id?{...event,...patch}:event)});
+  const removeEvent=(id)=>update({events:eventRecords.filter(event=>event.id!==id)});
   const addRow=()=>{
     let month=today().slice(0,7);
     while(records.some(row=>row.month===month)){
@@ -2317,40 +2414,55 @@ function SgovMonthlyPanel({sgov,onUpdate,totalMarginUsed}){
     }
     update({monthlyRecords:[...records,{month,shares:'',grossDividend:'',referencePrice:stats.referencePrice,source:'manual'}]});
   };
+  const addEvent=()=>update({events:[...eventRecords,{id:`manual-${Date.now()}`,date:today(),type:'buy',shares:'',price:currentPrice,amount:'',note:''}]});
+  const refreshPrice=async()=>{
+    if(refreshingPrice)return;
+    setRefreshingPrice(true);
+    try{
+      const quote=(await fetchStockPrices(['SGOV'])).SGOV;
+      if(quote?.price){
+        update({currentPrice:quote.price,quoteSource:quote.source||'Yahoo',quoteTime:quote.quoteTime||new Date().toISOString()});
+        showToast?.(`SGOV 最新价 $${fmt(quote.price,2)} 已更新`,ACC.teal);
+      }else showToast?.('暂未获取到 SGOV 最新价',ACC.amber);
+    }catch(e){showToast?.('SGOV 价格刷新失败：'+e.message,ACC.loss);}
+    finally{setRefreshingPrice(false);}
+  };
+  useEffect(()=>{refreshPrice();},[]);
   const sortedRecords=[...records].sort((a,b)=>String(a.month||'').localeCompare(String(b.month||'')));
+  const sortedEvents=[...eventRecords].sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));
   return(
     <div className="glass-card sgov-panel anim-in" style={{borderColor:'rgba(45,212,191,.25)',padding:'16px 20px',marginBottom:16}}>
       <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
         <div style={{width:3,height:16,borderRadius:2,background:ACC.teal,flexShrink:0}}/>
         <span style={{fontWeight:700,fontSize:14,color:ACC.teal}}>SGOV 保证金底仓</span>
-        <span style={{fontSize:11,color:V('faint'),fontFamily:'IBM Plex Mono,monospace'}}>月度分红与持仓记录</span>
+        <span style={{fontSize:11,color:V('faint'),fontFamily:'IBM Plex Mono,monospace'}}>资金事件 · 月度分红</span>
       </div>
-      <div className="sgov-form-grid" style={{display:'grid',gridTemplateColumns:'1.35fr .8fr 1fr .8fr .8fr .9fr',gap:12,marginBottom:14}}>
-        <NumField label="当前市值" prefix="$" value={s.marketValue??''} placeholder="100000" onChange={v=>update({marketValue:parseFloat(v)||null})}/>
-        <NumField label="当前份额" suffix="股" value={s.shares??stats.currentShares??''} placeholder="1000" onChange={v=>update({shares:parseFloat(v)||null})}/>
-        <DateField label="计息起始日" value={s.startDate??''} onChange={v=>update({startDate:v})}/>
+      <div className="sgov-form-grid" style={{display:'grid',gridTemplateColumns:'1.1fr 1fr 1fr .8fr',gap:12,marginBottom:14}}>
+        <NumField label="当前市值（自动）" prefix="$" value={currentMarketValue??''} readOnly/>
+        <NumField label="当前价格" prefix="$" value={currentPrice??''} readOnly/>
+        <NumField label="当前份额" suffix="股" value={s.shares??stats.currentShares??''} placeholder="1000" onChange={v=>update({shares:parseFloat(v)||0})}/>
         <NumField label="默认税率" hint="输入税前" suffix="%" value={s.dividendTaxRate??DEFAULT_SGOV_TAX_RATE} onChange={v=>update({dividendTaxRate:parseFloat(v)||0})}/>
-        <NumField label="年化利率" hint="旧估算" suffix="%" value={s.annualRate??''} placeholder="4.0" onChange={v=>update({annualRate:parseFloat(v)||null})}/>
-        <NumField label="手动修正" hint="旧口径" prefix="$" value={s.manualAdj??''} placeholder="0" onChange={v=>update({manualAdj:parseFloat(v)||null})}/>
+      </div>
+      <div style={{display:'flex',justifyContent:'flex-end',marginTop:-6,marginBottom:12}}>
+        <button className="btn btn-ghost" onClick={refreshPrice} disabled={refreshingPrice} style={{fontSize:11}}>{refreshingPrice?'拉取中…':'↻ 刷新 SGOV 价格'}</button>
       </div>
       <div className="sgov-stat-grid" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))',gap:14,paddingTop:12,borderTop:'1px solid '+V('line')}}>
-        <Stat label="SGOV 市值" value={'$'+fmt(s.marketValue,0)} color={ACC.teal} sub={stats.currentShares?fmt(stats.currentShares,0)+' 股':''}/>
+        <Stat label="SGOV 市值" value={'$'+fmt(currentMarketValue,0)} color={ACC.teal} sub={currentShares?fmt(currentShares,0)+' 股 × $'+fmt(currentPrice,2):'补充当前份额'}/>
         <Stat label="累计税前分红" value={fmtM(stats.totalGross)} color={ACC.amber} sub={sortedRecords.length+' 个月记录'}/>
         <Stat label="已扣税费" value={fmtM(-stats.totalTax)} color={ACC.loss} sub={'税率 '+stats.taxRate.toFixed(1)+'%'}/>
         <Stat label="总收益（税后）" value={fmtM(stats.totalNet)} color={ACC.profit} sub="税前分红 − 税费"/>
         <Stat label="分段实现年化" value={fmtA(stats.annual)} color={stats.annual==null?V('dim'):ACC.teal} sub={stats.averageCapital?'平均占用 $'+fmt(stats.averageCapital,0):'补充持仓份额后计算'}/>
-        {totalMarginUsed>0&&s.marketValue&&<Stat label="保证金占用比"
-          value={((totalMarginUsed/s.marketValue)*100).toFixed(1)+'%'}
-          color={(totalMarginUsed/s.marketValue)*100>80?ACC.loss:(totalMarginUsed/s.marketValue)*100>60?ACC.amber:ACC.profit}
-          sub={'$'+fmt(totalMarginUsed,0)+' / $'+fmt(s.marketValue,0)}/>}
-        {sgovVsMargin!=null&&<Stat label="旧口径利息÷保证金" value={fmtA(sgovVsMargin)} color={ACC.purple} sub="仅供对照" hl={ACC.purple}/>}
+        {totalMarginUsed>0&&currentMarketValue&&<Stat label="保证金占用比"
+          value={((totalMarginUsed/currentMarketValue)*100).toFixed(1)+'%'}
+          color={(totalMarginUsed/currentMarketValue)*100>80?ACC.loss:(totalMarginUsed/currentMarketValue)*100>60?ACC.amber:ACC.profit}
+          sub={'$'+fmt(totalMarginUsed,0)+' / $'+fmt(currentMarketValue,0)}/>}
       </div>
       <div className="sgov-monthly-panel">
         <div className="sgov-monthly-toolbar">
           <div><strong>月度分红与持仓</strong><span>分红输入税前，按默认 {stats.taxRate.toFixed(1)}% 扣税；历史账单已预填 3–7 月，8 月起可自行录入。</span></div>
-          <button className="btn btn-primary" onClick={addRow}>＋ 添加月份</button>
+          <div style={{display:'flex',gap:8}}><button className="btn btn-ghost" onClick={()=>setDetailsOpen(value=>!value)}>{detailsOpen?'收起明细':'展开明细'}</button><button className="btn btn-primary" onClick={addRow}>＋ 添加月份</button></div>
         </div>
-        <div className="sgov-monthly-table">
+        {detailsOpen&&<div className="sgov-monthly-table">
           <div className="sgov-monthly-head"><span>月份</span><span>期末份额</span><span>税前分红</span><span>税后收益</span><span>资金占用</span><span/></div>
           {sortedRecords.map(row=>{
             const rowStat=stats.rows.find(item=>item.month===row.month);
@@ -2367,8 +2479,30 @@ function SgovMonthlyPanel({sgov,onUpdate,totalMarginUsed}){
               </div>
             );
           })}
+        </div>}
+        <div className="sgov-monthly-note">分段年化 = 税后分红 ÷ 分段资金占用天数 × 365；存在资金事件时，优先按事件后的实际份额计算，事件前历史月份按账单份额估算。</div>
+      </div>
+      <div className="sgov-event-panel">
+        <div className="sgov-monthly-toolbar">
+          <div><strong>SGOV 资金事件</strong><span>记录买入、卖出，以及 Put 行权时卖出 SGOV 补充接货资金。</span></div>
+          <div style={{display:'flex',gap:8}}><button className="btn btn-ghost" onClick={()=>setEventsOpen(value=>!value)}>{eventsOpen?'收起事件':'展开事件'}{eventRecords.length?` · ${eventRecords.length}`:''}</button><button className="btn btn-primary" onClick={addEvent}>＋ 添加事件</button></div>
         </div>
-        <div className="sgov-monthly-note">年化 = 各月税后分红合计 ÷ 各月“份额 × 参考价格 × 实际天数”之和 × 365；参考价格沿用账单月末价，适合收益率跟踪，不替代券商税务报表。</div>
+        {eventsOpen&&<div className="sgov-event-table">
+          <div className="sgov-event-head"><span>日期</span><span>事件类型</span><span>份额</span><span>价格</span><span>金额</span><span>备注</span><span/></div>
+          {sortedEvents.length===0&&<div className="sgov-event-empty">暂无资金事件；期权被行权接货后会自动记录卖出 SGOV 事件。</div>}
+          {sortedEvents.map(event=>{
+            const amount=Number(event.amount)>0?Number(event.amount):(Number(event.shares)>0&&Number(event.price)>0?Number(event.shares)*Number(event.price):0);
+            return <div className="sgov-event-row" key={event.id}>
+              <input type="date" value={event.date||''} onChange={e=>updateEvent(event.id,{date:e.target.value})}/>
+              <select value={event.type||'buy'} onChange={e=>updateEvent(event.id,{type:e.target.value})}>{SGOV_EVENT_TYPES.map(type=><option key={type.value} value={type.value}>{type.label}</option>)}</select>
+              <input type="number" min="0" step="0.001" value={event.shares??''} placeholder="份额" onChange={e=>updateEvent(event.id,{shares:e.target.value})}/>
+              <input type="number" min="0" step="0.01" value={event.price??''} placeholder={fmt(currentPrice,2)} onChange={e=>updateEvent(event.id,{price:e.target.value})}/>
+              <input type="number" min="0" step="0.01" value={event.amount??''} placeholder={amount?fmt(amount,2):'金额'} onChange={e=>updateEvent(event.id,{amount:e.target.value})}/>
+              <input value={event.note||''} placeholder="备注（可选）" onChange={e=>updateEvent(event.id,{note:e.target.value})}/>
+              <button className="sgov-monthly-delete" onClick={()=>removeEvent(event.id)} title="删除事件">×</button>
+            </div>;
+          })}
+        </div>}
       </div>
     </div>
   );
@@ -2435,8 +2569,7 @@ function SummaryBar({positions,commPerSide,sgov}){
     return calcAnnual(totalProfitNow,margin,wDays);
   })();
 
-  const sgovMV=sgov?.marketValue||null;
-  const si=calcSgov(sgov);
+  const sgovMV=sgovCurrentMarketValue(sgov);
   const marginRatio=sgovMV&&totalMargin>0?(totalMargin/sgovMV)*100:null;
   const scored=positions.map((p,i)=>({p,r:rs[i],...scorePosition(p,rs[i],{totalMargin,sgov})}));
   const avgScore=scored.length?Math.round(scored.reduce((s,x)=>s+x.score,0)/scored.length):null;
@@ -2484,16 +2617,6 @@ function SummaryBar({positions,commPerSide,sgov}){
       <div className="summary-grid" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:18}}>
         {avgNow!=null&&<BigA label="现在卖出年化" main={fmtA(avgNow)} mainColor={ACC.blue} vs={nowVsSgov} sub={nowVsSgov?`对保证金 ${fmtA(avgNow)} · 对SGOV ${fmtA(nowVsSgov)}`:'录入期权现价后计算'}/>}
         {avgExp!=null&&<BigA label="持到到期年化" main={fmtA(avgExp)} mainColor={ACC.amber} vs={expVsSgov} sub={expVsSgov?`对保证金 ${fmtA(avgExp)} · 对SGOV ${fmtA(expVsSgov)}`:'录入SGOV市值后计算'}/>}
-        {si&&sgovMV&&(
-          <div className="summary-metric" style={{display:'flex',flexDirection:'column',gap:6}}>
-            <span className="section-label">SGOV 利息</span>
-            <div style={{display:'flex',alignItems:'baseline',gap:8}}>
-              <span className="summary-main" style={{fontSize:28,fontWeight:700,letterSpacing:'-.03em',color:ACC.teal,fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{fmtA(si.rate)}</span>
-              <span style={{fontSize:13,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>年化</span>
-            </div>
-            <span className="summary-metric-sub" style={{fontSize:11,color:V('dim'),fontFamily:'IBM Plex Mono,monospace'}}>累计 {fmtM(si.total)} · {si.days} 天</span>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -4588,7 +4711,7 @@ function App(){
 
           {/* SGOV Tab */}
           <div style={{display:tab==='sgov'?'block':'none'}}>
-            <SgovMonthlyPanel sgov={sgov} onUpdate={mutateSgov} totalMarginUsed={totalMarginUsed}/>
+            <SgovMonthlyPanel sgov={sgov} onUpdate={mutateSgov} totalMarginUsed={totalMarginUsed} showToast={showToast}/>
           </div>
 
           {/* 观察列表暂时从导航隐藏，保留组件代码便于后续恢复 */}
