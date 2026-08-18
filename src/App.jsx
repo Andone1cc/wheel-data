@@ -849,18 +849,20 @@ const SGOV_EVENT_TYPES=[
   {value:'assignment',label:'卖出补接货'},
 ];
 const DEFAULT_SGOV_MONTHLY=[
-  {month:'2026-03',shares:0,grossDividend:0,referencePrice:DEFAULT_SGOV_UNIT_PRICE,source:'statement'},
-  {month:'2026-04',shares:145,grossDividend:0,referencePrice:100.67,source:'statement'},
-  {month:'2026-05',shares:292,grossDividend:43.20,referencePrice:100.67,source:'statement'},
-  {month:'2026-06',shares:701,grossDividend:87.45,referencePrice:100.67,source:'statement'},
-  {month:'2026-07',shares:701,grossDividend:207.33,referencePrice:100.71,source:'statement'},
-  {month:'2026-08',shares:'',grossDividend:'',referencePrice:100.71,source:'manual'},
+  {month:'2026-03',shares:0,grossDividend:0,annualIncome:0,referencePrice:DEFAULT_SGOV_UNIT_PRICE,source:'statement'},
+  {month:'2026-04',shares:145,grossDividend:0,annualIncome:509.28,referencePrice:100.67,source:'statement'},
+  {month:'2026-05',shares:292,grossDividend:43.20,annualIncome:1043.91,referencePrice:100.67,source:'statement'},
+  {month:'2026-06',shares:701,grossDividend:87.45,annualIncome:2519.33,referencePrice:100.67,source:'statement'},
+  {month:'2026-07',shares:701,grossDividend:207.33,annualIncome:2711.26,referencePrice:100.71,source:'statement'},
+  {month:'2026-08',shares:'',grossDividend:'',annualIncome:'',referencePrice:100.71,source:'manual'},
 ];
-const sgovMonthlyRecords=(value)=>(
-  Array.isArray(value?.monthlyRecords)&&value.monthlyRecords.length
-    ?value.monthlyRecords
-    :DEFAULT_SGOV_MONTHLY
-);
+const sgovMonthlyRecords=(value)=>{
+  const rows=Array.isArray(value?.monthlyRecords)&&value.monthlyRecords.length?value.monthlyRecords:DEFAULT_SGOV_MONTHLY;
+  return rows.map(row=>{
+    const preset=DEFAULT_SGOV_MONTHLY.find(item=>item.month===row?.month);
+    return preset?{...preset,...row,annualIncome:row?.annualIncome??preset.annualIncome}:row;
+  });
+};
 const sgovEvents=(value)=>Array.isArray(value?.events)?value.events:[];
 const sgovCurrentPrice=(value)=>{
   const s=value||{};
@@ -927,14 +929,18 @@ function calcSgovMonthly(sgov){
   const rows=rawRows.map(row=>{
     const shares=Math.max(0,Number(row?.shares)||0);
     const gross=Math.max(0,Number(row?.grossDividend??row?.dividend)||0);
+    const annualIncome=Math.max(0,Number(row?.annualIncome??row?.estimatedAnnualIncome)||0);
     const referencePrice=Number(row?.referencePrice)>0?Number(row.referencePrice):fallbackPrice;
     const days=sgovDaysInPeriod(String(row?.month||''));
     const tax=gross*taxRate/100;
     const net=gross-tax;
     const capital=shares*referencePrice;
-    return{...row,shares,grossDividend:gross,referencePrice,tax,net,days,capital};
+    const netAnnualIncome=annualIncome*(1-taxRate/100);
+    const annualYieldGross=capital>0?annualIncome/capital*100:null;
+    const annualYieldNet=capital>0?netAnnualIncome/capital*100:null;
+    return{...row,shares,grossDividend:gross,annualIncome,netAnnualIncome,annualYieldGross,annualYieldNet,referencePrice,tax,net,days,capital};
   }).filter(row=>/^\d{4}-\d{2}$/.test(String(row.month||'')));
-  const validRows=rows.filter(row=>row.month<=today().slice(0,7)&&(row.shares>0||row.grossDividend>0));
+  const validRows=rows.filter(row=>row.month<=today().slice(0,7)&&(row.shares>0||row.grossDividend>0||row.annualIncome>0));
   const totalGross=validRows.reduce((sum,row)=>sum+row.grossDividend,0);
   const totalTax=validRows.reduce((sum,row)=>sum+row.tax,0);
   const totalNet=validRows.reduce((sum,row)=>sum+row.net,0);
@@ -947,7 +953,17 @@ function calcSgovMonthly(sgov){
   const totalDays=events.eventCount
     ?preEventRows.reduce((sum,row)=>sum+row.days,0)+events.eventDays
     :validRows.reduce((sum,row)=>sum+row.days,0);
-  const annual=capitalDays>0?totalNet/(capitalDays/365)*100:null;
+  const latestIncomeRow=[...rows]
+    .filter(row=>row.month<=today().slice(0,7)&&row.shares>0&&row.annualIncome>0)
+    .sort((a,b)=>a.month.localeCompare(b.month)).pop();
+  const usesCurrentBasis=fallbackShares>0&&fallbackPrice>0;
+  const annualBasisShares=usesCurrentBasis?fallbackShares:(latestIncomeRow?.shares||0);
+  const annualBasisPrice=usesCurrentBasis?fallbackPrice:(latestIncomeRow?.referencePrice||fallbackPrice);
+  const annualBasisValue=annualBasisShares*annualBasisPrice;
+  const grossAnnualIncome=latestIncomeRow?.annualIncome||0;
+  const netAnnualIncome=latestIncomeRow?.netAnnualIncome||0;
+  const annual=annualBasisValue>0?netAnnualIncome/annualBasisValue*100:null;
+  const annualGross=annualBasisValue>0?grossAnnualIncome/annualBasisValue*100:null;
   const currentRecord=[...rows].filter(row=>row.month<=today().slice(0,7)&&row.shares>0).sort((a,b)=>a.month.localeCompare(b.month)).pop();
   return{
     rows,
@@ -959,6 +975,11 @@ function calcSgovMonthly(sgov){
     totalDays,
     averageCapital:totalDays>0?capitalDays/totalDays:null,
     annual,
+    annualGross,
+    grossAnnualIncome,
+    netAnnualIncome,
+    annualBasisValue,
+    annualBasisMonth:latestIncomeRow?.month||null,
     currentShares:fallbackShares||(currentRecord?.shares||0),
     currentPrice:fallbackPrice,
     currentMarketValue:sgovCurrentMarketValue({...s,shares:fallbackShares,currentPrice:fallbackPrice}),
@@ -2412,7 +2433,7 @@ function SgovMonthlyPanel({sgov,onUpdate,totalMarginUsed,showToast}){
       d.setUTCMonth(d.getUTCMonth()+1);
       month=d.toISOString().slice(0,7);
     }
-    update({monthlyRecords:[...records,{month,shares:'',grossDividend:'',referencePrice:stats.referencePrice,source:'manual'}]});
+    update({monthlyRecords:[...records,{month,shares:'',grossDividend:'',annualIncome:'',referencePrice:stats.referencePrice,source:'manual'}]});
   };
   const addEvent=()=>update({events:[...eventRecords,{id:`manual-${Date.now()}`,date:today(),type:'buy',shares:'',price:currentPrice,amount:'',note:''}]});
   const refreshPrice=async()=>{
@@ -2451,7 +2472,10 @@ function SgovMonthlyPanel({sgov,onUpdate,totalMarginUsed,showToast}){
         <Stat label="累计税前分红" value={fmtM(stats.totalGross)} color={ACC.amber} sub={sortedRecords.length+' 个月记录'}/>
         <Stat label="已扣税费" value={fmtM(-stats.totalTax)} color={ACC.loss} sub={'税率 '+stats.taxRate.toFixed(1)+'%'}/>
         <Stat label="总收益（税后）" value={fmtM(stats.totalNet)} color={ACC.profit} sub="税前分红 − 税费"/>
-        <Stat label="分段实现年化" value={fmtA(stats.annual)} color={stats.annual==null?V('dim'):ACC.teal} sub={stats.averageCapital?'平均占用 $'+fmt(stats.averageCapital,0):'补充持仓份额后计算'}/>
+        <Stat label="最新预估年收入（税后）" value={stats.netAnnualIncome?fmtM(stats.netAnnualIncome):'—'} color={ACC.amber}
+          sub={stats.annualBasisMonth?`${stats.annualBasisMonth} · 税前 ${fmtM(stats.grossAnnualIncome)}`:'补充 PDF / 修正值'}/>
+        <Stat label="实际年化（税后）" value={fmtA(stats.annual)} color={stats.annual==null?V('dim'):ACC.teal}
+          sub={stats.annualBasisValue?`税前 ${fmtA(stats.annualGross)} · 基准 $${fmt(stats.annualBasisValue,0)}`:'补充预估年收入后计算'}/>
         {totalMarginUsed>0&&currentMarketValue&&<Stat label="保证金占用比"
           value={((totalMarginUsed/currentMarketValue)*100).toFixed(1)+'%'}
           color={(totalMarginUsed/currentMarketValue)*100>80?ACC.loss:(totalMarginUsed/currentMarketValue)*100>60?ACC.amber:ACC.profit}
@@ -2463,7 +2487,7 @@ function SgovMonthlyPanel({sgov,onUpdate,totalMarginUsed,showToast}){
           <div style={{display:'flex',gap:8}}><button className="btn btn-ghost" onClick={()=>setDetailsOpen(value=>!value)}>{detailsOpen?'收起明细':'展开明细'}</button><button className="btn btn-primary" onClick={addRow}>＋ 添加月份</button></div>
         </div>
         {detailsOpen&&<div className="sgov-monthly-table">
-          <div className="sgov-monthly-head"><span>月份</span><span>期末份额</span><span>税前分红</span><span>税后收益</span><span>资金占用</span><span/></div>
+          <div className="sgov-monthly-head"><span>月份</span><span>期末份额</span><span>税前分红</span><span>预估年收入（税前）</span><span>月度年化</span><span>资金占用</span><span/></div>
           {sortedRecords.map(row=>{
             const rowStat=stats.rows.find(item=>item.month===row.month);
             const hasGross=row.grossDividend!==''&&row.grossDividend!=null;
@@ -2473,14 +2497,16 @@ function SgovMonthlyPanel({sgov,onUpdate,totalMarginUsed,showToast}){
                 <div><input type="month" value={row.month||''} onChange={e=>updateRow(row.month,{month:e.target.value})}/><small>{row.source==='statement'?'历史账单':'手动录入'}</small></div>
                 <input type="number" min="0" step="1" value={row.shares??''} placeholder="份额" onChange={e=>updateRow(row.month,{shares:e.target.value})}/>
                 <input type="number" min="0" step="0.01" value={row.grossDividend??''} placeholder="税前金额" onChange={e=>updateRow(row.month,{grossDividend:e.target.value})}/>
+                <input type="number" min="0" step="0.01" value={row.annualIncome??''} placeholder="PDF / 修正" onChange={e=>updateRow(row.month,{annualIncome:e.target.value})}/>
                 <span className={hasGross?'positive':''}>{hasGross?fmtM(rowStat?.net||0):'—'}</span>
+                <span className={rowStat?.annualYieldNet!=null?'positive':''}>{rowStat?.annualYieldNet!=null?fmtA(rowStat.annualYieldNet):'—'}</span>
                 <span>{hasShares?('$'+fmt(rowStat?.capital||0,0)):'—'}</span>
                 <button className="sgov-monthly-delete" onClick={()=>removeRow(row.month)} title="删除月份">×</button>
               </div>
             );
           })}
         </div>}
-        <div className="sgov-monthly-note">分段年化 = 税后分红 ÷ 分段资金占用天数 × 365；存在资金事件时，优先按事件后的实际份额计算，事件前历史月份按账单份额估算。</div>
+        <div className="sgov-monthly-note">实际年化 = 最新月份预估年收入（税后） ÷ 最新月份净市值；预估年收入可按 PDF 数值或你的修正值录入。当前税率默认 10%，税前预估年化会同时展示用于对账。</div>
       </div>
       <div className="sgov-event-panel">
         <div className="sgov-monthly-toolbar">
