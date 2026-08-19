@@ -382,6 +382,18 @@ async function fetchAnchorEtfQuote(force=false){
   return null;
 }
 
+async function fetchAnchorDividends(force=false){
+  const bases=[localStorage.getItem('whl-cloud-url'),DEFAULT_CLOUD_URL,window.location.origin].filter(Boolean).filter((base,index,list)=>list.indexOf(base)===index);
+  for(const proxyBase of bases){
+    try{
+      const query=force?`?refresh=${Date.now()}`:'';
+      const response=await fetch(`${proxyBase}/api/anchor-dividends${query}`,{signal:AbortSignal.timeout(9000),cache:force?'no-store':'default'});
+      if(response.ok)return await response.json();
+    }catch(error){console.warn('anchor dividend history fetch:',proxyBase,error.message);}
+  }
+  return null;
+}
+
 async function fetchStockCloseOnDate(ticker,date,{force=false}={}){
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
   try{
@@ -4066,6 +4078,7 @@ function LoginScreen({onLogin}){
 
 const ANCHOR_DEFAULT={
   transactions:[],
+  dividendFeed:null,
   metrics:null,
   metricOverrides:{},
   manualPrice:null,
@@ -4103,6 +4116,62 @@ function calcAnchorPortfolio(transactions,currentPrice){
   return{shares,costBasis,avgCost:shares>0?costBasis/shares:null,realized,unrealized,totalReturn:unrealized==null?null:realized+unrealized,value,buyCash,dividendCash,soldShares};
 }
 
+function sharesHeldBeforeAnchorDate(transactions,date){
+  return (Array.isArray(transactions)?transactions:[]).reduce((shares,tx)=>{
+    const txDate=String(tx?.date||'').slice(0,10);
+    if(!txDate||txDate>=date)return shares;
+    const amount=Math.max(0,num(tx.shares));
+    return tx.type==='sell'?Math.max(0,shares-amount):shares+amount;
+  },0);
+}
+
+function calcAnchorDividendIncome(transactions,events){
+  const rows=(Array.isArray(events)?events:[]).map(event=>{
+    const shares=sharesHeldBeforeAnchorDate(transactions,String(event.exDate||'').slice(0,10));
+    return{...event,shares,amount:shares*Math.max(0,num(event.perShare))};
+  }).filter(event=>event.shares>0&&event.amount>0);
+  return{
+    rows,
+    total:rows.reduce((sum,event)=>sum+event.amount,0),
+    count:rows.length,
+    latest:rows.at(-1)||null,
+  };
+}
+
+function anchorXirr(flows){
+  const valid=(Array.isArray(flows)?flows:[]).map(flow=>({
+    amount:Number(flow.amount),
+    time:new Date(`${String(flow.date).slice(0,10)}T00:00:00+08:00`).getTime(),
+  })).filter(flow=>Number.isFinite(flow.amount)&&Number.isFinite(flow.time));
+  if(valid.length<2||!valid.some(flow=>flow.amount<0)||!valid.some(flow=>flow.amount>0))return null;
+  const base=Math.min(...valid.map(flow=>flow.time));
+  const npv=(rate)=>valid.reduce((sum,flow)=>sum+flow.amount/Math.pow(1+rate,(flow.time-base)/86400000/365),0);
+  let low=-0.9999,high=1,lowValue=npv(low),highValue=npv(high);
+  while(lowValue*highValue>0&&high<1024){high=high*2+1;highValue=npv(high);}
+  if(lowValue*highValue>0)return null;
+  for(let i=0;i<100;i+=1){
+    const mid=(low+high)/2;
+    const midValue=npv(mid);
+    if(Math.abs(midValue)<1e-7)return mid*100;
+    if(lowValue*midValue<=0){high=mid;highValue=midValue;}else{low=mid;lowValue=midValue;}
+  }
+  return((low+high)/2)*100;
+}
+
+function calcAnchorAnnualized(transactions,currentValue){
+  if(!(currentValue>0))return null;
+  const flows=(Array.isArray(transactions)?transactions:[]).map(tx=>{
+    const amount=Math.max(0,num(tx.amount));
+    const fee=Math.max(0,num(tx.fee));
+    if(tx.type==='sell')return{date:tx.date,amount:amount-fee};
+    // 分红再投不是外部新增资金，现金流中不重复计入；新增份额已反映在期末市值。
+    if(tx.type==='dividend')return null;
+    return{date:tx.date,amount:-(amount+fee)};
+  }).filter(Boolean);
+  flows.push({date:today(),amount:currentValue});
+  return anchorXirr(flows);
+}
+
 function formatAnchorDate(value){
   if(!value)return'尚未同步';
   const raw=String(value);
@@ -4115,6 +4184,7 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
   const data={...ANCHOR_DEFAULT,...(anchor||{}),transactions:Array.isArray(anchor?.transactions)?anchor.transactions:[],metricOverrides:anchor?.metricOverrides&&typeof anchor.metricOverrides==='object'?anchor.metricOverrides:{}};
   const [metrics,setMetrics]=useState(data.metrics||null);
   const [quote,setQuote]=useState(data.manualPrice?{price:data.manualPrice,source:'manual'}:null);
+  const [dividendFeed,setDividendFeed]=useState(data.dividendFeed||null);
   const [refreshing,setRefreshing]=useState(false);
   const [showForm,setShowForm]=useState(false);
   const [showEditor,setShowEditor]=useState(false);
@@ -4127,32 +4197,45 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
   const action=anchorAction(spread);
   const currentPrice=quote?.price??data.manualPrice??null;
   const portfolio=calcAnchorPortfolio(data.transactions,currentPrice);
+  const dividendIncome=calcAnchorDividendIncome(data.transactions,dividendFeed?.events);
+  const annualized=calcAnchorAnnualized(data.transactions,portfolio.value);
+  const dividendRows=(Array.isArray(dividendFeed?.events)?dividendFeed.events:[]).slice().reverse().slice(0,8).map(event=>({
+    ...event,
+    shares:sharesHeldBeforeAnchorDate(data.transactions,String(event.exDate||'').slice(0,10)),
+    amount:sharesHeldBeforeAnchorDate(data.transactions,String(event.exDate||'').slice(0,10))*Math.max(0,num(event.perShare)),
+  }));
   const fmtAnchorPct=(value)=>value==null?'—':`${value>=0?'+':''}${Number(value).toFixed(2)}%`;
+
+  const applyFetchedAnchorData=(nextMetrics,nextQuote,nextDividendFeed,persist=true)=>{
+    if(nextMetrics)setMetrics(nextMetrics);
+    if(nextQuote?.price>0)setQuote(nextQuote);
+    if(nextDividendFeed)setDividendFeed(nextDividendFeed);
+    if(persist&&(nextMetrics||nextQuote?.price>0||nextDividendFeed)){
+      onChange({...data,metrics:nextMetrics||data.metrics,dividendFeed:nextDividendFeed||data.dividendFeed,manualPrice:nextQuote?.price>0?null:data.manualPrice});
+    }
+  };
 
   const refresh=async()=>{
     if(refreshing)return;
     setRefreshing(true);
-    const [nextMetrics,nextQuote]=await Promise.all([fetchAnchorMetrics(true),fetchAnchorEtfQuote(true)]);
-    if(nextMetrics){setMetrics(nextMetrics);onChange({...data,metrics:nextMetrics});}
-    if(nextQuote?.price>0){setQuote(nextQuote);onChange({...data,metrics:nextMetrics||data.metrics,manualPrice:null});}
-    if(!nextMetrics&&!nextQuote?.price)showToast('监控数据暂时不可用，可先手动录入',ACC.amber);
+    const [nextMetrics,nextQuote,nextDividendFeed]=await Promise.all([fetchAnchorMetrics(true),fetchAnchorEtfQuote(true),fetchAnchorDividends(true)]);
+    applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed);
+    if(!nextMetrics&&!nextQuote?.price&&!nextDividendFeed)showToast('监控数据暂时不可用，可先手动录入',ACC.amber);
     setRefreshing(false);
   };
   useEffect(()=>{
     if(!active)return undefined;
     let alive=true;
     // 进入“压舱石”页面时主动绕过代理缓存，避免首屏一直停留在旧快照。
-    const load=()=>Promise.all([fetchAnchorMetrics(true),fetchAnchorEtfQuote(true)]).then(([nextMetrics,nextQuote])=>{
+    const load=()=>Promise.all([fetchAnchorMetrics(true),fetchAnchorEtfQuote(true),fetchAnchorDividends(true)]).then(([nextMetrics,nextQuote,nextDividendFeed])=>{
       if(!alive)return;
-      if(nextMetrics){setMetrics(nextMetrics);onChange({...data,metrics:nextMetrics});}
-      if(nextQuote?.price>0)setQuote(nextQuote);
+      applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed);
     });
     load();
     const timer=window.setInterval(async()=>{
-      const [nextMetrics,nextQuote]=await Promise.all([fetchAnchorMetrics(false),fetchAnchorEtfQuote(false)]);
+      const [nextMetrics,nextQuote,nextDividendFeed]=await Promise.all([fetchAnchorMetrics(false),fetchAnchorEtfQuote(false),fetchAnchorDividends(false)]);
       if(!alive)return;
-      if(nextMetrics)setMetrics(nextMetrics);
-      if(nextQuote?.price>0)setQuote(nextQuote);
+      applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed,false);
     },30*60*1000);
     return()=>{alive=false;window.clearInterval(timer);};
   },[active]);
@@ -4243,9 +4326,19 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
             <Stat label="持仓市值" value={portfolio.value==null?'—':`¥${fmt(portfolio.value,2)}`} sub="按现价估算" color={V('ink')}/>
             <Stat label="成本基础" value={portfolio.costBasis?`¥${fmt(portfolio.costBasis,2)}`:'—'} sub={portfolio.avgCost?`均价 ¥${fmtPrice(portfolio.avgCost)}`:'暂无交易'} color={ACC.amber}/>
             <Stat label="浮动收益" value={portfolio.unrealized==null?'—':`${portfolio.unrealized>=0?'+':'−'}¥${fmt(Math.abs(portfolio.unrealized),2)}`} sub={portfolio.costBasis&&portfolio.unrealized!=null?fmtAnchorPct(portfolio.unrealized/portfolio.costBasis*100):'—'} color={portfolio.unrealized==null?V('dim'):portfolio.unrealized>=0?ACC.profit:ACC.loss}/>
+            <Stat label="预计分红收益" value={dividendFeed?`¥${fmt(dividendIncome.total,2)}`:'—'} sub={dividendFeed?`${dividendIncome.count} 次 · 除权日前持仓估算`:'等待分红历史'} color={ACC.profit}/>
+            <Stat label="资金加权年化" value={annualized==null?'—':fmtAnchorPct(annualized)} sub="XIRR · 定投分段计算" color={ACC.blue}/>
           </div>
           <div className="anchor-portfolio-foot"><span>已实现收益 {portfolio.realized>=0?'+':''}¥{fmt(portfolio.realized,2)}</span><span>累计分红再投 ¥{fmt(portfolio.dividendCash,2)}</span></div>
         </div>
+      </div>
+
+      <div className="glass-card anchor-dividend-card">
+        <div className="anchor-card-head"><div><span className="section-label">159307 分红维护</span><h3>分红收益跟踪</h3></div><span className="anchor-rule">自动同步 · 流水估算</span></div>
+        {!dividendFeed?<div className="anchor-empty">分红历史尚未同步，点击“刷新监控”后自动获取。</div>:<>
+          <div className="anchor-dividend-list"><div className="anchor-dividend-head"><span>除权日</span><span>每份分红</span><span>除权前份额</span><span>预计应得</span><span>状态</span></div>{dividendRows.map(event=><div className="anchor-dividend-row" key={event.id}><span>{event.exDate}</span><span>¥{fmtPrice(event.perShare)}</span><span>{event.shares?fmt(event.shares,0):'—'}</span><span>{event.amount?`¥${fmt(event.amount,2)}`:'—'}</span><span className={event.shares?'positive':''}>{event.shares?'已按流水估算':'待录入持仓'}</span></div>)}</div>
+          <div className="anchor-dividend-note">应得分红 = 除权日前持仓份额 × 每份分红；当前按本机交易流水估算，实际到账以券商资金流水为准。数据源：{dividendFeed.source}，更新至 {dividendFeed.asOf||'—'}。</div>
+        </>}
       </div>
 
       <div className="glass-card anchor-ledger-card">

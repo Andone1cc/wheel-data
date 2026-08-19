@@ -347,6 +347,39 @@ async function fetchEtfRunAnchorPb() {
   return { value, asOf, source: 'ETF.run PB' };
 }
 
+async function fetchAnchorDividendHistory() {
+  const raw = await fetchText('https://fund.eastmoney.com/pingzhongdata/159307.js', {
+    headers: {
+      'User-Agent': BROWSER_USER_AGENT,
+      Accept: 'application/javascript,text/plain,*/*',
+      Referer: 'https://fund.eastmoney.com/159307.html',
+    },
+    timeoutMs: 6500,
+    attempts: 1,
+  });
+  const trendText = raw.match(/var\s+Data_netWorthTrend\s*=\s*(\[[\s\S]*?\]);/)?.[1];
+  if (!trendText) throw new Error('159307 分红历史格式暂时不可用');
+  const trend = JSON.parse(trendText);
+  const events = trend
+    .filter(item => typeof item?.unitMoney === 'string' && item.unitMoney.includes('分红'))
+    .map(item => {
+      const perShare = finiteNumber(item.unitMoney.match(/每份派现金([\d.]+)元/)?.[1]);
+      if (!(perShare > 0) || !(item.x > 0)) return null;
+      const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date(item.x));
+      return { id: `159307-${date}`, exDate: date, perShare, description: item.unitMoney };
+    })
+    .filter(Boolean);
+  if (!events.length) throw new Error('159307 暂无可识别分红记录');
+  return {
+    symbol: '159307.SZ',
+    events,
+    asOf: events.at(-1)?.exDate || null,
+    source: 'Eastmoney fund dividend history',
+    sourceLink: 'https://fund.eastmoney.com/159307.html',
+    stale: false,
+  };
+}
+
 async function fetchAnchorMetrics() {
   const lastVerifiedAnchorSnapshot = {
     indexPE: 8.64,
@@ -1206,6 +1239,16 @@ module.exports = async function handler(req, res) {
       return res.status(200).json(payload);
     } catch (e) {
       return res.status(502).json({ error: '压舱石监控数据暂时不可用', detail: e.message });
+    }
+  }
+
+  if (reqUrl.startsWith('/api/anchor-dividends')) {
+    try {
+      const payload = await fetchAnchorDividendHistory();
+      res.setHeader('Cache-Control', reqUrl.includes('refresh=') ? 'no-store' : 'public, s-maxage=86400, stale-while-revalidate=172800');
+      return res.status(200).json(payload);
+    } catch (e) {
+      return res.status(502).json({ error: '159307 分红历史暂时不可用', detail: e.message });
     }
   }
 
