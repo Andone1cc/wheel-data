@@ -4089,6 +4089,14 @@ function calcAnchorPortfolio(transactions,currentPrice){
   return{shares,costBasis,avgCost:shares>0?costBasis/shares:null,realized,unrealized,totalReturn:unrealized==null?null:realized+unrealized,value,buyCash,dividendCash,soldShares};
 }
 
+function formatAnchorDate(value){
+  if(!value)return'尚未同步';
+  const raw=String(value);
+  const normalized=/^\d{8}$/.test(raw)?`${raw.slice(0,4)}-${raw.slice(4,6)}-${raw.slice(6,8)}`:raw;
+  const date=new Date(normalized);
+  return Number.isNaN(date.getTime())?raw:date.toLocaleString('zh-CN',{hour12:false});
+}
+
 function AnchorPanel({anchor,onChange,showToast}){
   const data={...ANCHOR_DEFAULT,...(anchor||{}),transactions:Array.isArray(anchor?.transactions)?anchor.transactions:[],metricOverrides:anchor?.metricOverrides&&typeof anchor.metricOverrides==='object'?anchor.metricOverrides:{}};
   const [metrics,setMetrics]=useState(data.metrics||null);
@@ -4191,7 +4199,7 @@ function AnchorPanel({anchor,onChange,showToast}){
       <div className="anchor-metric-grid">
         {metricCards.map(([label,value,color,sub])=><div className="anchor-metric-card" key={label}><span>{label}</span><strong style={{color}}>{value}</strong><small>{sub}</small></div>)}
       </div>
-      <div className="anchor-data-bar"><span>数据状态：{metricSource}</span><span>最近更新：{resolved.asOf?new Date(resolved.asOf).toLocaleString('zh-CN',{hour12:false}):'尚未同步'}</span><button className="btn btn-ghost" onClick={()=>{setOverride({indexPE:resolved.indexPE??'',indexPB:resolved.indexPB??'',dividendYield:resolved.dividendYield??'',bond10Y:resolved.bond10Y??''});setShowEditor(v=>!v);}}>{showEditor?'收起修正':'手动修正口径'}</button></div>
+      <div className="anchor-data-bar"><span>数据状态：{metricSource}</span><span>最近更新：{formatAnchorDate(resolved.asOf)}</span><button className="btn btn-ghost" onClick={()=>{setOverride({indexPE:resolved.indexPE??'',indexPB:resolved.indexPB??'',dividendYield:resolved.dividendYield??'',bond10Y:resolved.bond10Y??''});setShowEditor(v=>!v);}}>{showEditor?'收起修正':'手动修正口径'}</button></div>
       {showEditor&&<div className="anchor-editor card">
         <div className="anchor-editor-head"><strong>手动修正监控口径</strong><span>当官方/行情接口尚未更新时使用；保存后会标记为本机修正。</span></div>
         <div className="anchor-editor-grid">
