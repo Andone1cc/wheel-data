@@ -4300,8 +4300,11 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
           <strong><span className="anchor-action-emoji" aria-hidden="true">{action.emoji}</span>{action.label}</strong>
           <p>{action.desc}</p>
         </div>
-        <div className="anchor-spread"><span>股债息差</span><b>{fmtAnchorPct(spread)}</b><small>股息率 − 10Y</small></div>
-        <div className="anchor-score"><span>情绪温度</span><b>{action.score==null?'—':action.score}</b><small>100 = 更积极</small></div>
+        <div className="anchor-signal-rules">
+          <div className="anchor-signal-rules-head"><span className="section-label">股债息差情绪表</span><span className="anchor-rule">规则化执行</span></div>
+          <div className="anchor-sentiment-table"><div className="anchor-sentiment-head"><span>息差区间</span><span>动作</span><span>含义</span></div>{sentimentRows.map(([range,label,meaning,color,emoji])=><div key={range} className={`anchor-sentiment-row ${action.label===label?'active':''}`} style={{'--row-color':color}}><b>{range}</b><strong><span className="anchor-row-emoji" aria-hidden="true">{emoji}</span>{label}</strong><span>{meaning}</span>{action.label===label&&<i>当前</i>}</div>)}</div>
+          <div className="anchor-signal-stats"><div className="anchor-spread"><span>股债息差</span><b>{fmtAnchorPct(spread)}</b><small>股息率 − 10Y</small></div><div className="anchor-score"><span>情绪温度</span><b>{action.score==null?'—':action.score}</b><small>100 = 更积极</small></div></div>
+        </div>
       </div>
 
       <div className="anchor-metric-grid">
@@ -4320,12 +4323,6 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
       </div>}
 
       <div className="anchor-two-col">
-        <div className="glass-card anchor-card anchor-sentiment-card">
-          <div className="anchor-card-head"><div><span className="section-label">股债息差情绪表</span><h3>今天该不该买？</h3></div><span className="anchor-rule">规则化执行</span></div>
-          <div className="anchor-sentiment-inline"><strong style={{color:action.color}}><span className="anchor-row-emoji" aria-hidden="true">{action.emoji}</span>{action.label}</strong><span>股债息差 {fmtAnchorPct(spread)} · {action.desc}</span></div>
-          <div className="anchor-sentiment-table"><div className="anchor-sentiment-head"><span>息差区间</span><span>动作</span><span>含义</span></div>{sentimentRows.map(([range,label,meaning,color,emoji])=><div key={range} className={`anchor-sentiment-row ${action.label===label?'active':''}`} style={{'--row-color':color}}><b>{range}</b><strong><span className="anchor-row-emoji" aria-hidden="true">{emoji}</span>{label}</strong><span>{meaning}</span>{action.label===label&&<i>当前</i>}</div>)}</div>
-          <p className="anchor-note">规则：息差 &gt;3% 适当加码，2%–3% 正常定投，1.5%–2% 谨慎定投，&lt;1.5% 暂停买入。</p>
-        </div>
         <div className="glass-card anchor-card anchor-portfolio-card">
           <div className="anchor-card-head"><div><span className="section-label">159307 · 博时红利低波100</span><h3>我的底仓</h3></div><span className="anchor-ticker">159307.SZ</span></div>
           <div className="anchor-portfolio-price"><div><span>最新价</span><strong>{currentPrice==null?'—':`¥${fmtPrice(currentPrice)}`}</strong><small>{quote?.source==='manual'?'手动录入':quote?.source||'行情同步中'}</small></div><NumField label="手动现价" value={data.manualPrice??''} onChange={updateManualPrice} prefix="¥" placeholder="接口失败时录入"/></div>
