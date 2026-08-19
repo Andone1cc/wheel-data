@@ -4298,6 +4298,22 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
         </div>
       </div>
 
+      <div className="anchor-two-col anchor-holdings-first">
+        <div className="glass-card anchor-card anchor-portfolio-card">
+          <div className="anchor-card-head"><div><span className="section-label">159307 · 博时红利低波100</span><h3>我的底仓</h3></div><span className="anchor-ticker">159307.SZ</span></div>
+          <div className="anchor-portfolio-price"><div className="anchor-price-block"><div className="anchor-price-label"><span>最新价</span>{!editingPrice&&<button className="btn btn-ghost anchor-price-edit-btn" onClick={beginManualPriceEdit}>手动修改</button>}</div>{editingPrice?<div className="anchor-price-edit"><NumField label="" value={priceDraft} onChange={setPriceDraft} prefix="¥" placeholder={currentPrice?fmtPrice(currentPrice):'输入价格'}/><button className="btn btn-primary" onClick={saveManualPrice}>保存</button><button className="btn btn-ghost" onClick={()=>setEditingPrice(false)}>取消</button></div>:<strong>{currentPrice==null?'—':`¥${fmtPrice(currentPrice)}`}</strong>}<small>{quote?.source==='manual'?'手动修改 · 刷新后自动恢复行情':quote?.source||'行情同步中'}</small></div></div>
+          <div className="anchor-portfolio-grid">
+            <Stat label="当前份额" value={portfolio.shares?fmt(portfolio.shares,0):'—'} sub="份" color={ACC.teal}/>
+            <Stat label="持仓市值" value={portfolio.value==null?'—':`¥${fmt(portfolio.value,2)}`} sub="按现价估算" color={V('ink')}/>
+            <Stat label="成本基础" value={portfolio.costBasis?`¥${fmt(portfolio.costBasis,2)}`:'—'} sub={portfolio.avgCost?`均价 ¥${fmtPrice(portfolio.avgCost)}`:'暂无交易'} color={ACC.amber}/>
+            <Stat label="浮动收益" value={portfolio.unrealized==null?'—':`${portfolio.unrealized>=0?'+':'−'}¥${fmt(Math.abs(portfolio.unrealized),2)}`} sub={portfolio.costBasis&&portfolio.unrealized!=null?fmtAnchorPct(portfolio.unrealized/portfolio.costBasis*100):'—'} color={portfolio.unrealized==null?V('dim'):portfolio.unrealized>=0?ACC.profit:ACC.loss}/>
+            <Stat label="预计分红收益" value={dividendFeed?`¥${fmt(dividendIncome.total,2)}`:'—'} sub={dividendFeed?`${dividendIncome.count} 次 · 除权日前持仓估算`:'等待分红历史'} color={ACC.profit}/>
+            <Stat label="资金加权年化" value={annualized==null?'—':fmtAnchorPct(annualized)} sub="XIRR · 定投分段计算" color={ACC.blue}/>
+          </div>
+          <div className="anchor-portfolio-foot"><span>已实现收益 {portfolio.realized>=0?'+':''}¥{fmt(portfolio.realized,2)}</span><span>累计分红再投 ¥{fmt(portfolio.dividendCash,2)}</span></div>
+        </div>
+      </div>
+
       <div className="anchor-signal" style={{'--anchor-color':action.color}}>
         <div className="anchor-signal-main">
           <span className="section-label">当前情绪 / 执行动作</span>
@@ -4325,22 +4341,6 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
         </div>
         <div style={{display:'flex',gap:8,marginTop:12}}><button className="btn btn-primary" onClick={saveOverrides}>保存修正</button><button className="btn btn-ghost" onClick={()=>{onChange({...data,metricOverrides:{}});setShowEditor(false);}}>清除修正</button></div>
       </div>}
-
-      <div className="anchor-two-col">
-        <div className="glass-card anchor-card anchor-portfolio-card">
-          <div className="anchor-card-head"><div><span className="section-label">159307 · 博时红利低波100</span><h3>我的底仓</h3></div><span className="anchor-ticker">159307.SZ</span></div>
-          <div className="anchor-portfolio-price"><div className="anchor-price-block"><div className="anchor-price-label"><span>最新价</span>{!editingPrice&&<button className="btn btn-ghost anchor-price-edit-btn" onClick={beginManualPriceEdit}>手动修改</button>}</div>{editingPrice?<div className="anchor-price-edit"><NumField label="" value={priceDraft} onChange={setPriceDraft} prefix="¥" placeholder={currentPrice?fmtPrice(currentPrice):'输入价格'}/><button className="btn btn-primary" onClick={saveManualPrice}>保存</button><button className="btn btn-ghost" onClick={()=>setEditingPrice(false)}>取消</button></div>:<strong>{currentPrice==null?'—':`¥${fmtPrice(currentPrice)}`}</strong>}<small>{quote?.source==='manual'?'手动修改 · 刷新后自动恢复行情':quote?.source||'行情同步中'}</small></div></div>
-          <div className="anchor-portfolio-grid">
-            <Stat label="当前份额" value={portfolio.shares?fmt(portfolio.shares,0):'—'} sub="份" color={ACC.teal}/>
-            <Stat label="持仓市值" value={portfolio.value==null?'—':`¥${fmt(portfolio.value,2)}`} sub="按现价估算" color={V('ink')}/>
-            <Stat label="成本基础" value={portfolio.costBasis?`¥${fmt(portfolio.costBasis,2)}`:'—'} sub={portfolio.avgCost?`均价 ¥${fmtPrice(portfolio.avgCost)}`:'暂无交易'} color={ACC.amber}/>
-            <Stat label="浮动收益" value={portfolio.unrealized==null?'—':`${portfolio.unrealized>=0?'+':'−'}¥${fmt(Math.abs(portfolio.unrealized),2)}`} sub={portfolio.costBasis&&portfolio.unrealized!=null?fmtAnchorPct(portfolio.unrealized/portfolio.costBasis*100):'—'} color={portfolio.unrealized==null?V('dim'):portfolio.unrealized>=0?ACC.profit:ACC.loss}/>
-            <Stat label="预计分红收益" value={dividendFeed?`¥${fmt(dividendIncome.total,2)}`:'—'} sub={dividendFeed?`${dividendIncome.count} 次 · 除权日前持仓估算`:'等待分红历史'} color={ACC.profit}/>
-            <Stat label="资金加权年化" value={annualized==null?'—':fmtAnchorPct(annualized)} sub="XIRR · 定投分段计算" color={ACC.blue}/>
-          </div>
-          <div className="anchor-portfolio-foot"><span>已实现收益 {portfolio.realized>=0?'+':''}¥{fmt(portfolio.realized,2)}</span><span>累计分红再投 ¥{fmt(portfolio.dividendCash,2)}</span></div>
-        </div>
-      </div>
 
       <div className="glass-card anchor-dividend-card">
         <div className="anchor-card-head"><div><span className="section-label">159307 分红维护</span><h3>分红收益跟踪</h3></div><div className="anchor-card-head-actions"><span className="anchor-rule">自动同步 · 流水估算</span><button className="btn btn-ghost anchor-dividend-toggle" onClick={()=>setShowDividendHistory(v=>!v)}>{showDividendHistory?'收起历史':'展开历史'}</button></div></div>
