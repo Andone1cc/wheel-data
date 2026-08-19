@@ -4320,10 +4320,11 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
       </div>}
 
       <div className="anchor-two-col">
-        <div className="glass-card anchor-card">
+        <div className="glass-card anchor-card anchor-sentiment-card">
           <div className="anchor-card-head"><div><span className="section-label">股债息差情绪表</span><h3>今天该不该买？</h3></div><span className="anchor-rule">规则化执行</span></div>
+          <div className="anchor-sentiment-inline"><strong style={{color:action.color}}><span className="anchor-row-emoji" aria-hidden="true">{action.emoji}</span>{action.label}</strong><span>股债息差 {fmtAnchorPct(spread)} · {action.desc}</span></div>
           <div className="anchor-sentiment-table"><div className="anchor-sentiment-head"><span>息差区间</span><span>动作</span><span>含义</span></div>{sentimentRows.map(([range,label,meaning,color,emoji])=><div key={range} className={`anchor-sentiment-row ${action.label===label?'active':''}`} style={{'--row-color':color}}><b>{range}</b><strong><span className="anchor-row-emoji" aria-hidden="true">{emoji}</span>{label}</strong><span>{meaning}</span>{action.label===label&&<i>当前</i>}</div>)}</div>
-          <p className="anchor-note">公式：股债息差 = 930955 股息率（TTM） − 中国 10 年期国债收益率。1.5%–2.0% 是你给出的规则之间的缓冲带，默认采用谨慎定投。</p>
+          <p className="anchor-note">规则：息差 &gt;3% 适当加码，2%–3% 正常定投，1.5%–2% 谨慎定投，&lt;1.5% 暂停买入。</p>
         </div>
         <div className="glass-card anchor-card anchor-portfolio-card">
           <div className="anchor-card-head"><div><span className="section-label">159307 · 博时红利低波100</span><h3>我的底仓</h3></div><span className="anchor-ticker">159307.SZ</span></div>
