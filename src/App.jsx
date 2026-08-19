@@ -4303,7 +4303,7 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
         <div className="anchor-signal-rules">
           <div className="anchor-signal-rules-head"><span className="section-label">股债息差情绪表</span><span className="anchor-rule">规则化执行</span></div>
           <div className="anchor-sentiment-table"><div className="anchor-sentiment-head"><span>息差区间</span><span>动作</span><span>含义</span></div>{sentimentRows.map(([range,label,meaning,color,emoji])=><div key={range} className={`anchor-sentiment-row ${action.label===label?'active':''}`} style={{'--row-color':color}}><b>{range}</b><strong><span className="anchor-row-emoji" aria-hidden="true">{emoji}</span>{label}</strong><span>{meaning}</span>{action.label===label&&<i>当前</i>}</div>)}</div>
-          <div className="anchor-signal-stats"><div className="anchor-spread"><span>股债息差</span><b>{fmtAnchorPct(spread)}</b><small>股息率 − 10Y</small></div><div className="anchor-score"><span>情绪温度</span><b>{action.score==null?'—':action.score}</b><small>100 = 更积极</small></div></div>
+          <div className="anchor-signal-stats"><div className="anchor-spread"><span>股债息差</span><b style={{color:action.color}}>{fmtAnchorPct(spread)}</b><small>股息率 − 10Y</small></div><div className="anchor-score"><span>情绪温度</span><b style={{color:action.color}}>{action.score==null?'—':action.score}</b><small>100 = 更积极</small></div></div>
         </div>
       </div>
 
