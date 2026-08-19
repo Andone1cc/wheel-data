@@ -356,7 +356,7 @@ async function fetchCnStockQuoteCached(market,ticker,force=false){
 }
 
 async function fetchAnchorMetrics(force=false){
-  const query=force?`?refresh=${Math.floor(Date.now()/900000)}`:'';
+  const query=force?`?refresh=${Date.now()}`:'';
   const bases=[localStorage.getItem('whl-cloud-url'),DEFAULT_CLOUD_URL,window.location.origin].filter(Boolean).filter((base,index,list)=>list.indexOf(base)===index);
   for(const proxyBase of bases){
     try{
@@ -371,7 +371,7 @@ async function fetchAnchorEtfQuote(force=false){
   const bases=[localStorage.getItem('whl-cloud-url'),DEFAULT_CLOUD_URL,window.location.origin].filter(Boolean).filter((base,index,list)=>list.indexOf(base)===index);
   for(const proxyBase of bases){
     try{
-      const cacheParam=force?`?refresh=${Math.floor(Date.now()/60000)}`:'';
+      const cacheParam=force?`?refresh=${Date.now()}`:'';
       const response=await fetch(`${proxyBase}/api/quote/159307.SZ${cacheParam}`,{signal:AbortSignal.timeout(8000),cache:force?'no-store':'default'});
       if(!response.ok)continue;
       const data=await response.json();
@@ -4110,7 +4110,7 @@ function formatAnchorDate(value){
   return Number.isNaN(date.getTime())?raw:date.toLocaleString('zh-CN',{hour12:false});
 }
 
-function AnchorPanel({anchor,onChange,showToast}){
+function AnchorPanel({anchor,onChange,showToast,active=false}){
   const data={...ANCHOR_DEFAULT,...(anchor||{}),transactions:Array.isArray(anchor?.transactions)?anchor.transactions:[],metricOverrides:anchor?.metricOverrides&&typeof anchor.metricOverrides==='object'?anchor.metricOverrides:{}};
   const [metrics,setMetrics]=useState(data.metrics||null);
   const [quote,setQuote]=useState(data.manualPrice?{price:data.manualPrice,source:'manual'}:null);
@@ -4126,6 +4126,7 @@ function AnchorPanel({anchor,onChange,showToast}){
   const action=anchorAction(spread);
   const currentPrice=quote?.price??data.manualPrice??null;
   const portfolio=calcAnchorPortfolio(data.transactions,currentPrice);
+  const fmtAnchorPct=(value)=>value==null?'—':`${value>=0?'+':''}${Number(value).toFixed(2)}%`;
 
   const refresh=async()=>{
     if(refreshing)return;
@@ -4137,8 +4138,10 @@ function AnchorPanel({anchor,onChange,showToast}){
     setRefreshing(false);
   };
   useEffect(()=>{
+    if(!active)return undefined;
     let alive=true;
-    const load=()=>Promise.all([fetchAnchorMetrics(false),fetchAnchorEtfQuote(false)]).then(([nextMetrics,nextQuote])=>{
+    // 进入“压舱石”页面时主动绕过代理缓存，避免首屏一直停留在旧快照。
+    const load=()=>Promise.all([fetchAnchorMetrics(true),fetchAnchorEtfQuote(true)]).then(([nextMetrics,nextQuote])=>{
       if(!alive)return;
       if(nextMetrics){setMetrics(nextMetrics);onChange({...data,metrics:nextMetrics});}
       if(nextQuote?.price>0)setQuote(nextQuote);
@@ -4151,7 +4154,7 @@ function AnchorPanel({anchor,onChange,showToast}){
       if(nextQuote?.price>0)setQuote(nextQuote);
     },30*60*1000);
     return()=>{alive=false;window.clearInterval(timer);};
-  },[]);
+  },[active]);
 
   const addTransaction=()=>{
     const price=finitePrice(form.price),inputShares=num(form.shares),inputAmount=num(form.amount);
@@ -4205,7 +4208,7 @@ function AnchorPanel({anchor,onChange,showToast}){
           <strong>{action.label}</strong>
           <p>{action.desc}</p>
         </div>
-        <div className="anchor-spread"><span>股债息差</span><b>{spread==null?'—':fmtA(spread)}</b><small>股息率 − 10Y</small></div>
+        <div className="anchor-spread"><span>股债息差</span><b>{fmtAnchorPct(spread)}</b><small>股息率 − 10Y</small></div>
         <div className="anchor-score"><span>情绪温度</span><b>{action.score==null?'—':action.score}</b><small>100 = 更积极</small></div>
       </div>
 
@@ -4232,14 +4235,14 @@ function AnchorPanel({anchor,onChange,showToast}){
         </div>
         <div className="glass-card anchor-card anchor-portfolio-card">
           <div className="anchor-card-head"><div><span className="section-label">159307 · 博时红利低波100</span><h3>我的底仓</h3></div><span className="anchor-ticker">159307.SZ</span></div>
-          <div className="anchor-portfolio-price"><div><span>最新价</span><strong>{currentPrice==null?'—':`¥${fmt(currentPrice,3)}`}</strong><small>{quote?.source==='manual'?'手动录入':quote?.source||'行情同步中'}</small></div><NumField label="手动现价" value={data.manualPrice??''} onChange={updateManualPrice} prefix="¥" placeholder="接口失败时录入"/></div>
+          <div className="anchor-portfolio-price"><div><span>最新价</span><strong>{currentPrice==null?'—':`¥${fmt(currentPrice,2)}`}</strong><small>{quote?.source==='manual'?'手动录入':quote?.source||'行情同步中'}</small></div><NumField label="手动现价" value={data.manualPrice??''} onChange={updateManualPrice} prefix="¥" placeholder="接口失败时录入"/></div>
           <div className="anchor-portfolio-grid">
             <Stat label="当前份额" value={portfolio.shares?fmt(portfolio.shares,0):'—'} sub="份" color={ACC.teal}/>
-            <Stat label="持仓市值" value={portfolio.value==null?'—':`¥${fmt(portfolio.value,0)}`} sub="按现价估算" color={V('ink')}/>
-            <Stat label="成本基础" value={portfolio.costBasis?`¥${fmt(portfolio.costBasis,0)}`:'—'} sub={portfolio.avgCost?`均价 ¥${fmt(portfolio.avgCost,3)}`:'暂无交易'} color={ACC.amber}/>
-            <Stat label="浮动收益" value={portfolio.unrealized==null?'—':`${portfolio.unrealized>=0?'+':'−'}¥${fmt(Math.abs(portfolio.unrealized),0)}`} sub={portfolio.costBasis&&portfolio.unrealized!=null?fmtA(portfolio.unrealized/portfolio.costBasis*100):'—'} color={portfolio.unrealized==null?V('dim'):portfolio.unrealized>=0?ACC.profit:ACC.loss}/>
+            <Stat label="持仓市值" value={portfolio.value==null?'—':`¥${fmt(portfolio.value,2)}`} sub="按现价估算" color={V('ink')}/>
+            <Stat label="成本基础" value={portfolio.costBasis?`¥${fmt(portfolio.costBasis,2)}`:'—'} sub={portfolio.avgCost?`均价 ¥${fmt(portfolio.avgCost,2)}`:'暂无交易'} color={ACC.amber}/>
+            <Stat label="浮动收益" value={portfolio.unrealized==null?'—':`${portfolio.unrealized>=0?'+':'−'}¥${fmt(Math.abs(portfolio.unrealized),2)}`} sub={portfolio.costBasis&&portfolio.unrealized!=null?fmtAnchorPct(portfolio.unrealized/portfolio.costBasis*100):'—'} color={portfolio.unrealized==null?V('dim'):portfolio.unrealized>=0?ACC.profit:ACC.loss}/>
           </div>
-          <div className="anchor-portfolio-foot"><span>已实现收益 {portfolio.realized>=0?'+':''}¥{fmt(portfolio.realized,0)}</span><span>累计分红再投 ¥{fmt(portfolio.dividendCash,0)}</span></div>
+          <div className="anchor-portfolio-foot"><span>已实现收益 {portfolio.realized>=0?'+':''}¥{fmt(portfolio.realized,2)}</span><span>累计分红再投 ¥{fmt(portfolio.dividendCash,2)}</span></div>
         </div>
       </div>
 
@@ -4258,9 +4261,9 @@ function AnchorPanel({anchor,onChange,showToast}){
           <Field label="备注" value={form.note} onChange={v=>setFormValue('note',v)} placeholder="如：2026Q2 分红到账再投"/>
           <div style={{display:'flex',gap:8,marginTop:12}}><button className="btn btn-primary" onClick={addTransaction}>保存流水</button><button className="btn btn-ghost" onClick={()=>setShowForm(false)}>取消</button></div>
         </div>}
-        {!data.transactions.length?<div className="anchor-empty">还没有 159307 交易记录；从第一笔定投开始记录，持仓收益会自动滚动计算。</div>:<div className="anchor-ledger-list"><div className="anchor-ledger-head"><span>日期</span><span>类型</span><span>份额</span><span>成交价</span><span>金额</span><span>备注</span><span/></div>{data.transactions.map(tx=><div className="anchor-ledger-row" key={tx.id}><span>{tx.date}</span><strong className={tx.type==='sell'?'sell':tx.type==='dividend'?'dividend':''}>{tx.type==='sell'?'卖出':tx.type==='dividend'?'分红再投':'正常定投'}</strong><span>{fmt(tx.shares,0)}</span><span>¥{fmt(tx.price,3)}</span><span>¥{fmt(tx.amount,2)}</span><span>{tx.note||'—'}</span><button onClick={()=>removeTransaction(tx.id)} title="删除流水">×</button></div>)}</div>}
+        {!data.transactions.length?<div className="anchor-empty">还没有 159307 交易记录；从第一笔定投开始记录，持仓收益会自动滚动计算。</div>:<div className="anchor-ledger-list"><div className="anchor-ledger-head"><span>日期</span><span>类型</span><span>份额</span><span>成交价</span><span>金额</span><span>备注</span><span/></div>{data.transactions.map(tx=><div className="anchor-ledger-row" key={tx.id}><span>{tx.date}</span><strong className={tx.type==='sell'?'sell':tx.type==='dividend'?'dividend':''}>{tx.type==='sell'?'卖出':tx.type==='dividend'?'分红再投':'正常定投'}</strong><span>{fmt(tx.shares,0)}</span><span>¥{fmt(tx.price,2)}</span><span>¥{fmt(tx.amount,2)}</span><span>{tx.note||'—'}</span><button onClick={()=>removeTransaction(tx.id)} title="删除流水">×</button></div>)}</div>}
       </div>
-      <div className="anchor-sources">数据提示：930955 估值与 CN10Y 尝试从东方财富公开行情同步；10 年期收益率可与 <a href="https://yield.chinabond.com.cn/cbweb-cbrc-web/cbrc/showCbrc" target="_blank" rel="noopener">中国债券信息网</a> 收盘曲线交叉核对。模块只做规则化记录与监控，不替代投资判断。</div>
+      <div className="anchor-sources">数据提示：PE / 股息率来自中证指数官方，PB 使用 ETF.run 公开估值备用源，CN10Y 使用新浪行情并可与 <a href="https://yield.chinabond.com.cn/cbweb-cbrc-web/cbrc/showCbrc" target="_blank" rel="noopener">中国债券信息网</a> 收盘曲线交叉核对。模块只做规则化记录与监控，不替代投资判断。</div>
     </div>
   );
 }
@@ -5012,7 +5015,7 @@ function App(){
           </div>
 
           <div style={{display:tab==='anchor'?'block':'none'}}>
-            <AnchorPanel anchor={anchor} onChange={mutateAnchor} showToast={showToast}/>
+            <AnchorPanel active={tab==='anchor'} anchor={anchor} onChange={mutateAnchor} showToast={showToast}/>
           </div>
 
           {/* 期权筛选暂时从导航隐藏，保留组件代码便于后续恢复 */}

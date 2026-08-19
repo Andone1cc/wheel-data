@@ -255,7 +255,7 @@ async function fetchExchangeRateQuote(ticker) {
 // 10 年期国债优先取新浪公开 CN10YT 行情，东方财富只作为 PB 的补充源。
 function anchorScaled(value, threshold = 20) {
   const n = finiteNumber(value);
-  if (n == null) return null;
+  if (!(n > 0)) return null;
   return Math.abs(n) > threshold ? n / 100 : n;
 }
 
@@ -327,6 +327,26 @@ async function fetchCsIndexAnchorValuation() {
   };
 }
 
+// 中证指数的日频 indicator 文件不提供 PB；东方财富的指数行情接口对
+// 930955 也经常返回 0。因此 PB 单独走公开估值页，并且只作为可选指标，
+// 不参与 PE / 股息率 / 国债收益率主链路的成功判定。
+async function fetchEtfRunAnchorPb() {
+  const raw = await fetchText('https://www.etf.run/index/CSI/930955', {
+    headers: {
+      'User-Agent': BROWSER_USER_AGENT,
+      Accept: 'text/html,application/xhtml+xml',
+      Referer: 'https://www.etf.run/',
+    },
+    timeoutMs: 6500,
+    attempts: 1,
+  });
+  const value = finiteNumber(raw.match(/最新市净率<\/span><span[^>]*>([\d.]+)<\/span>/)?.[1])
+    ?? finiteNumber(raw.match(/PB[：:]\s*([\d.]+)倍/)?.[1]);
+  if (!(value > 0)) throw new Error('ETF.run PB 无有效值');
+  const asOf = raw.match(/更新时间：\s*(\d{4}\/\d{2}\/\d{2})/)?.[1]?.replaceAll('/', '') || null;
+  return { value, asOf, source: 'ETF.run PB' };
+}
+
 async function fetchAnchorMetrics() {
   const lastVerifiedAnchorSnapshot = {
     indexPE: 8.64,
@@ -340,22 +360,23 @@ async function fetchAnchorMetrics() {
     Referer: 'https://quote.eastmoney.com/',
   };
   const indexRequest = fetchJson(
-    'https://push2.eastmoney.com/api/qt/stock/get?secid=1.930955&fields=f58,f43,f57,f162,f164,f167,f173,f124',
+    'https://push2.eastmoney.com/api/qt/stock/get?secid=2.930955&fields=f58,f43,f57,f162,f164,f167,f173,f124',
     { headers, timeoutMs: 5500, attempts: 1 },
   ).catch(() => null);
   const bondRequest = fetchSinaAnchorBondYield().catch(() => null);
   const csIndexRequest = fetchCsIndexAnchorValuation().catch(() => null);
-  const [indexPayload, bondPayload, csIndex] = await Promise.all([indexRequest, bondRequest, csIndexRequest]);
+  const pbRequest = fetchEtfRunAnchorPb().catch(() => null);
+  const [indexPayload, bondPayload, csIndex, pbPayload] = await Promise.all([indexRequest, bondRequest, csIndexRequest, pbRequest]);
   const index = indexPayload?.data || {};
   const indexPE = csIndex?.indexPE ?? anchorScaled(index.f164 ?? index.f162);
-  const indexPB = anchorScaled(index.f167, 5);
+  const indexPB = anchorScaled(index.f167, 5) ?? pbPayload?.value ?? null;
   const dividendYield = csIndex?.dividendYield ?? anchorScaled(index.f173);
   const bond10Y = bondPayload?.value ?? anchorScaled(indexPayload?.data?.f43);
   const stale = indexPE == null || dividendYield == null || bond10Y == null;
   const resolvedPE = indexPE ?? lastVerifiedAnchorSnapshot.indexPE;
   const resolvedDividendYield = dividendYield ?? lastVerifiedAnchorSnapshot.dividendYield;
   const resolvedBond10Y = bond10Y ?? lastVerifiedAnchorSnapshot.bond10Y;
-  const liveSource = [csIndex?.source, bondPayload?.source, indexPB != null ? 'Eastmoney PB' : null].filter(Boolean).join(' + ');
+  const liveSource = [csIndex?.source, bondPayload?.source, indexPB != null ? (anchorScaled(index.f167, 5) != null ? 'Eastmoney PB' : pbPayload?.source) : null].filter(Boolean).join(' + ');
   return {
     indexCode: '930955',
     indexName: '中证红利低波100',
@@ -370,9 +391,10 @@ async function fetchAnchorMetrics() {
     stale,
     warning: stale ? '上游行情暂时不可用，已使用最近一次中证/新浪已验证快照；恢复后会自动更新。' : null,
     sourceLinks: {
-      index: csIndex?.sourceLinks?.index || 'https://quote.eastmoney.com/q/1.930955.html',
+      index: csIndex?.sourceLinks?.index || 'https://quote.eastmoney.com/zz/2.930955.html',
       bond: 'https://stock.finance.sina.com.cn/forex/globalbd/cn10yt.html',
       chinabond: 'https://yield.chinabond.com.cn/cbweb-cbrc-web/cbrc/showCbrc',
+      pb: 'https://www.etf.run/index/CSI/930955',
     },
   };
 }
@@ -1178,7 +1200,7 @@ module.exports = async function handler(req, res) {
   if (reqUrl.startsWith('/api/anchor-metrics')) {
     try {
       const payload = await fetchAnchorMetrics();
-      res.setHeader('Cache-Control', 'public, s-maxage=900, stale-while-revalidate=3600');
+      res.setHeader('Cache-Control', reqUrl.includes('refresh=') ? 'no-store' : 'public, s-maxage=900, stale-while-revalidate=3600');
       return res.status(200).json(payload);
     } catch (e) {
       return res.status(502).json({ error: '压舱石监控数据暂时不可用', detail: e.message });
