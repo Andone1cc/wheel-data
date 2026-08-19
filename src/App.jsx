@@ -4188,6 +4188,7 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
   const [refreshing,setRefreshing]=useState(false);
   const [showForm,setShowForm]=useState(false);
   const [showEditor,setShowEditor]=useState(false);
+  const [showDividendHistory,setShowDividendHistory]=useState(false);
   const [form,setForm]=useState({type:'buy',date:today(),shares:'',price:'',amount:'',fee:'0',note:''});
   const [override,setOverride]=useState({indexPE:'',indexPB:'',dividendYield:'',bond10Y:''});
   const setFormValue=(key,value)=>setForm(prev=>({...prev,[key]:value}));
@@ -4199,11 +4200,17 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
   const portfolio=calcAnchorPortfolio(data.transactions,currentPrice);
   const dividendIncome=calcAnchorDividendIncome(data.transactions,dividendFeed?.events);
   const annualized=calcAnchorAnnualized(data.transactions,portfolio.value);
-  const dividendRows=(Array.isArray(dividendFeed?.events)?dividendFeed.events:[]).slice().reverse().slice(0,8).map(event=>({
-    ...event,
-    shares:sharesHeldBeforeAnchorDate(data.transactions,String(event.exDate||'').slice(0,10)),
-    amount:sharesHeldBeforeAnchorDate(data.transactions,String(event.exDate||'').slice(0,10))*Math.max(0,num(event.perShare)),
-  }));
+  const dividendRows=(Array.isArray(dividendFeed?.events)?dividendFeed.events:[]).slice().reverse().slice(0,8).map(event=>{
+    const shares=sharesHeldBeforeAnchorDate(data.transactions,String(event.exDate||'').slice(0,10));
+    const referencePrice=Number(event.referencePrice)>0?Number(event.referencePrice):Number(currentPrice);
+    return{
+      ...event,
+      shares,
+      amount:shares*Math.max(0,num(event.perShare)),
+      // 单季分红年化：每份分红 ÷ 除权前参考净值 × 4，仅衡量分红现金流，不代表 ETF 总回报。
+      quarterAnnualized:referencePrice>0?Math.max(0,num(event.perShare))/referencePrice*4*100:null,
+    };
+  });
   const fmtAnchorPct=(value)=>value==null?'—':`${value>=0?'+':''}${Number(value).toFixed(2)}%`;
 
   const applyFetchedAnchorData=(nextMetrics,nextQuote,nextDividendFeed,persist=true)=>{
@@ -4334,10 +4341,12 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
       </div>
 
       <div className="glass-card anchor-dividend-card">
-        <div className="anchor-card-head"><div><span className="section-label">159307 分红维护</span><h3>分红收益跟踪</h3></div><span className="anchor-rule">自动同步 · 流水估算</span></div>
+        <div className="anchor-card-head"><div><span className="section-label">159307 分红维护</span><h3>分红收益跟踪</h3></div><div className="anchor-card-head-actions"><span className="anchor-rule">自动同步 · 流水估算</span><button className="btn btn-ghost anchor-dividend-toggle" onClick={()=>setShowDividendHistory(v=>!v)}>{showDividendHistory?'收起历史':'展开历史'}</button></div></div>
         {!dividendFeed?<div className="anchor-empty">分红历史尚未同步，点击“刷新监控”后自动获取。</div>:<>
-          <div className="anchor-dividend-list"><div className="anchor-dividend-head"><span>除权日</span><span>每份分红</span><span>除权前份额</span><span>预计应得</span><span>状态</span></div>{dividendRows.map(event=><div className="anchor-dividend-row" key={event.id}><span>{event.exDate}</span><span>¥{fmtPrice(event.perShare)}</span><span>{event.shares?fmt(event.shares,0):'—'}</span><span>{event.amount?`¥${fmt(event.amount,2)}`:'—'}</span><span className={event.shares?'positive':''}>{event.shares?'已按流水估算':'待录入持仓'}</span></div>)}</div>
-          <div className="anchor-dividend-note">应得分红 = 除权日前持仓份额 × 每份分红；当前按本机交易流水估算，实际到账以券商资金流水为准。数据源：{dividendFeed.source}，更新至 {dividendFeed.asOf||'—'}。</div>
+          {!showDividendHistory?<div className="anchor-dividend-summary"><span>最近一期：{dividendRows[0]?.exDate||'—'}</span><span>每份分红：¥{dividendRows[0]?fmtPrice(dividendRows[0].perShare):'—'}</span><span>单季分红年化：{dividendRows[0]?fmtAnchorPct(dividendRows[0].quarterAnnualized):'—'}</span></div>:<>
+            <div className="anchor-dividend-list"><div className="anchor-dividend-head"><span>除权日</span><span>每份分红</span><span>单季年化</span><span>除权前份额</span><span>预计应得</span><span>状态</span></div>{dividendRows.map(event=><div className="anchor-dividend-row" key={event.id}><span>{event.exDate}</span><span>¥{fmtPrice(event.perShare)}</span><span>{fmtAnchorPct(event.quarterAnnualized)}</span><span>{event.shares?fmt(event.shares,0):'—'}</span><span>{event.amount?`¥${fmt(event.amount,2)}`:'—'}</span><span className={event.shares?'positive':''}>{event.shares?'已按流水估算':'待录入持仓'}</span></div>)}</div>
+            <div className="anchor-dividend-note">单季分红年化 = 每份分红 ÷ 除权前参考净值 × 4，仅估算分红收益，不等同于 ETF 总回报；应得分红 = 除权日前持仓份额 × 每份分红。当前按本机交易流水估算，实际到账以券商资金流水为准。数据源：{dividendFeed.source}，更新至 {dividendFeed.asOf||'—'}。</div>
+          </>}
         </>}
       </div>
 

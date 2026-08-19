@@ -361,12 +361,20 @@ async function fetchAnchorDividendHistory() {
   if (!trendText) throw new Error('159307 分红历史格式暂时不可用');
   const trend = JSON.parse(trendText);
   const events = trend
-    .filter(item => typeof item?.unitMoney === 'string' && item.unitMoney.includes('分红'))
-    .map(item => {
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => typeof item?.unitMoney === 'string' && item.unitMoney.includes('分红'))
+    .map(({ item, index }) => {
       const perShare = finiteNumber(item.unitMoney.match(/每份派现金([\d.]+)元/)?.[1]);
       if (!(perShare > 0) || !(item.x > 0)) return null;
       const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date(item.x));
-      return { id: `159307-${date}`, exDate: date, perShare, description: item.unitMoney };
+      return {
+        id: `159307-${date}`,
+        exDate: date,
+        perShare,
+        // 除权前最后一个净值作为分红年化参考价，避免用除权后的价格低估收益率。
+        referencePrice: finiteNumber(trend[index - 1]?.y) ?? finiteNumber(item.y),
+        description: item.unitMoney,
+      };
     })
     .filter(Boolean);
   if (!events.length) throw new Error('159307 暂无可识别分红记录');
