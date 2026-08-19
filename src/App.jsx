@@ -49,6 +49,7 @@ const SK={
   POS:'whl-pos-v2',CLOSED:'whl-closed-v1',STOCKS:'whl-stocks-v1',SGOV:'whl-sgov-v3',CFG:'whl-cfg-v2',US_CASH_FLOWS:'whl-us-cash-flows-v1',
   CN_POS:'whl-cn-pos-v1',CN_CLOSED:'whl-cn-closed-v1',CN_STOCKS:'whl-cn-stocks-v1',
   CN_RECOVERY:'whl-cn-pos-recovery-v1',
+  ANCHOR:'whl-anchor-v1',
   KEY:'whl-api-key',FH_KEY:'whl-finnhub-key',THEME:'whl-theme',
 };
 const US_ACCOUNT_TABS=['active','stocks','closed','sgov'];
@@ -352,6 +353,19 @@ async function fetchCnStockQuoteCached(market,ticker,force=false){
   const quote=await fetchCnStockQuote(market,ticker);
   saveCnStockQuoteCache(key,quote);
   return quote;
+}
+
+async function fetchAnchorMetrics(force=false){
+  const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
+  const query=force?`?refresh=${Math.floor(Date.now()/900000)}`:'';
+  try{
+    const response=await fetch(`${proxyBase}/api/anchor-metrics${query}`,{signal:AbortSignal.timeout(9000),cache:force?'no-store':'default'});
+    if(!response.ok)throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  }catch(error){
+    console.warn('anchor metrics fetch:',error.message);
+    return null;
+  }
 }
 
 async function fetchStockCloseOnDate(ticker,date,{force=false}={}){
@@ -4036,6 +4050,200 @@ function LoginScreen({onLogin}){
   );
 }
 
+const ANCHOR_DEFAULT={
+  transactions:[],
+  metrics:null,
+  metricOverrides:{},
+  manualPrice:null,
+  planAmount:1000,
+};
+
+function anchorAction(spread){
+  if(spread==null)return{label:'等待数据',short:'WAIT',color:ACC.blue,score:null,desc:'补齐股息率与 10 年国债收益率后再判断'};
+  if(spread>3)return{label:'适当加码',short:'ADD',color:ACC.profit,score:86,desc:'股债息差进入价值区，按计划增加一档'};
+  if(spread>=2)return{label:'正常定投',short:'KEEP',color:ACC.blue,score:68,desc:'维持基础定投，不追涨、不择时'};
+  if(spread>=1.5)return{label:'谨慎定投',short:'CAUTION',color:ACC.amber,score:48,desc:'处于缓冲区，可小额执行并等待息差扩大'};
+  return{label:'暂停买入',short:'PAUSE',color:ACC.loss,score:22,desc:'息差偏窄，暂停新增买入，分红到账仍按计划再投'};
+}
+
+function calcAnchorPortfolio(transactions,currentPrice){
+  let shares=0,costBasis=0,realized=0,buyCash=0,dividendCash=0,soldShares=0;
+  const rows=[...(Array.isArray(transactions)?transactions:[])].sort((a,b)=>String(a.date||'').localeCompare(String(b.date||''))||num(a.id)-num(b.id));
+  rows.forEach(tx=>{
+    const type=tx.type==='sell'?'sell':tx.type==='dividend'?'dividend':'buy';
+    const txShares=Math.max(0,num(tx.shares));
+    const amount=Math.max(0,num(tx.amount));
+    const fee=Math.max(0,num(tx.fee));
+    if(type==='sell'){
+      const avg=shares>0?costBasis/shares:0;
+      const sold=Math.min(shares,txShares);
+      realized+=(amount-fee)-avg*sold;
+      costBasis-=avg*sold;shares-=sold;soldShares+=sold;
+    }else{
+      shares+=txShares;costBasis+=amount+fee;buyCash+=amount+fee;
+      if(type==='dividend')dividendCash+=amount;
+    }
+  });
+  const value=currentPrice!=null?shares*currentPrice:null;
+  const unrealized=value!=null?value-costBasis:null;
+  return{shares,costBasis,avgCost:shares>0?costBasis/shares:null,realized,unrealized,totalReturn:unrealized==null?null:realized+unrealized,value,buyCash,dividendCash,soldShares};
+}
+
+function AnchorPanel({anchor,onChange,showToast}){
+  const data={...ANCHOR_DEFAULT,...(anchor||{}),transactions:Array.isArray(anchor?.transactions)?anchor.transactions:[],metricOverrides:anchor?.metricOverrides&&typeof anchor.metricOverrides==='object'?anchor.metricOverrides:{}};
+  const [metrics,setMetrics]=useState(data.metrics||null);
+  const [quote,setQuote]=useState(data.manualPrice?{price:data.manualPrice,source:'manual'}:null);
+  const [refreshing,setRefreshing]=useState(false);
+  const [showForm,setShowForm]=useState(false);
+  const [showEditor,setShowEditor]=useState(false);
+  const [form,setForm]=useState({type:'buy',date:today(),shares:'',price:'',amount:'',fee:'0',note:''});
+  const [override,setOverride]=useState({indexPE:'',indexPB:'',dividendYield:'',bond10Y:''});
+  const setFormValue=(key,value)=>setForm(prev=>({...prev,[key]:value}));
+  const overrideMetrics={...(data.metricOverrides||{})};
+  const resolved={...(metrics||{}),...overrideMetrics};
+  const spread=resolved.dividendYield!=null&&resolved.bond10Y!=null?num(resolved.dividendYield)-num(resolved.bond10Y):null;
+  const action=anchorAction(spread);
+  const currentPrice=quote?.price??data.manualPrice??null;
+  const portfolio=calcAnchorPortfolio(data.transactions,currentPrice);
+
+  const refresh=async()=>{
+    if(refreshing)return;
+    setRefreshing(true);
+    const [nextMetrics,nextQuote]=await Promise.all([fetchAnchorMetrics(true),fetchCnStockQuoteCached('CN','159307',true)]);
+    if(nextMetrics){setMetrics(nextMetrics);onChange({...data,metrics:nextMetrics});}
+    if(nextQuote?.price>0){setQuote(nextQuote);onChange({...data,metrics:nextMetrics||data.metrics,manualPrice:null});}
+    if(!nextMetrics&&!nextQuote?.price)showToast('监控数据暂时不可用，可先手动录入',ACC.amber);
+    setRefreshing(false);
+  };
+  useEffect(()=>{
+    let alive=true;
+    const load=()=>Promise.all([fetchAnchorMetrics(false),fetchCnStockQuoteCached('CN','159307',false)]).then(([nextMetrics,nextQuote])=>{
+      if(!alive)return;
+      if(nextMetrics){setMetrics(nextMetrics);onChange({...data,metrics:nextMetrics});}
+      if(nextQuote?.price>0)setQuote(nextQuote);
+    });
+    load();
+    const timer=window.setInterval(async()=>{
+      const [nextMetrics,nextQuote]=await Promise.all([fetchAnchorMetrics(false),fetchCnStockQuoteCached('CN','159307',false)]);
+      if(!alive)return;
+      if(nextMetrics)setMetrics(nextMetrics);
+      if(nextQuote?.price>0)setQuote(nextQuote);
+    },30*60*1000);
+    return()=>{alive=false;window.clearInterval(timer);};
+  },[]);
+
+  const addTransaction=()=>{
+    const price=finitePrice(form.price),inputShares=num(form.shares),inputAmount=num(form.amount);
+    const shares=inputShares>0?Math.floor(inputShares):price&&inputAmount>0?Math.floor(inputAmount/price/100)*100:0;
+    const amount=inputAmount>0?inputAmount:price&&shares>0?shares*price:0;
+    if(!form.date||!(price>0)||!(shares>0)||!(amount>0))return;
+    const tx={id:Date.now(),type:form.type,date:form.date,shares,price,amount,fee:Math.max(0,num(form.fee)),note:String(form.note||'').trim()};
+    onChange({...data,transactions:[tx,...data.transactions]});
+    setForm({type:'buy',date:today(),shares:'',price:'',amount:'',fee:'0',note:''});
+    setShowForm(false);
+    showToast(form.type==='dividend'?'已登记分红再投':'已登记定投交易',ACC.teal);
+  };
+  const removeTransaction=(id)=>onChange({...data,transactions:data.transactions.filter(tx=>tx.id!==id)});
+  const saveOverrides=()=>{
+    const next={};
+    ['indexPE','indexPB','dividendYield','bond10Y'].forEach(key=>{if(override[key]!==''&&Number.isFinite(Number(override[key])))next[key]=Number(override[key]);});
+    onChange({...data,metricOverrides:next});
+    setShowEditor(false);showToast('监控口径已保存',ACC.teal);
+  };
+  const updateManualPrice=(value)=>{const price=finitePrice(value);onChange({...data,manualPrice:price});setQuote(price?{price,source:'manual'}:null);};
+  const metricSource=resolved.source||'最近快照 / 手动修正';
+  const metricCards=[
+    ['930955 滚动 PE',resolved.indexPE!=null?`${fmt(resolved.indexPE,2)}x`:'—',ACC.purple,'指数估值'],
+    ['930955 PB',resolved.indexPB!=null?`${fmt(resolved.indexPB,2)}x`:'—',ACC.blue,'指数估值'],
+    ['股息率 TTM',resolved.dividendYield!=null?`${fmt(resolved.dividendYield,2)}%`:'—',ACC.profit,'指数估值'],
+    ['中债 / CN10Y 10Y',resolved.bond10Y!=null?`${fmt(resolved.bond10Y,2)}%`:'—',ACC.amber,'债券收益率'],
+  ];
+  const sentimentRows=[
+    ['> 3.0%','适当加码','价值区间',ACC.profit],
+    ['2.0% – 3.0%','正常定投','基础档位',ACC.blue],
+    ['1.5% – 2.0%','谨慎定投','缓冲区间',ACC.amber],
+    ['< 1.5%','暂停买入','息差偏窄',ACC.loss],
+  ];
+  return(
+    <div className="anchor-panel anim-in">
+      <div className="anchor-hero">
+        <div>
+          <div className="cnopt-kicker">A-SHARE INCOME BASE · 159307</div>
+          <h2>压舱石 <span>／磐石计划</span></h2>
+          <p>以博时红利低波100为人民币定投底仓；分红到账当天，全额手动再买入。</p>
+        </div>
+        <div className="anchor-hero-actions">
+          <span className="anchor-badge">人民币定投</span><span className="anchor-badge">分红再投</span>
+          <button className="btn btn-primary" onClick={refresh} disabled={refreshing}>{refreshing?'同步中…':'↻ 刷新监控'}</button>
+        </div>
+      </div>
+
+      <div className="anchor-signal" style={{'--anchor-color':action.color}}>
+        <div className="anchor-signal-main">
+          <span className="section-label">当前情绪 / 执行动作</span>
+          <strong>{action.label}</strong>
+          <p>{action.desc}</p>
+        </div>
+        <div className="anchor-spread"><span>股债息差</span><b>{spread==null?'—':fmtA(spread)}</b><small>股息率 − 10Y</small></div>
+        <div className="anchor-score"><span>情绪温度</span><b>{action.score==null?'—':action.score}</b><small>100 = 更积极</small></div>
+      </div>
+
+      <div className="anchor-metric-grid">
+        {metricCards.map(([label,value,color,sub])=><div className="anchor-metric-card" key={label}><span>{label}</span><strong style={{color}}>{value}</strong><small>{sub}</small></div>)}
+      </div>
+      <div className="anchor-data-bar"><span>数据状态：{metricSource}</span><span>最近更新：{resolved.asOf?new Date(resolved.asOf).toLocaleString('zh-CN',{hour12:false}):'尚未同步'}</span><button className="btn btn-ghost" onClick={()=>{setOverride({indexPE:resolved.indexPE??'',indexPB:resolved.indexPB??'',dividendYield:resolved.dividendYield??'',bond10Y:resolved.bond10Y??''});setShowEditor(v=>!v);}}>{showEditor?'收起修正':'手动修正口径'}</button></div>
+      {showEditor&&<div className="anchor-editor card">
+        <div className="anchor-editor-head"><strong>手动修正监控口径</strong><span>当官方/行情接口尚未更新时使用；保存后会标记为本机修正。</span></div>
+        <div className="anchor-editor-grid">
+          <NumField label="PE" value={override.indexPE} onChange={v=>setOverride(p=>({...p,indexPE:v}))} suffix="x"/>
+          <NumField label="PB" value={override.indexPB} onChange={v=>setOverride(p=>({...p,indexPB:v}))} suffix="x"/>
+          <NumField label="股息率" value={override.dividendYield} onChange={v=>setOverride(p=>({...p,dividendYield:v}))} suffix="%"/>
+          <NumField label="10Y 国债" value={override.bond10Y} onChange={v=>setOverride(p=>({...p,bond10Y:v}))} suffix="%"/>
+        </div>
+        <div style={{display:'flex',gap:8,marginTop:12}}><button className="btn btn-primary" onClick={saveOverrides}>保存修正</button><button className="btn btn-ghost" onClick={()=>{onChange({...data,metricOverrides:{}});setShowEditor(false);}}>清除修正</button></div>
+      </div>}
+
+      <div className="anchor-two-col">
+        <div className="glass-card anchor-card">
+          <div className="anchor-card-head"><div><span className="section-label">股债息差情绪表</span><h3>今天该不该买？</h3></div><span className="anchor-rule">规则化执行</span></div>
+          <div className="anchor-sentiment-table"><div className="anchor-sentiment-head"><span>息差区间</span><span>动作</span><span>含义</span></div>{sentimentRows.map(([range,label,meaning,color])=><div key={range} className={`anchor-sentiment-row ${action.label===label?'active':''}`} style={{'--row-color':color}}><b>{range}</b><strong>{label}</strong><span>{meaning}</span>{action.label===label&&<i>当前</i>}</div>)}</div>
+          <p className="anchor-note">公式：股债息差 = 930955 股息率（TTM） − 中国 10 年期国债收益率。1.5%–2.0% 是你给出的规则之间的缓冲带，默认采用谨慎定投。</p>
+        </div>
+        <div className="glass-card anchor-card anchor-portfolio-card">
+          <div className="anchor-card-head"><div><span className="section-label">159307 · 博时红利低波100</span><h3>我的底仓</h3></div><span className="anchor-ticker">159307.SZ</span></div>
+          <div className="anchor-portfolio-price"><div><span>最新价</span><strong>{currentPrice==null?'—':`¥${fmt(currentPrice,3)}`}</strong><small>{quote?.source==='manual'?'手动录入':quote?.source||'行情同步中'}</small></div><NumField label="手动现价" value={data.manualPrice??''} onChange={updateManualPrice} prefix="¥" placeholder="接口失败时录入"/></div>
+          <div className="anchor-portfolio-grid">
+            <Stat label="当前份额" value={portfolio.shares?fmt(portfolio.shares,0):'—'} sub="份" color={ACC.teal}/>
+            <Stat label="持仓市值" value={portfolio.value==null?'—':`¥${fmt(portfolio.value,0)}`} sub="按现价估算" color={V('ink')}/>
+            <Stat label="成本基础" value={portfolio.costBasis?`¥${fmt(portfolio.costBasis,0)}`:'—'} sub={portfolio.avgCost?`均价 ¥${fmt(portfolio.avgCost,3)}`:'暂无交易'} color={ACC.amber}/>
+            <Stat label="浮动收益" value={portfolio.unrealized==null?'—':`${portfolio.unrealized>=0?'+':'−'}¥${fmt(Math.abs(portfolio.unrealized),0)}`} sub={portfolio.costBasis&&portfolio.unrealized!=null?fmtA(portfolio.unrealized/portfolio.costBasis*100):'—'} color={portfolio.unrealized==null?V('dim'):portfolio.unrealized>=0?ACC.profit:ACC.loss}/>
+          </div>
+          <div className="anchor-portfolio-foot"><span>已实现收益 {portfolio.realized>=0?'+':''}¥{fmt(portfolio.realized,0)}</span><span>累计分红再投 ¥{fmt(portfolio.dividendCash,0)}</span></div>
+        </div>
+      </div>
+
+      <div className="glass-card anchor-ledger-card">
+        <div className="anchor-card-head"><div><span className="section-label">定投 / 分红再投流水</span><h3>把纪律记下来</h3></div><button className="btn btn-primary" onClick={()=>setShowForm(v=>!v)}>{showForm?'收起':'＋ 录入交易'}</button></div>
+        {showForm&&<div className="anchor-trade-form card">
+          <div className="anchor-form-grid">
+            <SelectField label="类型" value={form.type} onChange={v=>setFormValue('type',v)} options={[{value:'buy',label:'正常定投'},{value:'dividend',label:'分红再投'},{value:'sell',label:'卖出 / 减仓'}]}/>
+            <DateField label="日期" value={form.date} onChange={v=>setFormValue('date',v)}/>
+            <NumField label="成交价" prefix="¥" value={form.price} onChange={v=>setFormValue('price',v)} placeholder="1.000"/>
+            <NumField label="份额" value={form.shares} onChange={v=>setFormValue('shares',v)} placeholder="留空按金额计算" suffix="份"/>
+            <NumField label={form.type==='dividend'?'分红到账金额':'成交金额'} prefix="¥" value={form.amount} onChange={v=>setFormValue('amount',v)} placeholder="可由份额×价格计算"/>
+            <NumField label="费用" prefix="¥" value={form.fee} onChange={v=>setFormValue('fee',v)} placeholder="0"/>
+          </div>
+          <div className="anchor-form-hint">{form.type!=='sell'&&num(form.amount)>0&&finitePrice(form.price)>0?`预计可买 ${Math.floor(num(form.amount)/num(form.price)/100)*100} 份，剩余现金按 100 份整数倍保留。`:form.type==='dividend'?'分红到账当天录入，默认视作全额再投资。':'金额和份额至少填写一项。'}</div>
+          <Field label="备注" value={form.note} onChange={v=>setFormValue('note',v)} placeholder="如：2026Q2 分红到账再投"/>
+          <div style={{display:'flex',gap:8,marginTop:12}}><button className="btn btn-primary" onClick={addTransaction}>保存流水</button><button className="btn btn-ghost" onClick={()=>setShowForm(false)}>取消</button></div>
+        </div>}
+        {!data.transactions.length?<div className="anchor-empty">还没有 159307 交易记录；从第一笔定投开始记录，持仓收益会自动滚动计算。</div>:<div className="anchor-ledger-list"><div className="anchor-ledger-head"><span>日期</span><span>类型</span><span>份额</span><span>成交价</span><span>金额</span><span>备注</span><span/></div>{data.transactions.map(tx=><div className="anchor-ledger-row" key={tx.id}><span>{tx.date}</span><strong className={tx.type==='sell'?'sell':tx.type==='dividend'?'dividend':''}>{tx.type==='sell'?'卖出':tx.type==='dividend'?'分红再投':'正常定投'}</strong><span>{fmt(tx.shares,0)}</span><span>¥{fmt(tx.price,3)}</span><span>¥{fmt(tx.amount,2)}</span><span>{tx.note||'—'}</span><button onClick={()=>removeTransaction(tx.id)} title="删除流水">×</button></div>)}</div>}
+      </div>
+      <div className="anchor-sources">数据提示：930955 估值与 CN10Y 尝试从东方财富公开行情同步；10 年期收益率可与 <a href="https://yield.chinabond.com.cn/cbweb-cbrc-web/cbrc/showCbrc" target="_blank" rel="noopener">中国债券信息网</a> 收盘曲线交叉核对。模块只做规则化记录与监控，不替代投资判断。</div>
+    </div>
+  );
+}
+
 function App(){
   const [theme,setTheme]=useState(()=>localStorage.getItem(SK.THEME)||'dark');
   const [positions,setPositions]=useState(()=>ls(SK.POS,[]));
@@ -4053,6 +4261,7 @@ function App(){
   const [cnClosed,setCnClosed]=useState(()=>ls(SK.CN_CLOSED,[]));
   const [cnStocks,setCnStocks]=useState(()=>ls(SK.CN_STOCKS,[]));
   const [cnRecovery,setCnRecovery]=useState(()=>ls(SK.CN_RECOVERY,[]));
+  const [anchor,setAnchor]=useState(()=>({...ANCHOR_DEFAULT,...(ls(SK.ANCHOR,{})||{})}));
   const [apiKey,setApiKey]=useState(()=>localStorage.getItem(SK.KEY)||'');
   const [finnhubKey,setFinnhubKey]=useState(()=>localStorage.getItem(SK.FH_KEY)||'');
   // 云端同步（已内置默认配置）
@@ -4081,15 +4290,16 @@ function App(){
   const [lastRefresh,setLastRefresh]=useState(null);
   const [toast,setToast]=useState(null);
 
-  latestData.current={positions,closed,stocks,sgov,cfg,usCashFlows,cnPositions,cnClosed,cnStocks};
+  latestData.current={positions,closed,stocks,sgov,cfg,usCashFlows,cnPositions,cnClosed,cnStocks,anchor};
 
-  const hasRemoteSchema=(remote)=>['positions','closed','stocks','sgov','cfg','usCashFlows','cnPositions','cnClosed','cnStocks']
+  const hasRemoteSchema=(remote)=>['positions','closed','stocks','sgov','cfg','usCashFlows','cnPositions','cnClosed','cnStocks','anchor']
     .some(key=>Object.prototype.hasOwnProperty.call(remote||{},key));
   const buildPayload=(patch={})=>({...latestData.current,...patch,updatedAt:Date.now()});
   const persistLocal=(data)=>{
     lss(SK.POS,data.positions);lss(SK.CLOSED,data.closed);lss(SK.STOCKS,data.stocks);lss(SK.SGOV,data.sgov);lss(SK.CFG,data.cfg);
     lss(SK.US_CASH_FLOWS,data.usCashFlows);
     lss(SK.CN_POS,data.cnPositions);lss(SK.CN_CLOSED,data.cnClosed);lss(SK.CN_STOCKS,data.cnStocks);
+    lss(SK.ANCHOR,data.anchor);
   };
   const applyRemote=(remote)=>{
     const local=latestData.current;
@@ -4107,6 +4317,7 @@ function App(){
       cnPositions:Array.isArray(remote.cnPositions)?remote.cnPositions:local.cnPositions,
       cnClosed:Array.isArray(remote.cnClosed)?remote.cnClosed:local.cnClosed,
       cnStocks:Array.isArray(remote.cnStocks)?remote.cnStocks:local.cnStocks,
+      anchor:remote.anchor&&typeof remote.anchor==='object'?{...ANCHOR_DEFAULT,...remote.anchor}:local.anchor,
     };
     // 云端某一分类被旧请求意外清空时，不直接丢弃本机副本；保留为可确认恢复项。
     // 已平仓的 id 会被排除，避免把正常平仓的仓位重新复活。
@@ -4122,6 +4333,7 @@ function App(){
     latestData.current=next;
     setPositions(next.positions);setClosed(next.closed);setStocks(next.stocks);setSgov(next.sgov);setCfg(next.cfg);setUsCashFlows(next.usCashFlows);
     setCnPositions(next.cnPositions);setCnClosed(next.cnClosed);setCnStocks(next.cnStocks);
+    setAnchor(next.anchor);
     persistLocal(next);
     return next;
   };
@@ -4231,6 +4443,11 @@ function App(){
   const mutateSgov=(next)=>{
     setSgov(next);lss(SK.SGOV,next);
     persistPatch({sgov:next});
+  };
+  const mutateAnchor=(next)=>{
+    const normalized={...ANCHOR_DEFAULT,...(next||{}),transactions:Array.isArray(next?.transactions)?next.transactions:[]};
+    setAnchor(normalized);lss(SK.ANCHOR,normalized);
+    persistPatch({anchor:normalized});
   };
   const autoCloseExpiredPositions=useCallback(async()=>{
     if(expiryAutoRun.current)return;
@@ -4628,6 +4845,11 @@ function App(){
             <span className="tab-unit">CNY</span>
             <span className="tab-count">{cnPositions.length+cnStocks.length}</span>
           </button>
+          <button className={`tab-btn${tab==='anchor'?' active':''}`} onClick={()=>setTab('anchor')}>
+            <span className="tab-dot" style={{background:ACC.amber}}/>
+            <span className="tab-label tab-label-full">压舱石</span><span className="tab-label tab-label-short">底仓</span>
+            <span className="tab-unit">159307</span>
+          </button>
           <div className="sidebar-sep"/>
           <div className="sidebar-section">工具</div>
           <button className={`tab-btn${tab==='finews'?' active':''}`} onClick={()=>setTab('finews')}>
@@ -4766,6 +4988,10 @@ function App(){
             <CnAccountPanel positions={cnPositions} closed={cnClosed} stocks={cnStocks} recovery={cnRecovery} onRecover={recoverCnPositions}
               onPositions={mutateCnPositions} onClosed={mutateCnClosed} onStocks={mutateCnStocks}
               onAccountChange={mutateCnAccount} showToast={showToast}/>
+          </div>
+
+          <div style={{display:tab==='anchor'?'block':'none'}}>
+            <AnchorPanel anchor={anchor} onChange={mutateAnchor} showToast={showToast}/>
           </div>
 
           {/* 期权筛选暂时从导航隐藏，保留组件代码便于后续恢复 */}

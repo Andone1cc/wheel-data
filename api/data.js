@@ -249,6 +249,58 @@ async function fetchExchangeRateQuote(ticker) {
   });
 }
 
+// “压舱石”监控数据：指数估值取东方财富公开行情字段，10 年期国债取其
+// 全球债券行情页对应的 CN10Y 品种。接口失败时前端仍保留最近快照，并允许手动修正。
+function anchorScaled(value, threshold = 20) {
+  const n = finiteNumber(value);
+  if (n == null) return null;
+  return Math.abs(n) > threshold ? n / 100 : n;
+}
+
+async function fetchAnchorMetrics() {
+  const headers = {
+    'User-Agent': BROWSER_USER_AGENT,
+    Accept: 'application/json, text/plain, */*',
+    Referer: 'https://quote.eastmoney.com/',
+  };
+  const indexRequest = fetchJson(
+    'https://push2.eastmoney.com/api/qt/stock/get?secid=1.930955&fields=f58,f43,f57,f162,f164,f167,f173,f124',
+    { headers, timeoutMs: 5500, attempts: 1 },
+  ).catch(() => null);
+  const bondRequest = fetchJson(
+    'https://push2.eastmoney.com/api/qt/stock/get?secid=171.CN10Y&fields=f58,f43,f57,f169,f170,f124',
+    { headers, timeoutMs: 5500, attempts: 1 },
+  ).catch(() => null);
+  const [indexPayload, bondPayload] = await Promise.all([indexRequest, bondRequest]);
+  const index = indexPayload?.data || {};
+  const bond = bondPayload?.data || {};
+  // 不同公开接口版本对 f162/f164 的命名略有差异：优先取 TTM 字段，
+  // 缺失时回退到动态 PE，前端仍显示“滚动 PE”作为策略口径。
+  const indexPE = anchorScaled(index.f164 ?? index.f162);
+  const indexPB = anchorScaled(index.f167, 5);
+  const dividendYield = anchorScaled(index.f173);
+  const bond10Y = anchorScaled(bond.f43);
+  const hasIndex = [indexPE, indexPB, dividendYield].some((value) => value != null);
+  if (!hasIndex && bond10Y == null) throw new Error('监控数据暂时不可用');
+  return {
+    indexCode: '930955',
+    indexName: '中证红利低波100',
+    etfCode: '159307',
+    indexPE,
+    indexPB,
+    dividendYield,
+    bond10Y,
+    spread: dividendYield != null && bond10Y != null ? dividendYield - bond10Y : null,
+    asOf: new Date().toISOString(),
+    source: 'Eastmoney public quote',
+    sourceLinks: {
+      index: 'https://quote.eastmoney.com/q/1.930955.html',
+      bond: 'https://quote.eastmoney.com/q/171.CN10Y.html',
+      chinabond: 'https://yield.chinabond.com.cn/cbweb-cbrc-web/cbrc/showCbrc',
+    },
+  };
+}
+
 function normalCdf(x) {
   const sign = x < 0 ? -1 : 1;
   const z = Math.abs(x) / Math.sqrt(2);
@@ -1040,6 +1092,20 @@ module.exports = async function handler(req, res) {
       return res.status(200).json(payload);
     } catch (e) {
       return res.status(502).json({ error: 'CBOE failed', detail: e.message });
+    }
+  }
+
+  // ══════════════════════════════════════════════════
+  // “压舱石”股债息差监控
+  // /api/anchor-metrics
+  // ══════════════════════════════════════════════════
+  if (reqUrl.startsWith('/api/anchor-metrics')) {
+    try {
+      const payload = await fetchAnchorMetrics();
+      res.setHeader('Cache-Control', 'public, s-maxage=900, stale-while-revalidate=3600');
+      return res.status(200).json(payload);
+    } catch (e) {
+      return res.status(502).json({ error: '压舱石监控数据暂时不可用', detail: e.message });
     }
   }
 
