@@ -328,6 +328,12 @@ async function fetchCsIndexAnchorValuation() {
 }
 
 async function fetchAnchorMetrics() {
+  const lastVerifiedAnchorSnapshot = {
+    indexPE: 8.64,
+    dividendYield: 4.55,
+    bond10Y: 1.676,
+    asOf: '20260818',
+  };
   const headers = {
     'User-Agent': BROWSER_USER_AGENT,
     Accept: 'application/json, text/plain, */*',
@@ -345,19 +351,24 @@ async function fetchAnchorMetrics() {
   const indexPB = anchorScaled(index.f167, 5);
   const dividendYield = csIndex?.dividendYield ?? anchorScaled(index.f173);
   const bond10Y = bondPayload?.value ?? anchorScaled(indexPayload?.data?.f43);
-  const hasIndex = [indexPE, indexPB, dividendYield].some((value) => value != null);
-  if (!hasIndex && bond10Y == null) throw new Error('监控数据暂时不可用');
+  const stale = indexPE == null || dividendYield == null || bond10Y == null;
+  const resolvedPE = indexPE ?? lastVerifiedAnchorSnapshot.indexPE;
+  const resolvedDividendYield = dividendYield ?? lastVerifiedAnchorSnapshot.dividendYield;
+  const resolvedBond10Y = bond10Y ?? lastVerifiedAnchorSnapshot.bond10Y;
+  const liveSource = [csIndex?.source, bondPayload?.source, indexPB != null ? 'Eastmoney PB' : null].filter(Boolean).join(' + ');
   return {
     indexCode: '930955',
     indexName: '中证红利低波100',
     etfCode: '159307',
-    indexPE,
+    indexPE: resolvedPE,
     indexPB,
-    dividendYield,
-    bond10Y,
-    spread: dividendYield != null && bond10Y != null ? dividendYield - bond10Y : null,
-    asOf: csIndex?.asOf || bondPayload?.quoteTime || new Date().toISOString(),
-    source: [csIndex?.source, bondPayload?.source, indexPB != null ? 'Eastmoney PB' : null].filter(Boolean).join(' + '),
+    dividendYield: resolvedDividendYield,
+    bond10Y: resolvedBond10Y,
+    spread: resolvedDividendYield - resolvedBond10Y,
+    asOf: stale ? (csIndex?.asOf || bondPayload?.quoteTime || lastVerifiedAnchorSnapshot.asOf) : (csIndex?.asOf || bondPayload?.quoteTime || new Date().toISOString()),
+    source: stale ? `${liveSource || '官方数据'} · 最近已验证快照` : liveSource,
+    stale,
+    warning: stale ? '上游行情暂时不可用，已使用最近一次中证/新浪已验证快照；恢复后会自动更新。' : null,
     sourceLinks: {
       index: csIndex?.sourceLinks?.index || 'https://quote.eastmoney.com/q/1.930955.html',
       bond: 'https://stock.finance.sina.com.cn/forex/globalbd/cn10yt.html',

@@ -356,16 +356,29 @@ async function fetchCnStockQuoteCached(market,ticker,force=false){
 }
 
 async function fetchAnchorMetrics(force=false){
-  const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
   const query=force?`?refresh=${Math.floor(Date.now()/900000)}`:'';
-  try{
-    const response=await fetch(`${proxyBase}/api/anchor-metrics${query}`,{signal:AbortSignal.timeout(9000),cache:force?'no-store':'default'});
-    if(!response.ok)throw new Error(`HTTP ${response.status}`);
-    return await response.json();
-  }catch(error){
-    console.warn('anchor metrics fetch:',error.message);
-    return null;
+  const bases=[localStorage.getItem('whl-cloud-url'),DEFAULT_CLOUD_URL,window.location.origin].filter(Boolean).filter((base,index,list)=>list.indexOf(base)===index);
+  for(const proxyBase of bases){
+    try{
+      const response=await fetch(`${proxyBase}/api/anchor-metrics${query}`,{signal:AbortSignal.timeout(9000),cache:force?'no-store':'default'});
+      if(response.ok)return await response.json();
+    }catch(error){console.warn('anchor metrics fetch:',proxyBase,error.message);}
   }
+  return null;
+}
+
+async function fetchAnchorEtfQuote(force=false){
+  const bases=[localStorage.getItem('whl-cloud-url'),DEFAULT_CLOUD_URL,window.location.origin].filter(Boolean).filter((base,index,list)=>list.indexOf(base)===index);
+  for(const proxyBase of bases){
+    try{
+      const cacheParam=force?`?refresh=${Math.floor(Date.now()/60000)}`:'';
+      const response=await fetch(`${proxyBase}/api/quote/159307.SZ${cacheParam}`,{signal:AbortSignal.timeout(8000),cache:force?'no-store':'default'});
+      if(!response.ok)continue;
+      const data=await response.json();
+      if(finitePrice(data?.price)>0)return{...data,price:finitePrice(data.price)};
+    }catch(error){console.warn('anchor ETF quote fetch:',proxyBase,error.message);}
+  }
+  return null;
 }
 
 async function fetchStockCloseOnDate(ticker,date,{force=false}={}){
@@ -4117,7 +4130,7 @@ function AnchorPanel({anchor,onChange,showToast}){
   const refresh=async()=>{
     if(refreshing)return;
     setRefreshing(true);
-    const [nextMetrics,nextQuote]=await Promise.all([fetchAnchorMetrics(true),fetchCnStockQuoteCached('CN','159307',true)]);
+    const [nextMetrics,nextQuote]=await Promise.all([fetchAnchorMetrics(true),fetchAnchorEtfQuote(true)]);
     if(nextMetrics){setMetrics(nextMetrics);onChange({...data,metrics:nextMetrics});}
     if(nextQuote?.price>0){setQuote(nextQuote);onChange({...data,metrics:nextMetrics||data.metrics,manualPrice:null});}
     if(!nextMetrics&&!nextQuote?.price)showToast('监控数据暂时不可用，可先手动录入',ACC.amber);
@@ -4125,14 +4138,14 @@ function AnchorPanel({anchor,onChange,showToast}){
   };
   useEffect(()=>{
     let alive=true;
-    const load=()=>Promise.all([fetchAnchorMetrics(false),fetchCnStockQuoteCached('CN','159307',false)]).then(([nextMetrics,nextQuote])=>{
+    const load=()=>Promise.all([fetchAnchorMetrics(false),fetchAnchorEtfQuote(false)]).then(([nextMetrics,nextQuote])=>{
       if(!alive)return;
       if(nextMetrics){setMetrics(nextMetrics);onChange({...data,metrics:nextMetrics});}
       if(nextQuote?.price>0)setQuote(nextQuote);
     });
     load();
     const timer=window.setInterval(async()=>{
-      const [nextMetrics,nextQuote]=await Promise.all([fetchAnchorMetrics(false),fetchCnStockQuoteCached('CN','159307',false)]);
+      const [nextMetrics,nextQuote]=await Promise.all([fetchAnchorMetrics(false),fetchAnchorEtfQuote(false)]);
       if(!alive)return;
       if(nextMetrics)setMetrics(nextMetrics);
       if(nextQuote?.price>0)setQuote(nextQuote);
@@ -4199,7 +4212,7 @@ function AnchorPanel({anchor,onChange,showToast}){
       <div className="anchor-metric-grid">
         {metricCards.map(([label,value,color,sub])=><div className="anchor-metric-card" key={label}><span>{label}</span><strong style={{color}}>{value}</strong><small>{sub}</small></div>)}
       </div>
-      <div className="anchor-data-bar"><span>数据状态：{metricSource}</span><span>最近更新：{formatAnchorDate(resolved.asOf)}</span><button className="btn btn-ghost" onClick={()=>{setOverride({indexPE:resolved.indexPE??'',indexPB:resolved.indexPB??'',dividendYield:resolved.dividendYield??'',bond10Y:resolved.bond10Y??''});setShowEditor(v=>!v);}}>{showEditor?'收起修正':'手动修正口径'}</button></div>
+      <div className="anchor-data-bar"><span>数据状态：{metricSource}</span><span>最近更新：{formatAnchorDate(resolved.asOf)}</span>{resolved.warning&&<span style={{color:ACC.amber}}>{resolved.warning}</span>}<button className="btn btn-ghost" onClick={()=>{setOverride({indexPE:resolved.indexPE??'',indexPB:resolved.indexPB??'',dividendYield:resolved.dividendYield??'',bond10Y:resolved.bond10Y??''});setShowEditor(v=>!v);}}>{showEditor?'收起修正':'手动修正口径'}</button></div>
       {showEditor&&<div className="anchor-editor card">
         <div className="anchor-editor-head"><strong>手动修正监控口径</strong><span>当官方/行情接口尚未更新时使用；保存后会标记为本机修正。</span></div>
         <div className="anchor-editor-grid">
