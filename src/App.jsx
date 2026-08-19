@@ -4189,6 +4189,8 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
   const [showForm,setShowForm]=useState(false);
   const [showEditor,setShowEditor]=useState(false);
   const [showDividendHistory,setShowDividendHistory]=useState(false);
+  const [editingPrice,setEditingPrice]=useState(false);
+  const [priceDraft,setPriceDraft]=useState('');
   const [form,setForm]=useState({type:'buy',date:today(),shares:'',price:'',amount:'',fee:'0',note:''});
   const [override,setOverride]=useState({indexPE:'',indexPB:'',dividendYield:'',bond10Y:''});
   const setFormValue=(key,value)=>setForm(prev=>({...prev,[key]:value}));
@@ -4215,7 +4217,7 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
 
   const applyFetchedAnchorData=(nextMetrics,nextQuote,nextDividendFeed,persist=true)=>{
     if(nextMetrics)setMetrics(nextMetrics);
-    if(nextQuote?.price>0)setQuote(nextQuote);
+    if(nextQuote?.price>0){setQuote(nextQuote);setEditingPrice(false);}
     if(nextDividendFeed)setDividendFeed(nextDividendFeed);
     if(persist&&(nextMetrics||nextQuote?.price>0||nextDividendFeed)){
       onChange({...data,metrics:nextMetrics||data.metrics,dividendFeed:nextDividendFeed||data.dividendFeed,manualPrice:nextQuote?.price>0?null:data.manualPrice});
@@ -4225,6 +4227,7 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
   const refresh=async()=>{
     if(refreshing)return;
     setRefreshing(true);
+    setEditingPrice(false);
     const [nextMetrics,nextQuote,nextDividendFeed]=await Promise.all([fetchAnchorMetrics(true),fetchAnchorEtfQuote(true),fetchAnchorDividends(true)]);
     applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed);
     if(!nextMetrics&&!nextQuote?.price&&!nextDividendFeed)showToast('监控数据暂时不可用，可先手动录入',ACC.amber);
@@ -4265,7 +4268,8 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
     onChange({...data,metricOverrides:next});
     setShowEditor(false);showToast('监控口径已保存',ACC.teal);
   };
-  const updateManualPrice=(value)=>{const price=finitePrice(value);onChange({...data,manualPrice:price});setQuote(price?{price,source:'manual'}:null);};
+  const beginManualPriceEdit=()=>{setPriceDraft(currentPrice??'');setEditingPrice(true);};
+  const saveManualPrice=()=>{const price=finitePrice(priceDraft);if(!(price>0))return;onChange({...data,manualPrice:price});setQuote({price,source:'manual'});setEditingPrice(false);};
   const metricSource=resolved.source||'最近快照 / 手动修正';
   const metricCards=[
     ['930955 滚动 PE',resolved.indexPE!=null?`${fmt(resolved.indexPE,2)}x`:'—',ACC.purple,'指数估值'],
@@ -4325,7 +4329,7 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
       <div className="anchor-two-col">
         <div className="glass-card anchor-card anchor-portfolio-card">
           <div className="anchor-card-head"><div><span className="section-label">159307 · 博时红利低波100</span><h3>我的底仓</h3></div><span className="anchor-ticker">159307.SZ</span></div>
-          <div className="anchor-portfolio-price"><div><span>最新价</span><strong>{currentPrice==null?'—':`¥${fmtPrice(currentPrice)}`}</strong><small>{quote?.source==='manual'?'手动录入':quote?.source||'行情同步中'}</small></div><NumField label="手动现价" value={data.manualPrice??''} onChange={updateManualPrice} prefix="¥" placeholder="接口失败时录入"/></div>
+          <div className="anchor-portfolio-price"><div className="anchor-price-block"><div className="anchor-price-label"><span>最新价</span>{!editingPrice&&<button className="btn btn-ghost anchor-price-edit-btn" onClick={beginManualPriceEdit}>手动修改</button>}</div>{editingPrice?<div className="anchor-price-edit"><NumField label="" value={priceDraft} onChange={setPriceDraft} prefix="¥" placeholder={currentPrice?fmtPrice(currentPrice):'输入价格'}/><button className="btn btn-primary" onClick={saveManualPrice}>保存</button><button className="btn btn-ghost" onClick={()=>setEditingPrice(false)}>取消</button></div>:<strong>{currentPrice==null?'—':`¥${fmtPrice(currentPrice)}`}</strong>}<small>{quote?.source==='manual'?'手动修改 · 刷新后自动恢复行情':quote?.source||'行情同步中'}</small></div></div>
           <div className="anchor-portfolio-grid">
             <Stat label="当前份额" value={portfolio.shares?fmt(portfolio.shares,0):'—'} sub="份" color={ACC.teal}/>
             <Stat label="持仓市值" value={portfolio.value==null?'—':`¥${fmt(portfolio.value,2)}`} sub="按现价估算" color={V('ink')}/>
