@@ -4073,11 +4073,11 @@ const ANCHOR_DEFAULT={
 };
 
 function anchorAction(spread){
-  if(spread==null)return{label:'等待数据',short:'WAIT',color:ACC.blue,score:null,desc:'补齐股息率与 10 年国债收益率后再判断'};
-  if(spread>3)return{label:'适当加码',short:'ADD',color:ACC.profit,score:86,desc:'股债息差进入价值区，按计划增加一档'};
-  if(spread>=2)return{label:'正常定投',short:'KEEP',color:ACC.blue,score:68,desc:'维持基础定投，不追涨、不择时'};
-  if(spread>=1.5)return{label:'谨慎定投',short:'CAUTION',color:ACC.amber,score:48,desc:'处于缓冲区，可小额执行并等待息差扩大'};
-  return{label:'暂停买入',short:'PAUSE',color:ACC.loss,score:22,desc:'息差偏窄，暂停新增买入，分红到账仍按计划再投'};
+  if(spread==null)return{label:'等待数据',emoji:'⏳',short:'WAIT',color:ACC.blue,score:null,desc:'补齐股息率与 10 年国债收益率后再判断'};
+  if(spread>3)return{label:'适当加码',emoji:'🟢',short:'ADD',color:ACC.profit,score:86,desc:'股债息差进入价值区，按计划增加一档'};
+  if(spread>=2)return{label:'正常定投',emoji:'🔵',short:'KEEP',color:ACC.blue,score:68,desc:'维持基础定投，不追涨、不择时'};
+  if(spread>=1.5)return{label:'谨慎定投',emoji:'🟡',short:'CAUTION',color:ACC.amber,score:48,desc:'处于缓冲区，可小额执行并等待息差扩大'};
+  return{label:'暂停买入',emoji:'🔴',short:'PAUSE',color:ACC.loss,score:22,desc:'息差偏窄，暂停新增买入，分红到账仍按计划再投'};
 }
 
 function calcAnchorPortfolio(transactions,currentPrice){
@@ -4184,10 +4184,10 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
     ['中债 / CN10Y 10Y',resolved.bond10Y!=null?`${fmt(resolved.bond10Y,2)}%`:'—',ACC.amber,'债券收益率'],
   ];
   const sentimentRows=[
-    ['> 3.0%','适当加码','价值区间',ACC.profit],
-    ['2.0% – 3.0%','正常定投','基础档位',ACC.blue],
-    ['1.5% – 2.0%','谨慎定投','缓冲区间',ACC.amber],
-    ['< 1.5%','暂停买入','息差偏窄',ACC.loss],
+    ['> 3.0%','适当加码','价值区间',ACC.profit,'🟢'],
+    ['2.0% – 3.0%','正常定投','基础档位',ACC.blue,'🔵'],
+    ['1.5% – 2.0%','谨慎定投','缓冲区间',ACC.amber,'🟡'],
+    ['< 1.5%','暂停买入','息差偏窄',ACC.loss,'🔴'],
   ];
   return(
     <div className="anchor-panel anim-in">
@@ -4198,6 +4198,7 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
           <p>以博时红利低波100为人民币定投底仓；分红到账当天，全额手动再买入。</p>
         </div>
         <div className="anchor-hero-actions">
+          <span className="anchor-badge anchor-badge-cn">A股</span>
           <span className="anchor-badge">人民币定投</span><span className="anchor-badge">分红再投</span>
           <button className="btn btn-primary" onClick={refresh} disabled={refreshing}>{refreshing?'同步中…':'↻ 刷新监控'}</button>
         </div>
@@ -4206,7 +4207,7 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
       <div className="anchor-signal" style={{'--anchor-color':action.color}}>
         <div className="anchor-signal-main">
           <span className="section-label">当前情绪 / 执行动作</span>
-          <strong>{action.label}</strong>
+          <strong><span className="anchor-action-emoji" aria-hidden="true">{action.emoji}</span>{action.label}</strong>
           <p>{action.desc}</p>
         </div>
         <div className="anchor-spread"><span>股债息差</span><b>{fmtAnchorPct(spread)}</b><small>股息率 − 10Y</small></div>
@@ -4231,7 +4232,7 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
       <div className="anchor-two-col">
         <div className="glass-card anchor-card">
           <div className="anchor-card-head"><div><span className="section-label">股债息差情绪表</span><h3>今天该不该买？</h3></div><span className="anchor-rule">规则化执行</span></div>
-          <div className="anchor-sentiment-table"><div className="anchor-sentiment-head"><span>息差区间</span><span>动作</span><span>含义</span></div>{sentimentRows.map(([range,label,meaning,color])=><div key={range} className={`anchor-sentiment-row ${action.label===label?'active':''}`} style={{'--row-color':color}}><b>{range}</b><strong>{label}</strong><span>{meaning}</span>{action.label===label&&<i>当前</i>}</div>)}</div>
+          <div className="anchor-sentiment-table"><div className="anchor-sentiment-head"><span>息差区间</span><span>动作</span><span>含义</span></div>{sentimentRows.map(([range,label,meaning,color,emoji])=><div key={range} className={`anchor-sentiment-row ${action.label===label?'active':''}`} style={{'--row-color':color}}><b>{range}</b><strong><span className="anchor-row-emoji" aria-hidden="true">{emoji}</span>{label}</strong><span>{meaning}</span>{action.label===label&&<i>当前</i>}</div>)}</div>
           <p className="anchor-note">公式：股债息差 = 930955 股息率（TTM） − 中国 10 年期国债收益率。1.5%–2.0% 是你给出的规则之间的缓冲带，默认采用谨慎定投。</p>
         </div>
         <div className="glass-card anchor-card anchor-portfolio-card">
