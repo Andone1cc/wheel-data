@@ -371,7 +371,9 @@ async function fetchAnchorMetrics() {
   const indexPE = csIndex?.indexPE ?? anchorScaled(index.f164 ?? index.f162);
   const indexPB = anchorScaled(index.f167, 5) ?? pbPayload?.value ?? null;
   const dividendYield = csIndex?.dividendYield ?? anchorScaled(index.f173);
-  const bond10Y = bondPayload?.value ?? anchorScaled(indexPayload?.data?.f43);
+  // f43 是指数点位，不是债券收益率；新浪失败时必须走已验证快照，
+  // 不能把 930955 的点位误当成 CN10Y 百分比。
+  const bond10Y = bondPayload?.value ?? null;
   const stale = indexPE == null || dividendYield == null || bond10Y == null;
   const resolvedPE = indexPE ?? lastVerifiedAnchorSnapshot.indexPE;
   const resolvedDividendYield = dividendYield ?? lastVerifiedAnchorSnapshot.dividendYield;
