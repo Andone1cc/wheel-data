@@ -249,12 +249,81 @@ async function fetchExchangeRateQuote(ticker) {
   });
 }
 
-// “压舱石”监控数据：指数估值取东方财富公开行情字段，10 年期国债取其
-// 全球债券行情页对应的 CN10Y 品种。接口失败时前端仍保留最近快照，并允许手动修正。
+// “压舱石”监控数据：930955 的 PE / 股息率优先取中证指数官方数据文件，
+// 10 年期国债优先取新浪公开 CN10YT 行情，东方财富只作为 PB 的补充源。
 function anchorScaled(value, threshold = 20) {
   const n = finiteNumber(value);
   if (n == null) return null;
   return Math.abs(n) > threshold ? n / 100 : n;
+}
+
+async function fetchSinaAnchorBondYield() {
+  const raw = await fetchText('https://hq.sinajs.cn/list=globalbd_cn10yt', {
+    headers: {
+      'User-Agent': BROWSER_USER_AGENT,
+      Referer: 'https://stock.finance.sina.com.cn/forex/globalbd/cn10yt.html',
+    },
+    timeoutMs: 5000,
+    attempts: 1,
+  });
+  const match = /globalbd_cn10yt="([^"]*)"/.exec(raw);
+  const fields = match ? match[1].split(',') : [];
+  const value = finiteNumber(fields[1]);
+  if (!(value > 0)) throw new Error('新浪 CN10YT 无有效收益率');
+  return {
+    value,
+    quoteTime: fields[12] && fields[13] ? `${fields[12]}T${fields[13]}+08:00` : null,
+    source: 'Sina CN10YT',
+  };
+}
+
+async function fetchCsIndexAnchorValuation() {
+  const now = new Date();
+  const start = new Date(now.getTime() - 20 * 86400000).toISOString().slice(0, 10).replace(/-/g, '');
+  const end = now.toISOString().slice(0, 10).replace(/-/g, '');
+  const [perfPayload, indicatorBuffer] = await Promise.all([
+    fetchJson(`https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode=930955&startDate=${start}&endDate=${end}`, {
+      headers: { 'User-Agent': BROWSER_USER_AGENT, Accept: 'application/json' },
+      timeoutMs: 6500,
+      attempts: 1,
+    }).catch(() => null),
+    fetchUpstream('https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/file/autofile/indicator/930955indicator.xls', {
+      headers: { 'User-Agent': BROWSER_USER_AGENT, Accept: 'application/vnd.ms-excel' },
+      timeoutMs: 6500,
+      attempts: 1,
+    }, 'arrayBuffer').catch(() => null),
+  ]);
+  const perfRows = Array.isArray(perfPayload?.data) ? perfPayload.data : [];
+  const perf = [...perfRows].sort((a, b) => String(b.tradeDate || '').localeCompare(String(a.tradeDate || '')))[0] || {};
+  let indicator = {};
+  if (indicatorBuffer) {
+    try {
+      const XLSX = require('xlsx');
+      const workbook = XLSX.read(Buffer.from(indicatorBuffer), { type: 'buffer' });
+      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, raw: true });
+      const row = rows.slice(1).find(item => String(item?.[1] || '') === '930955') || rows[1] || [];
+      indicator = {
+        date: row[0] ? String(row[0]) : null,
+        pe: finiteNumber(row[6]),
+        dividendYield: finiteNumber(row[9]) ?? finiteNumber(row[8]),
+      };
+    } catch (error) {
+      console.warn('CSIndex indicator parse:', error.message);
+    }
+  }
+  const indexPE = indicator.pe ?? finiteNumber(perf.peg);
+  const dividendYield = indicator.dividendYield;
+  if (indexPE == null && dividendYield == null) throw new Error('中证指数官方估值暂时不可用');
+  return {
+    indexPE,
+    dividendYield,
+    asOf: indicator.date || perf.tradeDate || null,
+    source: 'CSIndex official',
+    sourceLinks: {
+      index: 'https://www.csindex.com.cn/zh-CN/indices/index-detail/930955#/indices/family/detail?indexCode=930955',
+      indicator: 'https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/file/autofile/indicator/930955indicator.xls',
+    },
+  };
 }
 
 async function fetchAnchorMetrics() {
@@ -267,19 +336,14 @@ async function fetchAnchorMetrics() {
     'https://push2.eastmoney.com/api/qt/stock/get?secid=1.930955&fields=f58,f43,f57,f162,f164,f167,f173,f124',
     { headers, timeoutMs: 5500, attempts: 1 },
   ).catch(() => null);
-  const bondRequest = fetchJson(
-    'https://push2.eastmoney.com/api/qt/stock/get?secid=171.CN10Y&fields=f58,f43,f57,f169,f170,f124',
-    { headers, timeoutMs: 5500, attempts: 1 },
-  ).catch(() => null);
-  const [indexPayload, bondPayload] = await Promise.all([indexRequest, bondRequest]);
+  const bondRequest = fetchSinaAnchorBondYield().catch(() => null);
+  const csIndexRequest = fetchCsIndexAnchorValuation().catch(() => null);
+  const [indexPayload, bondPayload, csIndex] = await Promise.all([indexRequest, bondRequest, csIndexRequest]);
   const index = indexPayload?.data || {};
-  const bond = bondPayload?.data || {};
-  // 不同公开接口版本对 f162/f164 的命名略有差异：优先取 TTM 字段，
-  // 缺失时回退到动态 PE，前端仍显示“滚动 PE”作为策略口径。
-  const indexPE = anchorScaled(index.f164 ?? index.f162);
+  const indexPE = csIndex?.indexPE ?? anchorScaled(index.f164 ?? index.f162);
   const indexPB = anchorScaled(index.f167, 5);
-  const dividendYield = anchorScaled(index.f173);
-  const bond10Y = anchorScaled(bond.f43);
+  const dividendYield = csIndex?.dividendYield ?? anchorScaled(index.f173);
+  const bond10Y = bondPayload?.value ?? anchorScaled(indexPayload?.data?.f43);
   const hasIndex = [indexPE, indexPB, dividendYield].some((value) => value != null);
   if (!hasIndex && bond10Y == null) throw new Error('监控数据暂时不可用');
   return {
@@ -291,11 +355,11 @@ async function fetchAnchorMetrics() {
     dividendYield,
     bond10Y,
     spread: dividendYield != null && bond10Y != null ? dividendYield - bond10Y : null,
-    asOf: new Date().toISOString(),
-    source: 'Eastmoney public quote',
+    asOf: csIndex?.asOf || bondPayload?.quoteTime || new Date().toISOString(),
+    source: [csIndex?.source, bondPayload?.source, indexPB != null ? 'Eastmoney PB' : null].filter(Boolean).join(' + '),
     sourceLinks: {
-      index: 'https://quote.eastmoney.com/q/1.930955.html',
-      bond: 'https://quote.eastmoney.com/q/171.CN10Y.html',
+      index: csIndex?.sourceLinks?.index || 'https://quote.eastmoney.com/q/1.930955.html',
+      bond: 'https://stock.finance.sina.com.cn/forex/globalbd/cn10yt.html',
       chinabond: 'https://yield.chinabond.com.cn/cbweb-cbrc-web/cbrc/showCbrc',
     },
   };
