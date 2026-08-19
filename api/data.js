@@ -1,3 +1,5 @@
+const XLSX = require('xlsx');
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
@@ -298,7 +300,6 @@ async function fetchCsIndexAnchorValuation() {
   let indicator = {};
   if (indicatorBuffer) {
     try {
-      const XLSX = require('xlsx');
       const workbook = XLSX.read(Buffer.from(indicatorBuffer), { type: 'buffer' });
       const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, raw: true });
       const row = rows.slice(1).find(item => String(item?.[1] || '') === '930955') || rows[1] || [];
