@@ -4203,8 +4203,13 @@ function usAnchorAction(percentile){
 }
 
 function UsAnchorChart({rows}){
+  const [activeIndex,setActiveIndex]=useState(Math.max(0,rows.length-1));
+  const [pointerY,setPointerY]=useState(null);
+  const [dragging,setDragging]=useState(false);
   const width=1000,height=360,left=55,right=18,top=20,bottom=38;
   if(!rows.length)return <div className="anchor-empty">美股收益率历史数据尚未同步。</div>;
+  const clamp=(value,minValue,maxValue)=>Math.min(maxValue,Math.max(minValue,value));
+  const safeIndex=clamp(activeIndex,0,rows.length-1);
   const keys=[['tenY','10Y','var(--us-teny)'],['oneY','1Y','var(--us-oney)'],['spread','利差','var(--us-spread)']];
   const values=rows.flatMap(row=>keys.map(([key])=>Number(row[key]))).filter(Number.isFinite);
   const rawMin=Math.min(...values),rawMax=Math.max(...values),padding=Math.max((rawMax-rawMin)*.08,.25);
@@ -4216,11 +4221,43 @@ function UsAnchorChart({rows}){
   };
   const grid=Array.from({length:5},(_,index)=>{const value=max-(max-min)*index/4;return{value,y:top+plotHeight*index/4};});
   const tickIndexes=[0,Math.floor((rows.length-1)/2),rows.length-1];
+  const activeRow=rows[safeIndex];
+  const activeX=left+(rows.length===1?plotWidth/2:safeIndex/(rows.length-1)*plotWidth);
+  const spreadY=top+(max-Number(activeRow.spread))/(max-min)*plotHeight;
+  const pointerValue=pointerY==null?null:max-(pointerY-top)/plotHeight*(max-min);
+  const updatePointer=(event)=>{
+    const rect=event.currentTarget.getBoundingClientRect();
+    const svgX=clamp((event.clientX-rect.left)/rect.width*width,0,width);
+    const svgY=clamp((event.clientY-rect.top)/rect.height*height,0,height);
+    const x=clamp((svgX-left)/plotWidth,0,1);
+    const y=clamp((svgY-top)/plotHeight,0,1);
+    setActiveIndex(Math.round(x*(rows.length-1)));
+    setPointerY(top+y*plotHeight);
+  };
+  const handlePointerDown=(event)=>{
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setDragging(true);
+    updatePointer(event);
+  };
+  const handlePointerUp=(event)=>{
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    setDragging(false);
+  };
+  const tooltipWidth=205,tooltipHeight=112;
+  const tooltipX=activeX>width-right-tooltipWidth?activeX-tooltipWidth-14:activeX+14;
+  const tooltipY=top+12;
   return <div className="us-anchor-chart-wrap">
-    <svg className="us-anchor-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="美国10年期、1年期国债收益率及利差图表">
+    <div className="us-anchor-chart-hint">悬停或点击查看实际值 · 按住拖动浏览时间序列</div>
+    <svg className={`us-anchor-chart${dragging?' is-dragging':''}`} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="美国10年期、1年期国债收益率及利差图表" onPointerMove={updatePointer} onPointerDown={handlePointerDown} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onPointerLeave={()=>{if(!dragging)setPointerY(null);}}>
       {grid.map(line=><g key={line.value}><line x1={left} x2={width-right} y1={line.y} y2={line.y} className="us-anchor-grid-line"/><text x={left-10} y={line.y+4} textAnchor="end" className="us-anchor-axis-label">{line.value.toFixed(1)}%</text></g>)}
       {tickIndexes.map(index=><text key={index} x={left+(rows.length===1?plotWidth/2:index/(rows.length-1)*plotWidth)} y={height-10} textAnchor={index===0?'start':index===rows.length-1?'end':'middle'} className="us-anchor-axis-label">{rows[index].date}</text>)}
       {keys.map(([key,label,color])=><polyline key={key} points={rows.map((row,index)=>point(row,index,key)).join(' ')} fill="none" stroke={color} strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"><title>{label}</title></polyline>)}
+      <line x1={activeX} x2={activeX} y1={top} y2={top+plotHeight} className="us-anchor-crosshair"/>
+      <line x1={left} x2={width-right} y1={spreadY} y2={spreadY} className="us-anchor-crosshair us-anchor-crosshair-horizontal"/>
+      {keys.map(([key,,color])=><circle key={key} cx={activeX} cy={top+(max-Number(activeRow[key]))/(max-min)*plotHeight} r="5" fill={color} className="us-anchor-point"/>) }
+      {pointerY!=null&&<><line x1={left} x2={width-right} y1={pointerY} y2={pointerY} className="us-anchor-pointer-line"/><text x={left-10} y={pointerY+4} textAnchor="end" className="us-anchor-pointer-label">{pointerValue.toFixed(2)}%</text></>}
+      <g className="us-anchor-tooltip" transform={`translate(${tooltipX},${tooltipY})`} pointerEvents="none"><rect width={tooltipWidth} height={tooltipHeight} rx="10"/><text x="13" y="22" className="us-anchor-tooltip-date">{activeRow.date}</text><text x="13" y="46" className="us-anchor-tooltip-value"><tspan fill="var(--us-teny)">10Y {Number(activeRow.tenY).toFixed(2)}%</tspan><tspan x="13" dy="20" fill="var(--us-oney)">1Y {Number(activeRow.oneY).toFixed(2)}%</tspan><tspan x="13" dy="20" fill="var(--us-spread)">利差 {Number(activeRow.spread).toFixed(2)}%</tspan></text></g>
+      <rect x={left} y={top} width={plotWidth} height={plotHeight} fill="transparent" className="us-anchor-hit-area"/>
     </svg>
     <div className="us-anchor-chart-legend">{keys.map(([,label,color])=><span key={label}><i style={{background:color}}/>{label}</span>)}</div>
   </div>;
