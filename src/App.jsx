@@ -4202,6 +4202,14 @@ function usAnchorAction(percentile){
   return{label:'不加码',emoji:'🔴',color:ACC.loss,desc:'利差处于历史低位，保持现金弹性，不因“便宜”一次性下注'};
 }
 
+function vixAction(value){
+  if(!(value>0))return{label:'等待数据',emoji:'⏳',color:ACC.blue,desc:'VIX 数据尚未同步'};
+  if(value>=40)return{label:'极端恐慌 · 强力加仓',emoji:'🟥',color:'#8f1d2c',desc:'进入极端恐慌区，可分批大幅加仓；保留现金，不建议一次性梭哈'};
+  if(value>=30)return{label:'果断加仓',emoji:'🔴',color:ACC.loss,desc:'恐慌显著升温，可在计划额度内果断加仓'};
+  if(value>=25)return{label:'开启定投',emoji:'🟠',color:'#f97316',desc:'波动率超过 25，开启基础定投，等待更高恐慌区间'};
+  return{label:'等待机会',emoji:'🔵',color:ACC.blue,desc:'VIX 低于 25，维持观察，不因平静行情追高'};
+}
+
 function UsAnchorChart({rows}){
   const [activeIndex,setActiveIndex]=useState(Math.max(0,rows.length-1));
   const [pointerY,setPointerY]=useState(null);
@@ -4270,11 +4278,16 @@ function UsAnchorPanel({data}){
   const current=data?.current||{};
   const history=data?.history||{};
   const action=usAnchorAction(Number.isFinite(Number(history.percentile))?Number(history.percentile):null);
+  const vix=Number(data?.current?.vix);
+  const vixSignal=vixAction(vix);
+  const vixPosition=Number.isFinite(vix)?Math.min(100,Math.max(0,vix/60*100)):0;
+  const vixChange=Number(data?.vixHistory?.change5d);
   const pct=(value)=>Number.isFinite(Number(value))?`${Number(value).toFixed(2)}%`:'—';
   const cards=[['10Y 收益率',pct(current.tenY),'var(--us-teny)','美国10年期国债'],['1Y 收益率',pct(current.oneY),'var(--us-oney)','美国1年期国债'],['10Y − 1Y 利差',pct(current.spread),'var(--us-spread)','期限利差 · 百分点'],['历史分位',history.percentile==null?'—':`${Number(history.percentile).toFixed(1)}%`,action.color,'全样本可用数据']];
   return <div className="us-anchor-panel">
     <div className="us-anchor-head"><div><span className="section-label">US INCOME BASE · TREASURY SPREAD</span><h3>美股利差策略</h3><p>用美国 10Y − 1Y 国债收益率利差观察宏观期限结构；作为美股定投的节奏参考，不替代估值和风险管理。</p></div></div>
     <div className="us-anchor-summary">{cards.map(([label,value,color,sub])=><div className="us-anchor-summary-card" key={label}><span>{label}</span><strong style={{color}}>{value}</strong><small>{sub}</small></div>)}</div>
+    <div className="glass-card us-vix-card" style={{'--vix-color':vixSignal.color}}><div className="us-vix-head"><div><span className="section-label">CBOE VIX · 恐慌仪表盘</span><h3>不看曲线，就盯 VIX</h3></div><div className="us-vix-links"><a href={data?.sourceLinks?.etfMonitor||'https://www.etfmonitor.cn/market-sentiment'} target="_blank" rel="noopener">ETF Monitor 参考</a><a href={data?.sourceLinks?.vix||'https://fred.stlouisfed.org/series/VIXCLS'} target="_blank" rel="noopener">FRED VIXCLS</a></div></div><div className="us-vix-main"><div className="us-vix-reading"><strong>{Number.isFinite(vix)?vix.toFixed(2):'—'}</strong><span>VIX 点位 · {data?.current?.vixDate||data?.asOf||'—'}</span></div><div className="us-vix-meter"><div className="us-vix-meter-track"><span className="us-vix-segment vix-low"/><span className="us-vix-segment vix-start"/><span className="us-vix-segment vix-add"/><span className="us-vix-segment vix-extreme"/><i style={{left:`${vixPosition}%`}}/></div><div className="us-vix-meter-labels"><span>0</span><span>25 开始定投</span><span>30 加仓</span><span>40 极端</span><span>60+</span></div></div><div className="us-vix-signal"><strong><span className="anchor-action-emoji" aria-hidden="true">{vixSignal.emoji}</span>{vixSignal.label}</strong><p>{vixSignal.desc}</p></div></div><div className="us-vix-stats"><span>近 5 日变化 <b style={{color:vixChange>0?ACC.loss:vixChange<0?ACC.profit:V('dim')}}>{Number.isFinite(vixChange)?`${vixChange>=0?'+':''}${vixChange.toFixed(2)} 点`:'—'}</b></span><span>近 10 年分位 <b>{data?.vixHistory?.percentile==null?'—':`${Number(data.vixHistory.percentile).toFixed(1)}%`}</b></span><span>执行口径 <b>25 / 30 / 40</b></span></div></div>
     <div className="us-anchor-action" style={{'--anchor-color':action.color}}><div className="us-anchor-action-main"><span className="section-label">当前情绪 / 执行动作</span><strong><span className="anchor-action-emoji" aria-hidden="true">{action.emoji}</span>{action.label}</strong><p>{action.desc}</p></div><div className="us-anchor-action-meta"><span>最新日期 <b>{current.date||'—'}</b></span><span>历史分位 <b>{history.percentile==null?'—':`${Number(history.percentile).toFixed(1)}%`}</b></span></div></div>
     <div className="glass-card us-anchor-chart-card"><div className="anchor-card-head"><div><span className="section-label">美国国债收益率曲线</span><h3>10Y、1Y 与期限利差</h3></div><div className="us-anchor-range-tabs">{['1Y','3Y','5Y'].map(item=><button key={item} className={range===item?'active':''} onClick={()=>setRange(item)}>{item}</button>)}</div></div><UsAnchorChart rows={rangeRows}/></div>
     <div className="us-anchor-rule-grid"><div className="glass-card us-anchor-rule-card"><span className="section-label">分位数执行框架</span><h3>把宏观信号变成节奏</h3><p><b>低于 50%</b>：基础定投；<b>50%–75%</b>：正常观察；<b>75%–90%</b>：分段加码；<b>高于 90%</b>：只有在 10Y 没有单边急升、趋势确认后才加码。</p></div><div className="glass-card us-anchor-rule-card"><span className="section-label">数据口径</span><h3>官方日频 · 可追溯</h3><p>利差 = 美国 10Y 国债收益率 − 1Y 国债收益率。历史分位按 FRED 可用的 10Y/1Y 配对样本计算；当前数据截至 {data?.asOf||'—'}。</p><div className="us-anchor-links"><a href={data?.sourceLinks?.fred10||'https://fred.stlouisfed.org/series/DGS10'} target="_blank" rel="noopener">FRED DGS10</a><a href={data?.sourceLinks?.fred1||'https://fred.stlouisfed.org/series/DGS1'} target="_blank" rel="noopener">FRED DGS1</a><a href={data?.sourceLinks?.treasury||'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?page=1&type=daily_treasury_yield_curve'} target="_blank" rel="noopener">美国财政部备查</a></div></div></div>

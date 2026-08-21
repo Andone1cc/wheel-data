@@ -445,14 +445,18 @@ async function fetchAnchorMetrics() {
 // 美股利差监控使用 FRED 的官方 H.15 日频序列：10Y Treasury Constant Maturity
 // 减去 1Y Treasury Constant Maturity。FRED CSV 不需要登录，适合服务端定时读取。
 async function fetchUsAnchorYields() {
-  const raw = await fetchText('https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10,DGS1', {
+  const requestOptions = {
     headers: {
       'User-Agent': 'Mozilla/5.0',
       Accept: 'text/csv,text/plain,*/*',
     },
     timeoutMs: 20000,
     attempts: 1,
-  });
+  };
+  const [raw, vixRaw] = await Promise.all([
+    fetchText('https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10,DGS1', requestOptions),
+    fetchText('https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS', requestOptions),
+  ]);
   const lines = String(raw || '').trim().split(/\r?\n/).filter(Boolean);
   if (lines.length < 2) throw new Error('FRED 收益率序列为空');
   const headers = lines.shift().split(',');
@@ -460,17 +464,32 @@ async function fetchUsAnchorYields() {
   const tenIndex = headers.indexOf('DGS10');
   const oneIndex = headers.indexOf('DGS1');
   if (dateIndex < 0 || tenIndex < 0 || oneIndex < 0) throw new Error('FRED CSV 字段不完整');
+  const vixLines = String(vixRaw || '').trim().split(/\r?\n/).filter(Boolean);
+  if (vixLines.length < 2) throw new Error('FRED VIX 序列为空');
+  const vixHeaders = vixLines.shift().split(',');
+  const vixDateIndex = vixHeaders.indexOf('observation_date');
+  const vixValueIndex = vixHeaders.indexOf('VIXCLS');
+  if (vixDateIndex < 0 || vixValueIndex < 0) throw new Error('FRED VIX 字段不完整');
+  const vixByDate = new Map(vixLines.map((line) => {
+    const fields = line.split(',');
+    const value = fields[vixValueIndex] === '' ? null : finiteNumber(fields[vixValueIndex]);
+    return [fields[vixDateIndex], value];
+  }).filter(([date, value]) => /^\d{4}-\d{2}-\d{2}$/.test(String(date || '')) && value != null));
   const allRows = lines.map((line) => {
     const fields = line.split(',');
     const date = fields[dateIndex];
     const tenY = fields[tenIndex] === '' ? null : finiteNumber(fields[tenIndex]);
     const oneY = fields[oneIndex] === '' ? null : finiteNumber(fields[oneIndex]);
+    const vix = vixByDate.get(date) ?? null;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || '')) || tenY == null || oneY == null) return null;
-    return { date, tenY, oneY, spread: tenY - oneY };
+    return { date, tenY, oneY, spread: tenY - oneY, vix };
   }).filter(Boolean);
   if (!allRows.length) throw new Error('FRED 没有可用的 10Y / 1Y 配对数据');
+  const vixRows = allRows.filter((row) => row.vix != null);
+  if (!vixRows.length) throw new Error('FRED 没有可用的 VIX 数据');
   const spreads = allRows.map((row) => row.spread).sort((a, b) => a - b);
   const latest = allRows[allRows.length - 1];
+  const latestVix = vixRows[vixRows.length - 1];
   const percentileRank = (value) => {
     const count = spreads.filter((item) => item <= value).length;
     return spreads.length > 1 ? (count - 1) / (spreads.length - 1) * 100 : 50;
@@ -483,6 +502,13 @@ async function fetchUsAnchorYields() {
     return spreads[lower] + (spreads[upper] - spreads[lower]) * (position - lower);
   };
   const round = (value, digits = 3) => Number(Number(value).toFixed(digits));
+  const vixReference = vixRows.slice(-2520);
+  const vixValues = vixReference.map((row) => row.vix).sort((a, b) => a - b);
+  const vixPercentile = (value) => {
+    const count = vixValues.filter((item) => item <= value).length;
+    return vixValues.length > 1 ? (count - 1) / (vixValues.length - 1) * 100 : 50;
+  };
+  const fiveDaysAgo = vixRows[Math.max(0, vixRows.length - 6)];
   return {
     symbol: 'US10Y1Y',
     rows: allRows.slice(-1300).map((row) => ({
@@ -490,12 +516,15 @@ async function fetchUsAnchorYields() {
       tenY: round(row.tenY),
       oneY: round(row.oneY),
       spread: round(row.spread),
+      vix: row.vix == null ? null : round(row.vix),
     })),
     current: {
       date: latest.date,
       tenY: round(latest.tenY),
       oneY: round(latest.oneY),
       spread: round(latest.spread),
+      vix: round(latestVix.vix, 2),
+      vixDate: latestVix.date,
     },
     history: {
       count: allRows.length,
@@ -507,11 +536,20 @@ async function fetchUsAnchorYields() {
       min: round(spreads[0]),
       max: round(spreads[spreads.length - 1]),
     },
+    vixHistory: {
+      count: vixReference.length,
+      percentile: round(vixPercentile(latestVix.vix), 1),
+      change5d: round(latestVix.vix - fiveDaysAgo.vix, 2),
+      min: round(vixValues[0], 2),
+      max: round(vixValues[vixValues.length - 1], 2),
+    },
     asOf: latest.date,
     source: 'FRED / Federal Reserve H.15',
     sourceLinks: {
       fred10: 'https://fred.stlouisfed.org/series/DGS10',
       fred1: 'https://fred.stlouisfed.org/series/DGS1',
+      vix: 'https://fred.stlouisfed.org/series/VIXCLS',
+      etfMonitor: 'https://www.etfmonitor.cn/market-sentiment',
       treasury: 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?page=1&type=daily_treasury_yield_curve',
     },
     stale: false,
