@@ -4226,7 +4226,7 @@ function UsAnchorChart({rows}){
   </div>;
 }
 
-function UsAnchorPanel({data,onRefresh,refreshing}){
+function UsAnchorPanel({data}){
   const [range,setRange]=useState('1Y');
   const rows=Array.isArray(data?.rows)?data.rows:[];
   const rangeRows=range==='5Y'?rows:range==='3Y'?rows.slice(-780):rows.slice(-260);
@@ -4236,7 +4236,7 @@ function UsAnchorPanel({data,onRefresh,refreshing}){
   const pct=(value)=>Number.isFinite(Number(value))?`${Number(value).toFixed(2)}%`:'—';
   const cards=[['10Y 收益率',pct(current.tenY),'var(--us-teny)','美国10年期国债'],['1Y 收益率',pct(current.oneY),'var(--us-oney)','美国1年期国债'],['10Y − 1Y 利差',pct(current.spread),'var(--us-spread)','期限利差 · 百分点'],['历史分位',history.percentile==null?'—':`${Number(history.percentile).toFixed(1)}%`,action.color,'全样本可用数据']];
   return <div className="us-anchor-panel">
-    <div className="us-anchor-head"><div><span className="section-label">US INCOME BASE · TREASURY SPREAD</span><h3>美股利差策略</h3><p>用美国 10Y − 1Y 国债收益率利差观察宏观期限结构；作为美股定投的节奏参考，不替代估值和风险管理。</p></div><button className="btn btn-primary" onClick={onRefresh} disabled={refreshing}>{refreshing?'同步中…':'↻ 刷新数据'}</button></div>
+    <div className="us-anchor-head"><div><span className="section-label">US INCOME BASE · TREASURY SPREAD</span><h3>美股利差策略</h3><p>用美国 10Y − 1Y 国债收益率利差观察宏观期限结构；作为美股定投的节奏参考，不替代估值和风险管理。</p></div></div>
     <div className="us-anchor-summary">{cards.map(([label,value,color,sub])=><div className="us-anchor-summary-card" key={label}><span>{label}</span><strong style={{color}}>{value}</strong><small>{sub}</small></div>)}</div>
     <div className="us-anchor-action" style={{'--anchor-color':action.color}}><div className="us-anchor-action-main"><span className="section-label">当前情绪 / 执行动作</span><strong><span className="anchor-action-emoji" aria-hidden="true">{action.emoji}</span>{action.label}</strong><p>{action.desc}</p></div><div className="us-anchor-action-meta"><span>最新日期 <b>{current.date||'—'}</b></span><span>历史分位 <b>{history.percentile==null?'—':`${Number(history.percentile).toFixed(1)}%`}</b></span></div></div>
     <div className="glass-card us-anchor-chart-card"><div className="anchor-card-head"><div><span className="section-label">美国国债收益率曲线</span><h3>10Y、1Y 与期限利差</h3></div><div className="us-anchor-range-tabs">{['1Y','3Y','5Y'].map(item=><button key={item} className={range===item?'active':''} onClick={()=>setRange(item)}>{item}</button>)}</div></div><UsAnchorChart rows={rangeRows}/></div>
@@ -4292,31 +4292,43 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
     }
   };
 
-  const refresh=async()=>{
+  const refreshCn=async()=>{
     if(refreshing)return;
     setRefreshing(true);
     setEditingPrice(false);
-    const [nextMetrics,nextQuote,nextDividendFeed,nextUsYields]=await Promise.all([fetchAnchorMetrics(true),fetchAnchorEtfQuote(true),fetchAnchorDividends(true),fetchAnchorUsYields(true)]);
-    applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed,nextUsYields);
-    if(!nextMetrics&&!nextQuote?.price&&!nextDividendFeed&&!nextUsYields)showToast('监控数据暂时不可用，可先手动录入',ACC.amber);
+    const [nextMetrics,nextQuote,nextDividendFeed]=await Promise.all([fetchAnchorMetrics(true),fetchAnchorEtfQuote(true),fetchAnchorDividends(true)]);
+    applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed,null);
+    if(!nextMetrics&&!nextQuote?.price&&!nextDividendFeed)showToast('监控数据暂时不可用，可先手动录入',ACC.amber);
     setRefreshing(false);
   };
+  const refreshUs=async()=>{
+    if(refreshing)return;
+    setRefreshing(true);
+    const nextUsYields=await fetchAnchorUsYields(true);
+    applyFetchedAnchorData(null,null,null,nextUsYields);
+    if(!nextUsYields)showToast('美股收益率数据暂时不可用，请稍后重试',ACC.amber);
+    setRefreshing(false);
+  };
+  const refresh=anchorMarket==='us'?refreshUs:refreshCn;
   useEffect(()=>{
     if(!active)return undefined;
     let alive=true;
     // 进入“压舱石”页面时主动绕过代理缓存，避免首屏一直停留在旧快照。
-    const load=()=>Promise.all([fetchAnchorMetrics(true),fetchAnchorEtfQuote(true),fetchAnchorDividends(true),fetchAnchorUsYields(true)]).then(([nextMetrics,nextQuote,nextDividendFeed,nextUsYields])=>{
-      if(!alive)return;
-      applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed,nextUsYields);
-    });
+    const load=anchorMarket==='us'
+      ? fetchAnchorUsYields(true).then(nextUsYields=>{if(alive)applyFetchedAnchorData(null,null,null,nextUsYields);})
+      : Promise.all([fetchAnchorMetrics(true),fetchAnchorEtfQuote(true),fetchAnchorDividends(true)]).then(([nextMetrics,nextQuote,nextDividendFeed])=>{if(alive)applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed,null);});
     load();
     const timer=window.setInterval(async()=>{
-      const [nextMetrics,nextQuote,nextDividendFeed,nextUsYields]=await Promise.all([fetchAnchorMetrics(false),fetchAnchorEtfQuote(false),fetchAnchorDividends(false),fetchAnchorUsYields(false)]);
-      if(!alive)return;
-      applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed,nextUsYields,false);
+      if(anchorMarket==='us'){
+        const nextUsYields=await fetchAnchorUsYields(false);
+        if(alive)applyFetchedAnchorData(null,null,null,nextUsYields,false);
+      }else{
+        const [nextMetrics,nextQuote,nextDividendFeed]=await Promise.all([fetchAnchorMetrics(false),fetchAnchorEtfQuote(false),fetchAnchorDividends(false)]);
+        if(alive)applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed,null,false);
+      }
     },30*60*1000);
     return()=>{alive=false;window.clearInterval(timer);};
-  },[active]);
+  },[active,anchorMarket]);
 
   const addTransaction=()=>{
     const price=finitePrice(form.price),inputShares=num(form.shares),inputAmount=num(form.amount);
@@ -4355,14 +4367,13 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
     <div className="anchor-panel anim-in">
       <div className="anchor-hero">
         <div>
-          <div className="cnopt-kicker">A-SHARE INCOME BASE · 159307</div>
+          <div className="cnopt-kicker">{anchorMarket==='us'?'US INCOME BASE · TREASURY SPREAD':'A-SHARE INCOME BASE · 159307'}</div>
           <h2>压舱石 <span>／磐石计划</span></h2>
-          <p>以博时红利低波100为人民币定投底仓；分红到账当天，全额手动再买入。</p>
+          <p>{anchorMarket==='us'?'用美国 10Y − 1Y 利差观察美股定投节奏，按历史分位分段执行。':'以博时红利低波100为人民币定投底仓；分红到账当天，全额手动再买入。'}</p>
         </div>
         <div className="anchor-hero-actions">
-          <span className="anchor-badge anchor-badge-cn">A股</span>
-          <span className="anchor-badge">人民币定投</span><span className="anchor-badge">分红再投</span>
-          <button className="btn btn-primary" onClick={refresh} disabled={refreshing}>{refreshing?'同步中…':'↻ 刷新监控'}</button>
+          {anchorMarket==='us'?<><span className="anchor-badge anchor-badge-us">美股</span><span className="anchor-badge">利差策略</span></>:<><span className="anchor-badge anchor-badge-cn">A股</span><span className="anchor-badge">人民币定投</span><span className="anchor-badge">分红再投</span></>}
+          <button className="btn btn-primary" onClick={refresh} disabled={refreshing}>{refreshing?'同步中…':'↻ 刷新数据'}</button>
         </div>
       </div>
 
@@ -4419,7 +4430,7 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
 
       <div className="glass-card anchor-dividend-card">
         <div className="anchor-card-head"><div><span className="section-label">159307 分红维护</span><h3>分红收益跟踪</h3></div><div className="anchor-card-head-actions"><span className="anchor-rule">自动同步 · 流水估算</span><button className="btn btn-ghost anchor-dividend-toggle" onClick={()=>setShowDividendHistory(v=>!v)}>{showDividendHistory?'收起历史':'展开历史'}</button></div></div>
-        {!dividendFeed?<div className="anchor-empty">分红历史尚未同步，点击“刷新监控”后自动获取。</div>:<>
+        {!dividendFeed?<div className="anchor-empty">分红历史尚未同步，点击“刷新数据”后自动获取。</div>:<>
           {!showDividendHistory?<div className="anchor-dividend-summary"><span>最近一期：{dividendRows[0]?.exDate||'—'}</span><span>每份分红：¥{dividendRows[0]?fmtPrice(dividendRows[0].perShare):'—'}</span><span>单季分红年化：{dividendRows[0]?fmtAnchorPct(dividendRows[0].quarterAnnualized):'—'}</span></div>:<>
             <div className="anchor-dividend-list"><div className="anchor-dividend-head"><span>除权日</span><span>每份分红</span><span>单季年化</span><span>除权前份额</span><span>预计应得</span><span>状态</span></div>{dividendRows.map(event=><div className="anchor-dividend-row" key={event.id}><span>{event.exDate}</span><span>¥{fmtPrice(event.perShare)}</span><span>{fmtAnchorPct(event.quarterAnnualized)}</span><span>{event.shares?fmt(event.shares,0):'—'}</span><span>{event.amount?`¥${fmt(event.amount,2)}`:'—'}</span><span className={event.shares?'positive':''}>{event.shares?'已按流水估算':'待录入持仓'}</span></div>)}</div>
             <div className="anchor-dividend-note">单季分红年化 = 每份分红 ÷ 除权前参考净值 × 4，仅估算分红收益，不等同于 ETF 总回报；应得分红 = 除权日前持仓份额 × 每份分红。当前按本机交易流水估算，实际到账以券商资金流水为准。数据源：{dividendFeed.source}，更新至 {dividendFeed.asOf||'—'}。</div>
@@ -4445,7 +4456,7 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
         {!data.transactions.length?<div className="anchor-empty">还没有 159307 交易记录；从第一笔定投开始记录，持仓收益会自动滚动计算。</div>:<div className="anchor-ledger-list"><div className="anchor-ledger-head"><span>日期</span><span>类型</span><span>份额</span><span>成交价</span><span>金额</span><span>备注</span><span/></div>{data.transactions.map(tx=><div className="anchor-ledger-row" key={tx.id}><span>{tx.date}</span><strong className={tx.type==='sell'?'sell':tx.type==='dividend'?'dividend':''}>{tx.type==='sell'?'卖出':tx.type==='dividend'?'分红再投':'正常定投'}</strong><span>{fmt(tx.shares,0)}</span><span>¥{fmtPrice(tx.price)}</span><span>¥{fmt(tx.amount,2)}</span><span>{tx.note||'—'}</span><button onClick={()=>removeTransaction(tx.id)} title="删除流水">×</button></div>)}</div>}
       </div>
       <div className="anchor-sources">数据提示：PE / 股息率来自中证指数官方，PB 使用 ETF.run 公开估值备用源，CN10Y 使用新浪行情并可与 <a href="https://yield.chinabond.com.cn/cbweb-cbrc-web/cbrc/showCbrc" target="_blank" rel="noopener">中国债券信息网</a> 收盘曲线交叉核对。模块只做规则化记录与监控，不替代投资判断。</div>
-      </div>:<UsAnchorPanel data={usYields} onRefresh={refresh} refreshing={refreshing}/>}
+      </div>:<UsAnchorPanel data={usYields}/>}
     </div>
   );
 }
@@ -5053,7 +5064,7 @@ function App(){
           </button>
           <button className={`tab-btn${tab==='anchor'?' active':''}`} onClick={()=>setTab('anchor')}>
             <span className="tab-dot" style={{background:ACC.amber}}/>
-            <span className="tab-label tab-label-full">压舱石</span><span className="tab-label tab-label-short">底仓</span>
+            <span className="tab-label tab-label-full">A股压舱石</span><span className="tab-label tab-label-short">A股</span>
             <span className="tab-unit">159307</span>
           </button>
           <div className="sidebar-sep"/>
