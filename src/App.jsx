@@ -394,6 +394,18 @@ async function fetchAnchorDividends(force=false){
   return null;
 }
 
+async function fetchAnchorUsYields(force=false){
+  const bases=[localStorage.getItem('whl-cloud-url'),DEFAULT_CLOUD_URL,window.location.origin].filter(Boolean).filter((base,index,list)=>list.indexOf(base)===index);
+  for(const proxyBase of bases){
+    try{
+      const query=force?`?refresh=${Date.now()}`:'';
+      const response=await fetch(`${proxyBase}/api/us-anchor-yields${query}`,{signal:AbortSignal.timeout(12000),cache:force?'no-store':'default'});
+      if(response.ok)return await response.json();
+    }catch(error){console.warn('US anchor yields fetch:',proxyBase,error.message);}
+  }
+  return null;
+}
+
 async function fetchStockCloseOnDate(ticker,date,{force=false}={}){
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
   try{
@@ -4083,6 +4095,7 @@ const ANCHOR_DEFAULT={
   metricOverrides:{},
   manualPrice:null,
   planAmount:1000,
+  usYields:null,
 };
 
 function anchorAction(spread){
@@ -4180,11 +4193,65 @@ function formatAnchorDate(value){
   return Number.isNaN(date.getTime())?raw:date.toLocaleString('zh-CN',{hour12:false});
 }
 
+function usAnchorAction(percentile){
+  if(percentile==null)return{label:'等待数据',emoji:'⏳',color:ACC.blue,desc:'补齐美国 10Y、1Y 收益率后再判断'};
+  if(percentile>=90)return{label:'历史高位 · 分段加码',emoji:'🟢',color:ACC.profit,desc:'10Y−1Y 利差处于历史高位，可分段增加，不一次满仓'};
+  if(percentile>=75)return{label:'偏积极',emoji:'🟢',color:ACC.profit,desc:'利差进入偏宽区间，可在基础定投上增加一档'};
+  if(percentile>=50)return{label:'正常观察',emoji:'🔵',color:ACC.blue,desc:'利差处于中性区间，维持基础定投并观察趋势'};
+  if(percentile>=25)return{label:'偏谨慎',emoji:'🟡',color:ACC.amber,desc:'利差偏窄，暂不加码，避免把单一宏观信号当成买点'};
+  return{label:'不加码',emoji:'🔴',color:ACC.loss,desc:'利差处于历史低位，保持现金弹性，不因“便宜”一次性下注'};
+}
+
+function UsAnchorChart({rows}){
+  const width=1000,height=360,left=55,right=18,top=20,bottom=38;
+  if(!rows.length)return <div className="anchor-empty">美股收益率历史数据尚未同步。</div>;
+  const keys=[['tenY','10Y','var(--us-teny)'],['oneY','1Y','var(--us-oney)'],['spread','利差','var(--us-spread)']];
+  const values=rows.flatMap(row=>keys.map(([key])=>Number(row[key]))).filter(Number.isFinite);
+  const rawMin=Math.min(...values),rawMax=Math.max(...values),padding=Math.max((rawMax-rawMin)*.08,.25);
+  const min=rawMin-padding,max=rawMax+padding,plotWidth=width-left-right,plotHeight=height-top-bottom;
+  const point=(row,index,key)=>{
+    const x=left+(rows.length===1?plotWidth/2:index/(rows.length-1)*plotWidth);
+    const y=top+(max-Number(row[key]))/(max-min)*plotHeight;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  };
+  const grid=Array.from({length:5},(_,index)=>{const value=max-(max-min)*index/4;return{value,y:top+plotHeight*index/4};});
+  const tickIndexes=[0,Math.floor((rows.length-1)/2),rows.length-1];
+  return <div className="us-anchor-chart-wrap">
+    <svg className="us-anchor-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="美国10年期、1年期国债收益率及利差图表">
+      {grid.map(line=><g key={line.value}><line x1={left} x2={width-right} y1={line.y} y2={line.y} className="us-anchor-grid-line"/><text x={left-10} y={line.y+4} textAnchor="end" className="us-anchor-axis-label">{line.value.toFixed(1)}%</text></g>)}
+      {tickIndexes.map(index=><text key={index} x={left+(rows.length===1?plotWidth/2:index/(rows.length-1)*plotWidth)} y={height-10} textAnchor={index===0?'start':index===rows.length-1?'end':'middle'} className="us-anchor-axis-label">{rows[index].date}</text>)}
+      {keys.map(([key,label,color])=><polyline key={key} points={rows.map((row,index)=>point(row,index,key)).join(' ')} fill="none" stroke={color} strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"><title>{label}</title></polyline>)}
+    </svg>
+    <div className="us-anchor-chart-legend">{keys.map(([,label,color])=><span key={label}><i style={{background:color}}/>{label}</span>)}</div>
+  </div>;
+}
+
+function UsAnchorPanel({data,onRefresh,refreshing}){
+  const [range,setRange]=useState('1Y');
+  const rows=Array.isArray(data?.rows)?data.rows:[];
+  const rangeRows=range==='5Y'?rows:range==='3Y'?rows.slice(-780):rows.slice(-260);
+  const current=data?.current||{};
+  const history=data?.history||{};
+  const action=usAnchorAction(Number.isFinite(Number(history.percentile))?Number(history.percentile):null);
+  const pct=(value)=>Number.isFinite(Number(value))?`${Number(value).toFixed(2)}%`:'—';
+  const cards=[['10Y 收益率',pct(current.tenY),'var(--us-teny)','美国10年期国债'],['1Y 收益率',pct(current.oneY),'var(--us-oney)','美国1年期国债'],['10Y − 1Y 利差',pct(current.spread),'var(--us-spread)','期限利差 · 百分点'],['历史分位',history.percentile==null?'—':`${Number(history.percentile).toFixed(1)}%`,action.color,'全样本可用数据']];
+  return <div className="us-anchor-panel">
+    <div className="us-anchor-head"><div><span className="section-label">US INCOME BASE · TREASURY SPREAD</span><h3>美股利差策略</h3><p>用美国 10Y − 1Y 国债收益率利差观察宏观期限结构；作为美股定投的节奏参考，不替代估值和风险管理。</p></div><button className="btn btn-primary" onClick={onRefresh} disabled={refreshing}>{refreshing?'同步中…':'↻ 刷新数据'}</button></div>
+    <div className="us-anchor-summary">{cards.map(([label,value,color,sub])=><div className="us-anchor-summary-card" key={label}><span>{label}</span><strong style={{color}}>{value}</strong><small>{sub}</small></div>)}</div>
+    <div className="us-anchor-action" style={{'--anchor-color':action.color}}><div className="us-anchor-action-main"><span className="section-label">当前情绪 / 执行动作</span><strong><span className="anchor-action-emoji" aria-hidden="true">{action.emoji}</span>{action.label}</strong><p>{action.desc}</p></div><div className="us-anchor-action-meta"><span>最新日期 <b>{current.date||'—'}</b></span><span>历史分位 <b>{history.percentile==null?'—':`${Number(history.percentile).toFixed(1)}%`}</b></span></div></div>
+    <div className="glass-card us-anchor-chart-card"><div className="anchor-card-head"><div><span className="section-label">美国国债收益率曲线</span><h3>10Y、1Y 与期限利差</h3></div><div className="us-anchor-range-tabs">{['1Y','3Y','5Y'].map(item=><button key={item} className={range===item?'active':''} onClick={()=>setRange(item)}>{item}</button>)}</div></div><UsAnchorChart rows={rangeRows}/></div>
+    <div className="us-anchor-rule-grid"><div className="glass-card us-anchor-rule-card"><span className="section-label">分位数执行框架</span><h3>把宏观信号变成节奏</h3><p><b>低于 50%</b>：基础定投；<b>50%–75%</b>：正常观察；<b>75%–90%</b>：分段加码；<b>高于 90%</b>：只有在 10Y 没有单边急升、趋势确认后才加码。</p></div><div className="glass-card us-anchor-rule-card"><span className="section-label">数据口径</span><h3>官方日频 · 可追溯</h3><p>利差 = 美国 10Y 国债收益率 − 1Y 国债收益率。历史分位按 FRED 可用的 10Y/1Y 配对样本计算；当前数据截至 {data?.asOf||'—'}。</p><div className="us-anchor-links"><a href={data?.sourceLinks?.fred10||'https://fred.stlouisfed.org/series/DGS10'} target="_blank" rel="noopener">FRED DGS10</a><a href={data?.sourceLinks?.fred1||'https://fred.stlouisfed.org/series/DGS1'} target="_blank" rel="noopener">FRED DGS1</a><a href={data?.sourceLinks?.treasury||'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?page=1&type=daily_treasury_yield_curve'} target="_blank" rel="noopener">美国财政部备查</a></div></div></div>
+    <div className="anchor-sources">数据源：{data?.source||'FRED / Federal Reserve H.15'}。美国利差仅作为海外宏观参考，不直接替代 A 股股债息差，也不构成投资建议。</div>
+  </div>;
+}
+
 function AnchorPanel({anchor,onChange,showToast,active=false}){
   const data={...ANCHOR_DEFAULT,...(anchor||{}),transactions:Array.isArray(anchor?.transactions)?anchor.transactions:[],metricOverrides:anchor?.metricOverrides&&typeof anchor.metricOverrides==='object'?anchor.metricOverrides:{}};
   const [metrics,setMetrics]=useState(data.metrics||null);
   const [quote,setQuote]=useState(data.manualPrice?{price:data.manualPrice,source:'manual'}:null);
   const [dividendFeed,setDividendFeed]=useState(data.dividendFeed||null);
+  const [usYields,setUsYields]=useState(data.usYields||null);
+  const [anchorMarket,setAnchorMarket]=useState('cn');
   const [refreshing,setRefreshing]=useState(false);
   const [showForm,setShowForm]=useState(false);
   const [showEditor,setShowEditor]=useState(false);
@@ -4215,12 +4282,13 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
   });
   const fmtAnchorPct=(value)=>value==null?'—':`${value>=0?'+':''}${Number(value).toFixed(2)}%`;
 
-  const applyFetchedAnchorData=(nextMetrics,nextQuote,nextDividendFeed,persist=true)=>{
+  const applyFetchedAnchorData=(nextMetrics,nextQuote,nextDividendFeed,nextUsYields,persist=true)=>{
     if(nextMetrics)setMetrics(nextMetrics);
     if(nextQuote?.price>0){setQuote(nextQuote);setEditingPrice(false);}
     if(nextDividendFeed)setDividendFeed(nextDividendFeed);
-    if(persist&&(nextMetrics||nextQuote?.price>0||nextDividendFeed)){
-      onChange({...data,metrics:nextMetrics||data.metrics,dividendFeed:nextDividendFeed||data.dividendFeed,manualPrice:nextQuote?.price>0?null:data.manualPrice});
+    if(nextUsYields)setUsYields(nextUsYields);
+    if(persist&&(nextMetrics||nextQuote?.price>0||nextDividendFeed||nextUsYields)){
+      onChange({...data,metrics:nextMetrics||data.metrics,dividendFeed:nextDividendFeed||data.dividendFeed,usYields:nextUsYields||data.usYields,manualPrice:nextQuote?.price>0?null:data.manualPrice});
     }
   };
 
@@ -4228,24 +4296,24 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
     if(refreshing)return;
     setRefreshing(true);
     setEditingPrice(false);
-    const [nextMetrics,nextQuote,nextDividendFeed]=await Promise.all([fetchAnchorMetrics(true),fetchAnchorEtfQuote(true),fetchAnchorDividends(true)]);
-    applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed);
-    if(!nextMetrics&&!nextQuote?.price&&!nextDividendFeed)showToast('监控数据暂时不可用，可先手动录入',ACC.amber);
+    const [nextMetrics,nextQuote,nextDividendFeed,nextUsYields]=await Promise.all([fetchAnchorMetrics(true),fetchAnchorEtfQuote(true),fetchAnchorDividends(true),fetchAnchorUsYields(true)]);
+    applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed,nextUsYields);
+    if(!nextMetrics&&!nextQuote?.price&&!nextDividendFeed&&!nextUsYields)showToast('监控数据暂时不可用，可先手动录入',ACC.amber);
     setRefreshing(false);
   };
   useEffect(()=>{
     if(!active)return undefined;
     let alive=true;
     // 进入“压舱石”页面时主动绕过代理缓存，避免首屏一直停留在旧快照。
-    const load=()=>Promise.all([fetchAnchorMetrics(true),fetchAnchorEtfQuote(true),fetchAnchorDividends(true)]).then(([nextMetrics,nextQuote,nextDividendFeed])=>{
+    const load=()=>Promise.all([fetchAnchorMetrics(true),fetchAnchorEtfQuote(true),fetchAnchorDividends(true),fetchAnchorUsYields(true)]).then(([nextMetrics,nextQuote,nextDividendFeed,nextUsYields])=>{
       if(!alive)return;
-      applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed);
+      applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed,nextUsYields);
     });
     load();
     const timer=window.setInterval(async()=>{
-      const [nextMetrics,nextQuote,nextDividendFeed]=await Promise.all([fetchAnchorMetrics(false),fetchAnchorEtfQuote(false),fetchAnchorDividends(false)]);
+      const [nextMetrics,nextQuote,nextDividendFeed,nextUsYields]=await Promise.all([fetchAnchorMetrics(false),fetchAnchorEtfQuote(false),fetchAnchorDividends(false),fetchAnchorUsYields(false)]);
       if(!alive)return;
-      applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed,false);
+      applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed,nextUsYields,false);
     },30*60*1000);
     return()=>{alive=false;window.clearInterval(timer);};
   },[active]);
@@ -4297,6 +4365,13 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
           <button className="btn btn-primary" onClick={refresh} disabled={refreshing}>{refreshing?'同步中…':'↻ 刷新监控'}</button>
         </div>
       </div>
+
+      <div className="anchor-market-tabs" role="tablist" aria-label="压舱石市场策略">
+        <button className={anchorMarket==='cn'?'active':''} role="tab" aria-selected={anchorMarket==='cn'} onClick={()=>setAnchorMarket('cn')}>🇨🇳 A股压舱石</button>
+        <button className={anchorMarket==='us'?'active':''} role="tab" aria-selected={anchorMarket==='us'} onClick={()=>setAnchorMarket('us')}>🇺🇸 美股利差策略</button>
+      </div>
+
+      {anchorMarket==='cn'?<div className="anchor-market-content">
 
       <div className="anchor-two-col anchor-holdings-first">
         <div className="glass-card anchor-card anchor-portfolio-card">
@@ -4370,6 +4445,7 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
         {!data.transactions.length?<div className="anchor-empty">还没有 159307 交易记录；从第一笔定投开始记录，持仓收益会自动滚动计算。</div>:<div className="anchor-ledger-list"><div className="anchor-ledger-head"><span>日期</span><span>类型</span><span>份额</span><span>成交价</span><span>金额</span><span>备注</span><span/></div>{data.transactions.map(tx=><div className="anchor-ledger-row" key={tx.id}><span>{tx.date}</span><strong className={tx.type==='sell'?'sell':tx.type==='dividend'?'dividend':''}>{tx.type==='sell'?'卖出':tx.type==='dividend'?'分红再投':'正常定投'}</strong><span>{fmt(tx.shares,0)}</span><span>¥{fmtPrice(tx.price)}</span><span>¥{fmt(tx.amount,2)}</span><span>{tx.note||'—'}</span><button onClick={()=>removeTransaction(tx.id)} title="删除流水">×</button></div>)}</div>}
       </div>
       <div className="anchor-sources">数据提示：PE / 股息率来自中证指数官方，PB 使用 ETF.run 公开估值备用源，CN10Y 使用新浪行情并可与 <a href="https://yield.chinabond.com.cn/cbweb-cbrc-web/cbrc/showCbrc" target="_blank" rel="noopener">中国债券信息网</a> 收盘曲线交叉核对。模块只做规则化记录与监控，不替代投资判断。</div>
+      </div>:<UsAnchorPanel data={usYields} onRefresh={refresh} refreshing={refreshing}/>}
     </div>
   );
 }

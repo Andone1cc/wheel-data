@@ -442,6 +442,82 @@ async function fetchAnchorMetrics() {
   };
 }
 
+// 美股利差监控使用 FRED 的官方 H.15 日频序列：10Y Treasury Constant Maturity
+// 减去 1Y Treasury Constant Maturity。FRED CSV 不需要登录，适合服务端定时读取。
+async function fetchUsAnchorYields() {
+  const raw = await fetchText('https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10,DGS1', {
+    headers: {
+      'User-Agent': 'Mozilla/5.0',
+      Accept: 'text/csv,text/plain,*/*',
+    },
+    timeoutMs: 20000,
+    attempts: 1,
+  });
+  const lines = String(raw || '').trim().split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) throw new Error('FRED 收益率序列为空');
+  const headers = lines.shift().split(',');
+  const dateIndex = headers.indexOf('observation_date');
+  const tenIndex = headers.indexOf('DGS10');
+  const oneIndex = headers.indexOf('DGS1');
+  if (dateIndex < 0 || tenIndex < 0 || oneIndex < 0) throw new Error('FRED CSV 字段不完整');
+  const allRows = lines.map((line) => {
+    const fields = line.split(',');
+    const date = fields[dateIndex];
+    const tenY = fields[tenIndex] === '' ? null : finiteNumber(fields[tenIndex]);
+    const oneY = fields[oneIndex] === '' ? null : finiteNumber(fields[oneIndex]);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || '')) || tenY == null || oneY == null) return null;
+    return { date, tenY, oneY, spread: tenY - oneY };
+  }).filter(Boolean);
+  if (!allRows.length) throw new Error('FRED 没有可用的 10Y / 1Y 配对数据');
+  const spreads = allRows.map((row) => row.spread).sort((a, b) => a - b);
+  const latest = allRows[allRows.length - 1];
+  const percentileRank = (value) => {
+    const count = spreads.filter((item) => item <= value).length;
+    return spreads.length > 1 ? (count - 1) / (spreads.length - 1) * 100 : 50;
+  };
+  const percentile = (ratio) => {
+    const position = (spreads.length - 1) * ratio;
+    const lower = Math.floor(position);
+    const upper = Math.ceil(position);
+    if (lower === upper) return spreads[lower];
+    return spreads[lower] + (spreads[upper] - spreads[lower]) * (position - lower);
+  };
+  const round = (value, digits = 3) => Number(Number(value).toFixed(digits));
+  return {
+    symbol: 'US10Y1Y',
+    rows: allRows.slice(-1300).map((row) => ({
+      date: row.date,
+      tenY: round(row.tenY),
+      oneY: round(row.oneY),
+      spread: round(row.spread),
+    })),
+    current: {
+      date: latest.date,
+      tenY: round(latest.tenY),
+      oneY: round(latest.oneY),
+      spread: round(latest.spread),
+    },
+    history: {
+      count: allRows.length,
+      percentile: round(percentileRank(latest.spread), 1),
+      p50: round(percentile(0.5)),
+      p75: round(percentile(0.75)),
+      p90: round(percentile(0.9)),
+      p95: round(percentile(0.95)),
+      min: round(spreads[0]),
+      max: round(spreads[spreads.length - 1]),
+    },
+    asOf: latest.date,
+    source: 'FRED / Federal Reserve H.15',
+    sourceLinks: {
+      fred10: 'https://fred.stlouisfed.org/series/DGS10',
+      fred1: 'https://fred.stlouisfed.org/series/DGS1',
+      treasury: 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?page=1&type=daily_treasury_yield_curve',
+    },
+    stale: false,
+  };
+}
+
 function normalCdf(x) {
   const sign = x < 0 ? -1 : 1;
   const z = Math.abs(x) / Math.sqrt(2);
@@ -1257,6 +1333,16 @@ module.exports = async function handler(req, res) {
       return res.status(200).json(payload);
     } catch (e) {
       return res.status(502).json({ error: '159307 分红历史暂时不可用', detail: e.message });
+    }
+  }
+
+  if (reqUrl.startsWith('/api/us-anchor-yields')) {
+    try {
+      const payload = await fetchUsAnchorYields();
+      res.setHeader('Cache-Control', reqUrl.includes('refresh=') ? 'no-store' : 'public, s-maxage=900, stale-while-revalidate=3600');
+      return res.status(200).json(payload);
+    } catch (e) {
+      return res.status(502).json({ error: '美股 10Y / 1Y 收益率暂时不可用', detail: e.message });
     }
   }
 
