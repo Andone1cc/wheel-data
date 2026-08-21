@@ -509,6 +509,59 @@ async function fetchUsAnchorYields() {
     return vixValues.length > 1 ? (count - 1) / (vixValues.length - 1) * 100 : 50;
   };
   const fiveDaysAgo = vixRows[Math.max(0, vixRows.length - 6)];
+  let spyRows = [];
+  let spySource = null;
+  try {
+    const now = new Date();
+    const from = new Date(now);
+    from.setUTCFullYear(from.getUTCFullYear() - 5);
+    const formatDate = (date) => date.toISOString().slice(0, 10);
+    const nasdaqUrl = `https://api.nasdaq.com/api/quote/SPY/historical?assetclass=etf&fromdate=${formatDate(from)}&todate=${formatDate(now)}&limit=5000`;
+    const nasdaqResponse = await fetch(nasdaqUrl, {
+      headers: {
+        Accept: 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        Origin: 'https://www.nasdaq.com',
+        Referer: 'https://www.nasdaq.com/market-activity/etf/spy/historical',
+        'User-Agent': BROWSER_USER_AGENT,
+      },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!nasdaqResponse.ok) throw new Error(`Nasdaq SPY ${nasdaqResponse.status}`);
+    const nasdaqPayload = await nasdaqResponse.json();
+    const nasdaqRows = nasdaqPayload?.data?.tradesTable?.rows || [];
+    spyRows = nasdaqRows.map((row) => {
+      const [month, day, year] = String(row.date || '').split('/');
+      return { date: `${year}-${month?.padStart(2, '0')}-${day?.padStart(2, '0')}`, close: marketNumber(row.close) };
+    }).filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && row.close != null).sort((a, b) => a.date.localeCompare(b.date));
+    if (spyRows.length) spySource = 'Nasdaq · SPY ETF 日收盘';
+  } catch {}
+  for (const host of spyRows.length ? [] : ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {
+    try {
+      const spyResponse = await fetch(`https://${host}/v8/finance/chart/SPY?interval=1d&range=5y&events=div%2Csplits`, {
+        headers: {
+          Accept: 'application/json, text/plain, */*',
+          'Accept-Language': 'en-US,en;q=0.9',
+          Referer: 'https://finance.yahoo.com/',
+          'User-Agent': BROWSER_USER_AGENT,
+        },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!spyResponse.ok) throw new Error(`Yahoo SPY ${spyResponse.status}`);
+      const spyPayload = await spyResponse.json();
+      const spyResult = spyPayload?.chart?.result?.[0];
+      const spyTimestamps = Array.isArray(spyResult?.timestamp) ? spyResult.timestamp : [];
+      const spyCloses = Array.isArray(spyResult?.indicators?.quote?.[0]?.close) ? spyResult.indicators.quote[0].close : [];
+      spyRows = spyTimestamps.map((timestamp, index) => {
+        const close = finiteNumber(spyCloses[index]);
+        return {
+          date: new Date(Number(timestamp) * 1000).toISOString().slice(0, 10),
+          close,
+        };
+      }).filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && row.close != null);
+      if (spyRows.length) { spySource = 'Yahoo Finance · SPY 日收盘（延迟）'; break; }
+    } catch {}
+  }
   return {
     symbol: 'US10Y1Y',
     rows: allRows.slice(-1300).map((row) => ({
@@ -543,13 +596,16 @@ async function fetchUsAnchorYields() {
       min: round(vixValues[0], 2),
       max: round(vixValues[vixValues.length - 1], 2),
     },
+    spyRows: spyRows.slice(-1300).map((row) => ({ date: row.date, close: round(row.close, 4) })),
+    spySource,
     asOf: latest.date,
-    source: 'FRED / Federal Reserve H.15',
+    source: `FRED / Federal Reserve H.15 + CBOE VIXCLS${spySource ? ` + ${spySource}` : ''}`,
     sourceLinks: {
       fred10: 'https://fred.stlouisfed.org/series/DGS10',
       fred1: 'https://fred.stlouisfed.org/series/DGS1',
       vix: 'https://fred.stlouisfed.org/series/VIXCLS',
       etfMonitor: 'https://www.etfmonitor.cn/market-sentiment',
+      spy: 'https://www.nasdaq.com/market-activity/etf/spy/historical',
       treasury: 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?page=1&type=daily_treasury_yield_curve',
     },
     stale: false,

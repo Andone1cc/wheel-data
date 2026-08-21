@@ -4271,6 +4271,89 @@ function UsAnchorChart({rows}){
   </div>;
 }
 
+function UsVixSpyChart({vixRows,spyRows}){
+  const [range,setRange]=useState('1Y');
+  const [activeIndex,setActiveIndex]=useState(0);
+  const [dragging,setDragging]=useState(false);
+  const width=1000,height=350,left=58,right=58,top=22,bottom=40;
+  const ranges={
+    '1M':22,
+    '3M':66,
+    '1Y':260,
+    '3Y':780,
+    '5Y':1300,
+  };
+  const selected=spyRows.slice(-(ranges[range]||260));
+  if(!selected.length)return <div className="anchor-empty">SPY 历史行情尚未同步，刷新后会自动更新。</div>;
+  const safeIndex=Math.min(selected.length-1,Math.max(0,activeIndex));
+  const vixByDate=new Map(vixRows.map(row=>[row.date,Number(row.vix)]));
+  const base=Number(selected[0].close);
+  const points=selected.map((row,index)=>({
+    ...row,
+    vix:vixByDate.get(row.date),
+    spyReturn:base>0?(Number(row.close)/base-1)*100:null,
+    index,
+  }));
+  const vixValues=points.map(row=>row.vix).filter(Number.isFinite);
+  const spyValues=points.map(row=>row.spyReturn).filter(Number.isFinite);
+  const vixRawMin=vixValues.length?Math.min(...vixValues):0;
+  const vixRawMax=vixValues.length?Math.max(...vixValues):1;
+  const spyRawMin=spyValues.length?Math.min(...spyValues):0;
+  const spyRawMax=spyValues.length?Math.max(...spyValues):1;
+  const vixPadding=Math.max((vixRawMax-vixRawMin)*.12,1);
+  const spyPadding=Math.max((spyRawMax-spyRawMin)*.14,.75);
+  const vixMin=Math.max(0,vixRawMin-vixPadding),vixMax=vixRawMax+vixPadding;
+  const spyMin=Math.min(0,spyRawMin-spyPadding),spyMax=spyRawMax+spyPadding;
+  const plotWidth=width-left-right,plotHeight=height-top-bottom;
+  const clamp=(value,minValue,maxValue)=>Math.min(maxValue,Math.max(minValue,value));
+  const xFor=(index)=>left+(points.length===1?plotWidth/2:index/(points.length-1)*plotWidth);
+  const yVix=(value)=>top+(vixMax-Number(value))/(vixMax-vixMin)*plotHeight;
+  const ySpy=(value)=>top+(spyMax-Number(value))/(spyMax-spyMin)*plotHeight;
+  const linePoints=(key,mapper)=>points.filter(row=>Number.isFinite(row[key])).map(row=>`${xFor(row.index).toFixed(1)},${mapper(row[key]).toFixed(1)}`).join(' ');
+  const tickIndexes=[0,Math.floor((points.length-1)/2),points.length-1];
+  const grid=Array.from({length:5},(_,index)=>index/4);
+  const activeRow=points[safeIndex];
+  const activeX=xFor(safeIndex);
+  const zeroY=ySpy(0);
+  const updatePointer=(event)=>{
+    const rect=event.currentTarget.getBoundingClientRect();
+    const svgX=clamp((event.clientX-rect.left)/rect.width*width,0,width);
+    const x=clamp((svgX-left)/plotWidth,0,1);
+    setActiveIndex(Math.round(x*(points.length-1)));
+  };
+  const handlePointerDown=(event)=>{
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setDragging(true);
+    updatePointer(event);
+  };
+  const handlePointerUp=(event)=>{
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    setDragging(false);
+  };
+  const tooltipWidth=218,tooltipHeight=108;
+  const tooltipX=activeX>width-right-tooltipWidth?activeX-tooltipWidth-14:activeX+14;
+  const tooltipY=top+10;
+  return <>
+    <div className="anchor-card-head us-vix-spy-chart-head"><div><span className="section-label">VIX 与 SPY 走势对比</span><h3>恐慌点位与标普 500 表现</h3><p>左轴 VIX 点位；右轴 SPY 相对区间起点涨跌幅。</p></div><div className="us-anchor-range-tabs">{Object.keys(ranges).map(item=><button key={item} className={range===item?'active':''} onClick={()=>{setRange(item);setActiveIndex(0);}}>{item}</button>)}</div></div>
+    <div className="us-vix-spy-chart-wrap">
+      <div className="us-anchor-chart-hint">悬停或点击查看实际值 · 按住拖动浏览时间序列</div>
+      <svg className={`us-vix-spy-chart${dragging?' is-dragging':''}`} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="VIX 与 SPY 相对表现图表" onPointerMove={updatePointer} onPointerDown={handlePointerDown} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onPointerLeave={()=>{if(!dragging)setActiveIndex(points.length-1);}}>
+        {grid.map((ratio)=><g key={ratio}><line x1={left} x2={width-right} y1={top+plotHeight*ratio} y2={top+plotHeight*ratio} className="us-vix-spy-grid-line"/><text x={left-10} y={top+plotHeight*ratio+4} textAnchor="end" className="us-vix-spy-axis-label">{(vixMax-(vixMax-vixMin)*ratio).toFixed(1)}</text><text x={width-right+10} y={top+plotHeight*ratio+4} className="us-vix-spy-axis-label us-vix-spy-axis-right">{(spyMax-(spyMax-spyMin)*ratio).toFixed(1)}%</text></g>)}
+        <line x1={left} x2={width-right} y1={zeroY} y2={zeroY} className="us-vix-spy-zero-line"/>
+        {tickIndexes.map(index=><text key={index} x={xFor(index)} y={height-12} textAnchor={index===0?'start':index===points.length-1?'end':'middle'} className="us-vix-spy-axis-label">{points[index].date}</text>)}
+        <polyline points={linePoints('vix',yVix)} fill="none" stroke="var(--vix-chart)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"/>
+        <polyline points={linePoints('spyReturn',ySpy)} fill="none" stroke="var(--spy-chart)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"/>
+        <line x1={activeX} x2={activeX} y1={top} y2={top+plotHeight} className="us-vix-spy-crosshair"/>
+        {Number.isFinite(activeRow.vix)&&<circle cx={activeX} cy={yVix(activeRow.vix)} r="5" fill="var(--vix-chart)" className="us-vix-spy-point"/>}
+        {Number.isFinite(activeRow.spyReturn)&&<circle cx={activeX} cy={ySpy(activeRow.spyReturn)} r="5" fill="var(--spy-chart)" className="us-vix-spy-point"/>}
+        <g className="us-vix-spy-tooltip" transform={`translate(${tooltipX},${tooltipY})`} pointerEvents="none"><rect width={tooltipWidth} height={tooltipHeight} rx="10"/><text x="13" y="22" className="us-vix-spy-tooltip-date">{activeRow.date}</text><text x="13" y="48" className="us-vix-spy-tooltip-value"><tspan fill="var(--vix-chart)">VIX {Number.isFinite(activeRow.vix)?activeRow.vix.toFixed(2):'—'}</tspan><tspan x="13" dy="22" fill="var(--spy-chart)">SPY {Number.isFinite(activeRow.spyReturn)?`${activeRow.spyReturn>=0?'+':''}${activeRow.spyReturn.toFixed(2)}%`:'—'}</tspan></text></g>
+        <rect x={left} y={top} width={plotWidth} height={plotHeight} fill="transparent" className="us-vix-spy-hit-area"/>
+      </svg>
+      <div className="us-vix-spy-legend"><span><i style={{background:'var(--vix-chart)'}}/>VIX</span><span><i style={{background:'var(--spy-chart)'}}/>SPY 相对区间收益</span></div>
+    </div>
+  </>;
+}
+
 function UsAnchorPanel({data}){
   const [range,setRange]=useState('1Y');
   const rows=Array.isArray(data?.rows)?data.rows:[];
@@ -4282,15 +4365,23 @@ function UsAnchorPanel({data}){
   const vixSignal=vixAction(vix);
   const vixPosition=Number.isFinite(vix)?Math.min(100,Math.max(0,vix/60*100)):0;
   const vixChange=Number(data?.vixHistory?.change5d);
+  const spyRows=Array.isArray(data?.spyRows)?data.spyRows:[];
+  const vixRows=rows;
+  const spyMonth=spyRows.length>21?((Number(spyRows.at(-1)?.close)/Number(spyRows.at(-22)?.close)-1)*100):null;
   const pct=(value)=>Number.isFinite(Number(value))?`${Number(value).toFixed(2)}%`:'—';
   const cards=[['10Y 收益率',pct(current.tenY),'var(--us-teny)','美国10年期国债'],['1Y 收益率',pct(current.oneY),'var(--us-oney)','美国1年期国债'],['10Y − 1Y 利差',pct(current.spread),'var(--us-spread)','期限利差 · 百分点'],['历史分位',history.percentile==null?'—':`${Number(history.percentile).toFixed(1)}%`,action.color,'全样本可用数据']];
   return <div className="us-anchor-panel">
     <div className="us-anchor-head"><div><span className="section-label">US INCOME BASE · TREASURY SPREAD</span><h3>美股利差策略</h3><p>用美国 10Y − 1Y 国债收益率利差观察宏观期限结构；作为美股定投的节奏参考，不替代估值和风险管理。</p></div></div>
-    <div className="us-anchor-summary">{cards.map(([label,value,color,sub])=><div className="us-anchor-summary-card" key={label}><span>{label}</span><strong style={{color}}>{value}</strong><small>{sub}</small></div>)}</div>
-    <div className="glass-card us-vix-card" style={{'--vix-color':vixSignal.color}}><div className="us-vix-head"><div><span className="section-label">CBOE VIX · 恐慌仪表盘</span><h3>不看曲线，就盯 VIX</h3></div><div className="us-vix-links"><a href={data?.sourceLinks?.etfMonitor||'https://www.etfmonitor.cn/market-sentiment'} target="_blank" rel="noopener">ETF Monitor 参考</a><a href={data?.sourceLinks?.vix||'https://fred.stlouisfed.org/series/VIXCLS'} target="_blank" rel="noopener">FRED VIXCLS</a></div></div><div className="us-vix-main"><div className="us-vix-reading"><strong>{Number.isFinite(vix)?vix.toFixed(2):'—'}</strong><span>VIX 点位 · {data?.current?.vixDate||data?.asOf||'—'}</span></div><div className="us-vix-meter"><div className="us-vix-meter-track"><span className="us-vix-segment vix-low"/><span className="us-vix-segment vix-start"/><span className="us-vix-segment vix-add"/><span className="us-vix-segment vix-extreme"/><i style={{left:`${vixPosition}%`}}/></div><div className="us-vix-meter-labels"><span>0</span><span>25 开始定投</span><span>30 加仓</span><span>40 极端</span><span>60+</span></div></div><div className="us-vix-signal"><strong><span className="anchor-action-emoji" aria-hidden="true">{vixSignal.emoji}</span>{vixSignal.label}</strong><p>{vixSignal.desc}</p></div></div><div className="us-vix-stats"><span>近 5 日变化 <b style={{color:vixChange>0?ACC.loss:vixChange<0?ACC.profit:V('dim')}}>{Number.isFinite(vixChange)?`${vixChange>=0?'+':''}${vixChange.toFixed(2)} 点`:'—'}</b></span><span>近 10 年分位 <b>{data?.vixHistory?.percentile==null?'—':`${Number(data.vixHistory.percentile).toFixed(1)}%`}</b></span><span>执行口径 <b>25 / 30 / 40</b></span></div></div>
-    <div className="us-anchor-action" style={{'--anchor-color':action.color}}><div className="us-anchor-action-main"><span className="section-label">当前情绪 / 执行动作</span><strong><span className="anchor-action-emoji" aria-hidden="true">{action.emoji}</span>{action.label}</strong><p>{action.desc}</p></div><div className="us-anchor-action-meta"><span>最新日期 <b>{current.date||'—'}</b></span><span>历史分位 <b>{history.percentile==null?'—':`${Number(history.percentile).toFixed(1)}%`}</b></span></div></div>
-    <div className="glass-card us-anchor-chart-card"><div className="anchor-card-head"><div><span className="section-label">美国国债收益率曲线</span><h3>10Y、1Y 与期限利差</h3></div><div className="us-anchor-range-tabs">{['1Y','3Y','5Y'].map(item=><button key={item} className={range===item?'active':''} onClick={()=>setRange(item)}>{item}</button>)}</div></div><UsAnchorChart rows={rangeRows}/></div>
-    <div className="us-anchor-rule-grid"><div className="glass-card us-anchor-rule-card"><span className="section-label">分位数执行框架</span><h3>把宏观信号变成节奏</h3><p><b>低于 50%</b>：基础定投；<b>50%–75%</b>：正常观察；<b>75%–90%</b>：分段加码；<b>高于 90%</b>：只有在 10Y 没有单边急升、趋势确认后才加码。</p></div><div className="glass-card us-anchor-rule-card"><span className="section-label">数据口径</span><h3>官方日频 · 可追溯</h3><p>利差 = 美国 10Y 国债收益率 − 1Y 国债收益率。历史分位按 FRED 可用的 10Y/1Y 配对样本计算；当前数据截至 {data?.asOf||'—'}。</p><div className="us-anchor-links"><a href={data?.sourceLinks?.fred10||'https://fred.stlouisfed.org/series/DGS10'} target="_blank" rel="noopener">FRED DGS10</a><a href={data?.sourceLinks?.fred1||'https://fred.stlouisfed.org/series/DGS1'} target="_blank" rel="noopener">FRED DGS1</a><a href={data?.sourceLinks?.treasury||'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?page=1&type=daily_treasury_yield_curve'} target="_blank" rel="noopener">美国财政部备查</a></div></div></div>
+    <section className="us-anchor-section us-anchor-rate-section"><div className="us-anchor-section-head"><div><span className="section-label">01 · 利率监控</span><h3>美国国债收益率与期限利差</h3><p>先看利率曲线和历史分位，再决定定投节奏。</p></div></div>
+      <div className="us-anchor-summary">{cards.map(([label,value,color,sub])=><div className="us-anchor-summary-card" key={label}><span>{label}</span><strong style={{color}}>{value}</strong><small>{sub}</small></div>)}</div>
+      <div className="us-anchor-action" style={{'--anchor-color':action.color}}><div className="us-anchor-action-main"><span className="section-label">当前情绪 / 执行动作</span><strong><span className="anchor-action-emoji" aria-hidden="true">{action.emoji}</span>{action.label}</strong><p>{action.desc}</p></div><div className="us-anchor-action-meta"><span>最新日期 <b>{current.date||'—'}</b></span><span>历史分位 <b>{history.percentile==null?'—':`${Number(history.percentile).toFixed(1)}%`}</b></span></div></div>
+      <div className="glass-card us-anchor-chart-card"><div className="anchor-card-head"><div><span className="section-label">美国国债收益率曲线</span><h3>10Y、1Y 与期限利差</h3></div><div className="us-anchor-range-tabs">{['1Y','3Y','5Y'].map(item=><button key={item} className={range===item?'active':''} onClick={()=>setRange(item)}>{item}</button>)}</div></div><UsAnchorChart rows={rangeRows}/></div>
+      <div className="us-anchor-rule-grid"><div className="glass-card us-anchor-rule-card"><span className="section-label">分位数执行框架</span><h3>把宏观信号变成节奏</h3><p><b>低于 50%</b>：基础定投；<b>50%–75%</b>：正常观察；<b>75%–90%</b>：分段加码；<b>高于 90%</b>：只有在 10Y 没有单边急升、趋势确认后才加码。</p></div><div className="glass-card us-anchor-rule-card"><span className="section-label">数据口径</span><h3>官方日频 · 可追溯</h3><p>利差 = 美国 10Y 国债收益率 − 1Y 国债收益率。历史分位按 FRED 可用的 10Y/1Y 配对样本计算；当前数据截至 {data?.asOf||'—'}。</p><div className="us-anchor-links"><a href={data?.sourceLinks?.fred10||'https://fred.stlouisfed.org/series/DGS10'} target="_blank" rel="noopener">FRED DGS10</a><a href={data?.sourceLinks?.fred1||'https://fred.stlouisfed.org/series/DGS1'} target="_blank" rel="noopener">FRED DGS1</a><a href={data?.sourceLinks?.treasury||'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?page=1&type=daily_treasury_yield_curve'} target="_blank" rel="noopener">美国财政部备查</a></div></div></div>
+    </section>
+    <section className="us-anchor-section us-anchor-vix-section"><div className="us-anchor-section-head"><div><span className="section-label">02 · VIX 恐慌监控</span><h3>波动率与美股走势</h3><p>VIX 用于观察市场恐慌程度；SPY 曲线展示对应区间的相对表现。</p></div></div>
+      <div className="glass-card us-vix-card" style={{'--vix-color':vixSignal.color}}><div className="us-vix-head"><div><span className="section-label">CBOE VIX · 恐慌仪表盘</span><h3>不看曲线，就盯 VIX</h3></div><div className="us-vix-links"><a href={data?.sourceLinks?.etfMonitor||'https://www.etfmonitor.cn/market-sentiment'} target="_blank" rel="noopener">ETF Monitor 参考</a><a href={data?.sourceLinks?.vix||'https://fred.stlouisfed.org/series/VIXCLS'} target="_blank" rel="noopener">FRED VIXCLS</a></div></div><div className="us-vix-main"><div className="us-vix-reading"><strong>{Number.isFinite(vix)?vix.toFixed(2):'—'}</strong><span>VIX 点位 · {data?.current?.vixDate||data?.asOf||'—'}</span></div><div className="us-vix-meter"><div className="us-vix-meter-track"><span className="us-vix-segment vix-low"/><span className="us-vix-segment vix-start"/><span className="us-vix-segment vix-add"/><span className="us-vix-segment vix-extreme"/><i style={{left:`${vixPosition}%`}}/></div><div className="us-vix-meter-labels"><span>0</span><span>25 开始定投</span><span>30 加仓</span><span>40 极端</span><span>60+</span></div></div><div className="us-vix-signal"><strong><span className="anchor-action-emoji" aria-hidden="true">{vixSignal.emoji}</span>{vixSignal.label}</strong><p>{vixSignal.desc}</p></div></div><div className="us-vix-stats"><span>近 5 日变化 <b style={{color:vixChange>0?ACC.loss:vixChange<0?ACC.profit:V('dim')}}>{Number.isFinite(vixChange)?`${vixChange>=0?'+':''}${vixChange.toFixed(2)} 点`:'—'}</b></span><span>近 10 年分位 <b>{data?.vixHistory?.percentile==null?'—':`${Number(data.vixHistory.percentile).toFixed(1)}%`}</b></span><span>SPY 近 1 个月 <b style={{color:spyMonth>=0?ACC.profit:ACC.loss}}>{Number.isFinite(spyMonth)?`${spyMonth>=0?'+':''}${spyMonth.toFixed(2)}%`:'—'}</b></span><span>执行口径 <b>25 / 30 / 40</b></span></div></div>
+      <div className="glass-card us-vix-spy-card"><UsVixSpyChart vixRows={vixRows} spyRows={spyRows}/><div className="us-vix-spy-source">SPY 行情：<a href={data?.sourceLinks?.spy||'https://www.nasdaq.com/market-activity/etf/spy/historical'} target="_blank" rel="noopener">{data?.spySource||'Nasdaq · SPY ETF 日收盘'}</a>。VIX 阈值为本模块的规则化观察口径。</div></div>
+    </section>
     <div className="anchor-sources">数据源：{data?.source||'FRED / Federal Reserve H.15'}。美国利差仅作为海外宏观参考，不直接替代 A 股股债息差，也不构成投资建议。</div>
   </div>;
 }
