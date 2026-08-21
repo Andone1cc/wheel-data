@@ -4338,6 +4338,7 @@ function UsVixSpyChart({vixRows,spyRows}){
     <div className="us-vix-spy-chart-wrap">
       <div className="us-anchor-chart-hint">悬停或点击查看实际值 · 按住拖动浏览时间序列</div>
       <svg className={`us-vix-spy-chart${dragging?' is-dragging':''}`} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="VIX 与 SPY 相对表现图表" onPointerMove={updatePointer} onPointerDown={handlePointerDown} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onPointerLeave={()=>{if(!dragging)setActiveIndex(points.length-1);}}>
+        <text x={left} y="12" className="us-vix-spy-axis-title">VIX 点位</text><text x={width-right} y="12" textAnchor="end" className="us-vix-spy-axis-title">SPY 相对收益</text>
         {grid.map((ratio)=><g key={ratio}><line x1={left} x2={width-right} y1={top+plotHeight*ratio} y2={top+plotHeight*ratio} className="us-vix-spy-grid-line"/><text x={left-10} y={top+plotHeight*ratio+4} textAnchor="end" className="us-vix-spy-axis-label">{(vixMax-(vixMax-vixMin)*ratio).toFixed(1)}</text><text x={width-right+10} y={top+plotHeight*ratio+4} className="us-vix-spy-axis-label us-vix-spy-axis-right">{(spyMax-(spyMax-spyMin)*ratio).toFixed(1)}%</text></g>)}
         <line x1={left} x2={width-right} y1={zeroY} y2={zeroY} className="us-vix-spy-zero-line"/>
         {tickIndexes.map(index=><text key={index} x={xFor(index)} y={height-12} textAnchor={index===0?'start':index===points.length-1?'end':'middle'} className="us-vix-spy-axis-label">{points[index].date}</text>)}
