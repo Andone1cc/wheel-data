@@ -4314,7 +4314,7 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
     if(!active)return undefined;
     let alive=true;
     // 进入“压舱石”页面时主动绕过代理缓存，避免首屏一直停留在旧快照。
-    const load=anchorMarket==='us'
+    const load=()=>anchorMarket==='us'
       ? fetchAnchorUsYields(true).then(nextUsYields=>{if(alive)applyFetchedAnchorData(null,null,null,nextUsYields);})
       : Promise.all([fetchAnchorMetrics(true),fetchAnchorEtfQuote(true),fetchAnchorDividends(true)]).then(([nextMetrics,nextQuote,nextDividendFeed])=>{if(alive)applyFetchedAnchorData(nextMetrics,nextQuote,nextDividendFeed,null);});
     load();
@@ -5063,9 +5063,8 @@ function App(){
             <span className="tab-count">{cnPositions.length+cnStocks.length}</span>
           </button>
           <button className={`tab-btn${tab==='anchor'?' active':''}`} onClick={()=>setTab('anchor')}>
-            <span className="tab-dot" style={{background:ACC.amber}}/>
-            <span className="tab-label tab-label-full">A股压舱石</span><span className="tab-label tab-label-short">A股</span>
-            <span className="tab-unit">159307</span>
+            <span className="tab-anchor-icon" aria-hidden="true">⚓</span>
+            <span className="tab-label tab-label-full">压舱石</span><span className="tab-label tab-label-short">压舱</span>
           </button>
           <div className="sidebar-sep"/>
           <div className="sidebar-section">工具</div>

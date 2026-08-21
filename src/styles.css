@@ -262,6 +262,7 @@ select{-webkit-appearance:none;appearance:none}
 .tab-btn:hover::after{opacity:1}
 .tab-btn.active{background:linear-gradient(135deg,rgba(245,183,49,.14),rgba(79,163,224,.055));color:var(--ink);font-weight:700;border-color:rgba(245,183,49,.28);box-shadow:0 10px 26px rgba(0,0,0,.16),0 0 0 1px rgba(245,183,49,.04) inset}
 .tab-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;box-shadow:0 0 12px currentColor}
+.tab-anchor-icon{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:16px;color:var(--amber,#f5b731);font-size:15px;line-height:1;text-shadow:0 0 10px rgba(245,183,49,.45)}
 .tab-count{margin-left:auto;font-size:11px;font-family:'IBM Plex Mono',monospace;
   background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.055);border-radius:999px;padding:1px 7px;color:var(--dim)}
 .tab-unit{font:700 8px 'IBM Plex Mono',monospace;letter-spacing:.08em;color:var(--faint);margin-left:auto}
