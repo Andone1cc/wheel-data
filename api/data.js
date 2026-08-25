@@ -263,6 +263,36 @@ function parseCapitolTraderRows(html) {
   return rows;
 }
 
+function parseCapitolTraderProfileRows(html, politician) {
+  const rawHtml = String(html || '');
+  const tbody = rawHtml.match(/<tbody[^>]*>([\s\S]*?)<\/tbody>/i)?.[1] || rawHtml;
+  return [...tbody.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)]
+    .map((match, index) => {
+      const rowHtml = match[1];
+      const cells = [...rowHtml.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((cell) => decodeCapitolHtml(cell[1]));
+      if (cells.length < 3) return null;
+      const ticker = extractCapitolAnchor(rowHtml, /href=["']([^"']*\/ticker\/[^"']*)["'][^>]*>([\s\S]*?)<\/a>/i) || cells[0];
+      const typeText = cells[1] || '';
+      const type = /purchase|buy/i.test(typeText) ? '买入'
+        : /sale|sell/i.test(typeText) ? '卖出'
+          : /exchange/i.test(typeText) ? '交换' : typeText || '其他';
+      if (!ticker || !typeText) return null;
+      return {
+        id: `profile-${ticker}-${type}-${index}`,
+        politician,
+        ticker: String(ticker).toUpperCase(),
+        type,
+        tradeDate: null,
+        disclosedDate: null,
+        delayDays: null,
+        amount: cells[2] || '—',
+        sourceUrl: 'https://capitoltrader.com/congressman/nancy-pelosi',
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
 function summarizeCapitolTraderRows(rows) {
   const validRows = Array.isArray(rows) ? rows : [];
   const purchases = validRows.filter((row) => row.type === '买入');
@@ -320,6 +350,21 @@ async function fetchCapitolTradesSummary() {
   const summary = summarizeCapitolTraderRows(rows);
   const totalMatch = decodeCapitolHtml(html).match(/([\d,]+)\s+disclosed trades/i);
   if (totalMatch) summary.totalDisclosedTrades = Number(totalMatch[1].replace(/,/g, ''));
+  let featuredMembers = [];
+  try {
+    const profileHtml = await fetchText('https://capitoltrader.com/congressman/nancy-pelosi', {
+      headers: {
+        Accept: 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-US,en;q=0.8',
+        Referer: 'https://capitoltrader.com/latest-trades',
+        'User-Agent': BROWSER_USER_AGENT,
+      },
+      timeoutMs: 8000,
+      attempts: 1,
+    });
+    const profileRows = parseCapitolTraderProfileRows(profileHtml, 'Nancy Pelosi');
+    if (profileRows.length) featuredMembers = [{ name: 'Nancy Pelosi', rows: profileRows, sourceUrl: 'https://capitoltrader.com/congressman/nancy-pelosi' }];
+  } catch {}
   return {
     provider: 'Capitol Trader public fallback',
     source: 'Capitol Trader 公开页（第三方汇总）',
@@ -328,6 +373,7 @@ async function fetchCapitolTradesSummary() {
     asOf: summary.latestDisclosureDate || rows[0]?.disclosedDate || null,
     summary,
     rows,
+    featuredMembers,
     sourceLinks: {
       fallback: 'https://capitoltrader.com/latest-trades',
       capitolTrades: 'https://www.capitoltrades.com/trades',
