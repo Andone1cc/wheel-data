@@ -4403,6 +4403,7 @@ function CapitolTradesPanel(){
   const [data,setData]=useState(null);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState('');
+  const [expandedPeople,setExpandedPeople]=useState(()=>new Set());
   const load=useCallback(async(force=false)=>{
     setLoading(true);
     const next=await fetchCapitolTrades(force);
@@ -4415,6 +4416,7 @@ function CapitolTradesPanel(){
     const timer=window.setInterval(()=>load(false),12*60*60*1000);
     return()=>window.clearInterval(timer);
   },[load]);
+  useEffect(()=>setExpandedPeople(new Set()),[data?.fetchedAt]);
 
   const summary=data?.summary||{};
   const focusRows=[
@@ -4429,35 +4431,51 @@ function CapitolTradesPanel(){
     ['每月 / 季度','回顾议员、行业和标的排名','评估信号是否有持续性，避免追逐旧新闻'],
   ];
   const metricCards=[
-    ['全站累计披露',summary.totalDisclosedTrades==null?'—':fmt(summary.totalDisclosedTrades,0),'var(--blue)','源页公开累计量'],
-    ['买入 / 卖出',`${fmt(summary.purchaseCount,0)} / ${fmt(summary.saleCount,0)}`,'var(--profit)','本次列表方向统计'],
+    ['最近 30 天披露',summary.rowCount==null?'—':fmt(summary.rowCount,0),'var(--blue)','按披露日筛选'],
+    ['涉及人物',summary.personCount==null?'—':fmt(summary.personCount,0),'var(--purple)','点击人物展开'],
+    ['买入 / 卖出',`${fmt(summary.purchaseCount,0)} / ${fmt(summary.saleCount,0)}`,'var(--profit)','窗口内方向统计'],
     ['买入占比',summary.purchaseRate==null?'—':`${fmt(summary.purchaseRate,1)}%`,'var(--amber)','不是收益预测'],
-    ['当前列表',summary.rowCount==null?'—':fmt(summary.rowCount,0),'var(--purple)','本次解析记录数'],
   ];
   const typeColor=(type)=>type==='买入'?ACC.profit:type==='卖出'?ACC.loss:ACC.amber;
+  const fallbackPeople=Object.values((data?.rows||[]).reduce((groups,row)=>{
+    const name=row.politician||'未知人物';
+    if(!groups[name])groups[name]={name,count:0,buyCount:0,sellCount:0,tickers:[],rows:[]};
+    groups[name].count+=1;
+    if(row.type==='买入')groups[name].buyCount+=1;
+    if(row.type==='卖出')groups[name].sellCount+=1;
+    if(row.ticker&&!groups[name].tickers.includes(row.ticker))groups[name].tickers.push(row.ticker);
+    groups[name].rows.push(row);
+    return groups;
+  },{}));
+  const people=Array.isArray(data?.people)&&data.people.length?data.people:fallbackPeople;
+  const togglePerson=(name)=>setExpandedPeople((current)=>{
+    const next=new Set(current);
+    if(next.has(name))next.delete(name);else next.add(name);
+    return next;
+  });
   return <div className="capitol-panel">
     <div className="capitol-hero glass-card"><div><span className="section-label">US POLITICAL TRADES · STOCK ACT FILINGS</span><h3>议员交易雷达</h3><p>不用打开网站，直接在这里看最新披露、集中买入和排行；公开交易只做政策关联度与资金行为观察，不作为实时跟单信号。</p></div><div className="capitol-hero-actions"><button className="btn btn-primary" onClick={()=>load(true)} disabled={loading}>{loading?'同步中…':'↻ 刷新摘要'}</button><a className="btn btn-ghost" href={data?.sourceLinks?.capitolTrades||'https://www.capitoltrades.com/trades'} target="_blank" rel="noopener noreferrer">↗ 原站核对</a><span className="capitol-status">{data?.fetchedAt?`最近同步 ${data.fetchedAt.slice(0,16).replace('T',' ')}`:'等待首次同步'}</span></div></div>
     <div className="capitol-notice"><strong>来源状态</strong><span>{data?.sourceWarning||'正在同步公开披露摘要。'} <a href={data?.sourceLinks?.fallback||'https://capitoltrader.com/latest-trades'} target="_blank" rel="noopener noreferrer">查看第三方公开页</a>。</span></div>
     {error&&!data&&<div className="anchor-empty">{error}<button className="btn btn-ghost" onClick={()=>load(true)}>重试</button></div>}
     {data&&<>
-      <div className="capitol-live-head"><div><span className="section-label">LIVE SUMMARY · 最新披露</span><h3>先看今天有没有值得跟踪的信号</h3><p>源页每日更新；当前展示最新 {summary.rowCount||0} 条公开记录，交易日 / 披露日未在该列表直接公开。</p></div><span className="anchor-rule">每 12 小时自动刷新</span></div>
+      <div className="capitol-live-head"><div><span className="section-label">LIVE SUMMARY · 最近一个月</span><h3>最新交易 · 按人物汇总</h3><p>按披露日筛选 {data.window?.from||'最近 30 天'} 至 {data.window?.to||'今天'}；默认折叠人物摘要，点击后展开该人物的交易日、标的、方向和金额区间。</p></div><span className="anchor-rule">每 12 小时自动刷新</span></div>
       <div className="capitol-metric-grid">{metricCards.map(([label,value,color,sub])=><div className="anchor-metric-card capitol-metric-card" key={label}><span>{label}</span><strong style={{color}}>{value}</strong><small>{sub}</small></div>)}</div>
       <div className="capitol-live-grid">
-        <div className="glass-card capitol-card"><div className="anchor-card-head"><div><span className="section-label">近端披露</span><h3>最新交易明细</h3></div><span className="anchor-rule">源页最新列表</span></div><div className="capitol-trades-table"><div className="capitol-trades-head"><span>议员</span><span>标的</span><span>方向</span><span>交易日</span><span>披露日</span><span>金额区间</span></div>{(data.rows||[]).slice(0,12).map(row=><div className="capitol-trade-row" key={row.id}><span title={row.politician}>{row.politician||'—'}</span><b>{row.ticker||'—'}</b><strong style={{color:typeColor(row.type)}}>{row.type||'—'}</strong><span>{row.tradeDate||'列表未公开'}</span><span>{row.disclosedDate||'列表未公开'}</span><span>{row.amount||'—'}</span></div>)}</div></div>
+        <div className="glass-card capitol-card"><div className="anchor-card-head"><div><span className="section-label">最近 30 天 · PERSON SUMMARY</span><h3>人物交易摘要</h3></div><span className="anchor-rule">默认折叠</span></div><div className="capitol-person-list">{people.length?people.map(person=>{const open=expandedPeople.has(person.name);return <div className={`capitol-person-card${open?' is-open':''}`} key={person.name}><button className="capitol-person-summary" onClick={()=>togglePerson(person.name)} aria-expanded={open}><span className="capitol-person-chevron" aria-hidden="true">{open?'⌄':'›'}</span><strong>{person.name}</strong><span className="capitol-person-count">{person.count||person.rows?.length||0} 笔</span><span className="capitol-person-buy">买 {person.buyCount||0}</span><span className="capitol-person-sell">卖 {person.sellCount||0}</span><small>最近披露 {person.latestDisclosure||'—'}</small></button>{open&&<div className="capitol-person-detail"><div className="capitol-person-detail-head"><span>交易日</span><span>标的</span><span>方向</span><span>披露日</span><span>金额区间</span></div>{(person.rows||[]).map(row=><div className="capitol-person-detail-row" key={row.id}><span>{row.tradeDate||'—'}</span><b>{row.ticker||'—'}</b><strong style={{color:typeColor(row.type)}}>{row.type||'—'}</strong><span>{row.disclosedDate||'—'}</span><span>{row.amount||'—'}{row.optionDetails?<small>{row.optionDetails}</small>:null}</span></div>)}</div>}</div>}):<div className="capitol-empty-note">最近 30 天暂未解析到带日期的披露记录。</div>}</div></div>
         <div className="capitol-side-stack">
           <div className="glass-card capitol-card"><div className="anchor-card-head"><div><span className="section-label">标的热度</span><h3>出现次数最多</h3></div></div><div className="capitol-rank-list">{(summary.topTickers||[]).slice(0,6).map((item,index)=><div key={item.name}><span>{index+1}. {item.name}</span><b>{item.count} 次</b></div>)}</div></div>
           <div className="glass-card capitol-card"><div className="anchor-card-head"><div><span className="section-label">议员行为</span><h3>披露次数最多</h3></div></div><div className="capitol-rank-list">{(summary.topPoliticians||[]).slice(0,6).map((item,index)=><div key={item.name}><span>{index+1}. {item.name}</span><b>{item.count} 次</b></div>)}</div></div>
         </div>
       </div>
       <div className="glass-card capitol-card"><div className="anchor-card-head"><div><span className="section-label">异常集中买入</span><h3>14 天内 3 位以上议员同向买入</h3></div><span className="anchor-rule">需要人工复核</span></div>{summary.clusteredBuys?.length?<div className="capitol-cluster-list">{summary.clusteredBuys.map(item=><div className="capitol-cluster-row" key={item.ticker}><strong>{item.ticker}</strong><span>{item.count} 位议员 · {item.politicians.join('、')}</span><small>最近交易日 {item.latestTradeDate||'—'}</small></div>)}</div>:<div className="anchor-empty compact">当前抓取窗口未发现满足规则的集中买入。</div>}</div>
-      {(data.featuredMembers||[]).map(member=><div className="glass-card capitol-card" key={member.name}><div className="anchor-card-head"><div><span className="section-label">重点人物 · WATCHLIST</span><h3>{member.name} 最新可见披露</h3></div><a className="anchor-rule" href={member.sourceUrl} target="_blank" rel="noopener noreferrer">查看人物页 ↗</a></div><div className="capitol-featured-note">全市场最新列表不一定包含重点人物；这里单独读取人物页，避免漏掉佩洛西这类高关注记录。人物页当前列表未直接公开交易日 / 披露日，金额仍以区间展示。</div><div className="capitol-trades-table"><div className="capitol-trades-head capitol-featured-head"><span>议员</span><span>标的</span><span>方向</span><span>交易日</span><span>披露日</span><span>金额区间</span></div>{member.rows.map(row=><div className="capitol-trade-row capitol-featured-row" key={row.id}><span>{row.politician}</span><b>{row.ticker}</b><strong style={{color:typeColor(row.type)}}>{row.type}</strong><span>人物页未公开</span><span>人物页未公开</span><span>{row.amount}</span></div>)}</div></div>)}
+      {!people.length&&(data.featuredMembers||[]).map(member=><div className="glass-card capitol-card" key={member.name}><div className="anchor-card-head"><div><span className="section-label">重点人物 · WATCHLIST</span><h3>{member.name} 最新可见披露</h3></div><a className="anchor-rule" href={member.sourceUrl} target="_blank" rel="noopener noreferrer">查看人物页 ↗</a></div><div className="capitol-featured-note">当前降级源的人物页未直接公开交易日 / 披露日，金额仍以区间展示。</div><div className="capitol-trades-table"><div className="capitol-trades-head capitol-featured-head"><span>议员</span><span>标的</span><span>方向</span><span>交易日</span><span>披露日</span><span>金额区间</span></div>{member.rows.map(row=><div className="capitol-trade-row capitol-featured-row" key={row.id}><span>{row.politician}</span><b>{row.ticker}</b><strong style={{color:typeColor(row.type)}}>{row.type}</strong><span>人物页未公开</span><span>人物页未公开</span><span>{row.amount}</span></div>)}</div></div>)}
     </>}
     <div className="capitol-grid">
       <div className="glass-card capitol-card capitol-data-card"><div className="anchor-card-head"><div><span className="section-label">可获取信息</span><h3>一笔披露能告诉我们什么</h3></div><span className="anchor-rule">公开披露</span></div><div className="capitol-fields">{['议员姓名 / 党派 / 众议院或参议院','股票、ETF、期权或其他证券代码','买入、卖出、交换及交易日期','披露日期与披露延迟天数','金额区间，而非精确成交金额','本人、配偶或受抚养子女账户','原始 PTR 披露文件链接'].map(item=><span key={item}>◆ {item}</span>)}</div><p className="capitol-note">金额通常是区间，交易可延迟披露；公开信息适合做横截面和主题观察，不适合精确复刻个人收益。</p></div>
       <div className="glass-card capitol-card"><div className="anchor-card-head"><div><span className="section-label">关注优先级</span><h3>哪些信号值得看</h3></div><span className="anchor-rule">规则化观察</span></div><div className="capitol-focus-list">{focusRows.map(([title,desc,meaning])=><div className="capitol-focus-row" key={title}><strong>{title}</strong><span>{desc}</span><small>{meaning}</small></div>)}</div></div>
     </div>
     <div className="glass-card capitol-card"><div className="anchor-card-head"><div><span className="section-label">推荐频率</span><h3>怎么盯才不会被噪声带走</h3></div></div><div className="capitol-cadence-table"><div className="capitol-cadence-head"><span>频率</span><span>动作</span><span>重点</span></div>{cadenceRows.map(([period,action,focus])=><div className="capitol-cadence-row" key={period}><strong>{period}</strong><span>{action}</span><span>{focus}</span></div>)}</div></div>
-    <div className="glass-card capitol-card capitol-source-card"><div><span className="section-label">数据接入路线</span><h3>摘要优先，官方原文交叉核对</h3><p>当前站内摘要来自 Capitol Trader 公开页；Capitol Trades 原站和官方 House Clerk / Senate eFD 作为核对入口。后续如原站开放稳定接口，可再切换为原站主源。</p></div><div className="capitol-links"><a href={data?.sourceLinks?.capitolTrades||'https://www.capitoltrades.com/trades'} target="_blank" rel="noopener noreferrer">Capitol Trades 原站</a><a href={data?.sourceLinks?.house||'https://disclosures-clerk.house.gov/FinancialDisclosure/ViewReport'} target="_blank" rel="noopener noreferrer">House Clerk 披露</a><a href={data?.sourceLinks?.senate||'https://efdsearch.senate.gov/search/home/'} target="_blank" rel="noopener noreferrer">Senate eFD 披露</a></div></div>
+    <div className="glass-card capitol-card capitol-source-card"><div><span className="section-label">数据接入路线</span><h3>日期优先，官方原文交叉核对</h3><p>当前站内摘要优先来自 Capitol Markets 的公开披露列表：先按披露日筛选最近 30 天，再按人物汇总；Capitol Trades 原站和官方 House Clerk / Senate eFD 作为核对入口。</p></div><div className="capitol-links"><a href={data?.sourceLinks?.capitolMarkets||'https://capitolmarkets.org/filings'} target="_blank" rel="noopener noreferrer">Capitol Markets 披露页</a><a href={data?.sourceLinks?.capitolTrades||'https://www.capitoltrades.com/trades'} target="_blank" rel="noopener noreferrer">Capitol Trades 原站</a><a href={data?.sourceLinks?.house||'https://disclosures-clerk.house.gov/FinancialDisclosure/ViewReport'} target="_blank" rel="noopener noreferrer">House Clerk 披露</a><a href={data?.sourceLinks?.senate||'https://efdsearch.senate.gov/search/home/'} target="_blank" rel="noopener noreferrer">Senate eFD 披露</a></div></div>
     <div className="anchor-sources">口径提醒：STOCK Act 披露通常不是实时行情，法规允许在收到交易通知后 30 天内、且不晚于交易发生后 45 天提交；因此本模块建议作为“政策/主题观察器”，不作为自动买卖信号。</div>
   </div>;
 }
