@@ -406,6 +406,18 @@ async function fetchAnchorUsYields(force=false){
   return null;
 }
 
+async function fetchCapitolTrades(force=false){
+  const bases=[localStorage.getItem('whl-cloud-url'),DEFAULT_CLOUD_URL,window.location.origin].filter(Boolean).filter((base,index,list)=>list.indexOf(base)===index);
+  for(const proxyBase of bases){
+    try{
+      const query=force?`?refresh=${Date.now()}`:'';
+      const response=await fetch(`${proxyBase}/api/capitol-trades${query}`,{signal:AbortSignal.timeout(15000),cache:force?'no-store':'default'});
+      if(response.ok)return await response.json();
+    }catch(error){console.warn('capitol trades fetch:',proxyBase,error.message);}
+  }
+  return null;
+}
+
 async function fetchStockCloseOnDate(ticker,date,{force=false}={}){
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
   try{
@@ -4388,6 +4400,23 @@ function UsAnchorPanel({data}){
 }
 
 function CapitolTradesPanel(){
+  const [data,setData]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState('');
+  const load=useCallback(async(force=false)=>{
+    setLoading(true);
+    const next=await fetchCapitolTrades(force);
+    if(next){setData(next);setError('');}
+    else setError('暂时没有拿到公开披露摘要，请稍后重试。');
+    setLoading(false);
+  },[]);
+  useEffect(()=>{
+    load(true);
+    const timer=window.setInterval(()=>load(false),12*60*60*1000);
+    return()=>window.clearInterval(timer);
+  },[load]);
+
+  const summary=data?.summary||{};
   const focusRows=[
     ['🟢 同向集中买入','同一股票在 14 天内出现 3 位以上议员净买入','比单个议员的一笔交易更值得跟踪'],
     ['🟠 委员会关联','议员所在委员会与公司所在行业有直接监管或预算关系','优先看“交易 + 职责”是否重叠'],
@@ -4399,15 +4428,35 @@ function CapitolTradesPanel(){
     ['每周一次','汇总近 14 / 30 天','确认主题是否持续、买卖方向是否一致'],
     ['每月 / 季度','回顾议员、行业和标的排名','评估信号是否有持续性，避免追逐旧新闻'],
   ];
+  const metricCards=[
+    ['全站累计披露',summary.totalDisclosedTrades==null?'—':fmt(summary.totalDisclosedTrades,0),'var(--blue)','源页公开累计量'],
+    ['买入 / 卖出',`${fmt(summary.purchaseCount,0)} / ${fmt(summary.saleCount,0)}`,'var(--profit)','本次列表方向统计'],
+    ['买入占比',summary.purchaseRate==null?'—':`${fmt(summary.purchaseRate,1)}%`,'var(--amber)','不是收益预测'],
+    ['当前列表',summary.rowCount==null?'—':fmt(summary.rowCount,0),'var(--purple)','本次解析记录数'],
+  ];
+  const typeColor=(type)=>type==='买入'?ACC.profit:type==='卖出'?ACC.loss:ACC.amber;
   return <div className="capitol-panel">
-    <div className="capitol-hero glass-card"><div><span className="section-label">US POLITICAL TRADES · STOCK ACT FILINGS</span><h3>议员交易雷达</h3><p>把公开披露当作“政策关联度与资金行为”的观察层，不作为实时跟单或内幕交易信号。</p></div><div className="capitol-hero-actions"><a className="btn btn-primary" href="https://www.capitoltrades.com/trades" target="_blank" rel="noopener noreferrer">↗ 打开 Capitol Trades</a><span className="capitol-status">原站需浏览器验证，采用安全外链</span></div></div>
-    <div className="capitol-notice"><strong>为什么不直接 iframe？</strong><span>当前站点会触发 Vercel Security Checkpoint，直接嵌入可能显示空白或验证页。这里先保留原站入口，并把适合纳入监控的字段和规则整理成站内面板。</span></div>
+    <div className="capitol-hero glass-card"><div><span className="section-label">US POLITICAL TRADES · STOCK ACT FILINGS</span><h3>议员交易雷达</h3><p>不用打开网站，直接在这里看最新披露、集中买入和排行；公开交易只做政策关联度与资金行为观察，不作为实时跟单信号。</p></div><div className="capitol-hero-actions"><button className="btn btn-primary" onClick={()=>load(true)} disabled={loading}>{loading?'同步中…':'↻ 刷新摘要'}</button><a className="btn btn-ghost" href={data?.sourceLinks?.capitolTrades||'https://www.capitoltrades.com/trades'} target="_blank" rel="noopener noreferrer">↗ 原站核对</a><span className="capitol-status">{data?.fetchedAt?`最近同步 ${data.fetchedAt.slice(0,16).replace('T',' ')}`:'等待首次同步'}</span></div></div>
+    <div className="capitol-notice"><strong>来源状态</strong><span>{data?.sourceWarning||'正在同步公开披露摘要。'} <a href={data?.sourceLinks?.fallback||'https://capitoltrader.com/latest-trades'} target="_blank" rel="noopener noreferrer">查看第三方公开页</a>。</span></div>
+    {error&&!data&&<div className="anchor-empty">{error}<button className="btn btn-ghost" onClick={()=>load(true)}>重试</button></div>}
+    {data&&<>
+      <div className="capitol-live-head"><div><span className="section-label">LIVE SUMMARY · 最新披露</span><h3>先看今天有没有值得跟踪的信号</h3><p>源页每日更新；当前展示最新 {summary.rowCount||0} 条公开记录，交易日 / 披露日未在该列表直接公开。</p></div><span className="anchor-rule">每 12 小时自动刷新</span></div>
+      <div className="capitol-metric-grid">{metricCards.map(([label,value,color,sub])=><div className="anchor-metric-card capitol-metric-card" key={label}><span>{label}</span><strong style={{color}}>{value}</strong><small>{sub}</small></div>)}</div>
+      <div className="capitol-live-grid">
+        <div className="glass-card capitol-card"><div className="anchor-card-head"><div><span className="section-label">近端披露</span><h3>最新交易明细</h3></div><span className="anchor-rule">源页最新列表</span></div><div className="capitol-trades-table"><div className="capitol-trades-head"><span>议员</span><span>标的</span><span>方向</span><span>交易日</span><span>披露日</span><span>金额区间</span></div>{(data.rows||[]).slice(0,12).map(row=><div className="capitol-trade-row" key={row.id}><span title={row.politician}>{row.politician||'—'}</span><b>{row.ticker||'—'}</b><strong style={{color:typeColor(row.type)}}>{row.type||'—'}</strong><span>{row.tradeDate||'列表未公开'}</span><span>{row.disclosedDate||'列表未公开'}</span><span>{row.amount||'—'}</span></div>)}</div></div>
+        <div className="capitol-side-stack">
+          <div className="glass-card capitol-card"><div className="anchor-card-head"><div><span className="section-label">标的热度</span><h3>出现次数最多</h3></div></div><div className="capitol-rank-list">{(summary.topTickers||[]).slice(0,6).map((item,index)=><div key={item.name}><span>{index+1}. {item.name}</span><b>{item.count} 次</b></div>)}</div></div>
+          <div className="glass-card capitol-card"><div className="anchor-card-head"><div><span className="section-label">议员行为</span><h3>披露次数最多</h3></div></div><div className="capitol-rank-list">{(summary.topPoliticians||[]).slice(0,6).map((item,index)=><div key={item.name}><span>{index+1}. {item.name}</span><b>{item.count} 次</b></div>)}</div></div>
+        </div>
+      </div>
+      <div className="glass-card capitol-card"><div className="anchor-card-head"><div><span className="section-label">异常集中买入</span><h3>14 天内 3 位以上议员同向买入</h3></div><span className="anchor-rule">需要人工复核</span></div>{summary.clusteredBuys?.length?<div className="capitol-cluster-list">{summary.clusteredBuys.map(item=><div className="capitol-cluster-row" key={item.ticker}><strong>{item.ticker}</strong><span>{item.count} 位议员 · {item.politicians.join('、')}</span><small>最近交易日 {item.latestTradeDate||'—'}</small></div>)}</div>:<div className="anchor-empty compact">当前抓取窗口未发现满足规则的集中买入。</div>}</div>
+    </>}
     <div className="capitol-grid">
       <div className="glass-card capitol-card capitol-data-card"><div className="anchor-card-head"><div><span className="section-label">可获取信息</span><h3>一笔披露能告诉我们什么</h3></div><span className="anchor-rule">公开披露</span></div><div className="capitol-fields">{['议员姓名 / 党派 / 众议院或参议院','股票、ETF、期权或其他证券代码','买入、卖出、交换及交易日期','披露日期与披露延迟天数','金额区间，而非精确成交金额','本人、配偶或受抚养子女账户','原始 PTR 披露文件链接'].map(item=><span key={item}>◆ {item}</span>)}</div><p className="capitol-note">金额通常是区间，交易可延迟披露；公开信息适合做横截面和主题观察，不适合精确复刻个人收益。</p></div>
       <div className="glass-card capitol-card"><div className="anchor-card-head"><div><span className="section-label">关注优先级</span><h3>哪些信号值得看</h3></div><span className="anchor-rule">规则化观察</span></div><div className="capitol-focus-list">{focusRows.map(([title,desc,meaning])=><div className="capitol-focus-row" key={title}><strong>{title}</strong><span>{desc}</span><small>{meaning}</small></div>)}</div></div>
     </div>
     <div className="glass-card capitol-card"><div className="anchor-card-head"><div><span className="section-label">推荐频率</span><h3>怎么盯才不会被噪声带走</h3></div></div><div className="capitol-cadence-table"><div className="capitol-cadence-head"><span>频率</span><span>动作</span><span>重点</span></div>{cadenceRows.map(([period,action,focus])=><div className="capitol-cadence-row" key={period}><strong>{period}</strong><span>{action}</span><span>{focus}</span></div>)}</div></div>
-    <div className="glass-card capitol-card capitol-source-card"><div><span className="section-label">数据接入路线</span><h3>先做摘要，再接官方源</h3><p>Capitol Trades 适合作为检索和交叉核对入口；真正落地时建议服务端定时读取 House Clerk 与 Senate eFD 的公开 PTR，再在本站统一标准化。</p></div><div className="capitol-links"><a href="https://www.capitoltrades.com/trades" target="_blank" rel="noopener noreferrer">Capitol Trades 原站</a><a href="https://disclosures-clerk.house.gov/FinancialDisclosure/ViewReport" target="_blank" rel="noopener noreferrer">House Clerk 披露</a><a href="https://efdsearch.senate.gov/search/home/" target="_blank" rel="noopener noreferrer">Senate eFD 披露</a></div></div>
+    <div className="glass-card capitol-card capitol-source-card"><div><span className="section-label">数据接入路线</span><h3>摘要优先，官方原文交叉核对</h3><p>当前站内摘要来自 Capitol Trader 公开页；Capitol Trades 原站和官方 House Clerk / Senate eFD 作为核对入口。后续如原站开放稳定接口，可再切换为原站主源。</p></div><div className="capitol-links"><a href={data?.sourceLinks?.capitolTrades||'https://www.capitoltrades.com/trades'} target="_blank" rel="noopener noreferrer">Capitol Trades 原站</a><a href={data?.sourceLinks?.house||'https://disclosures-clerk.house.gov/FinancialDisclosure/ViewReport'} target="_blank" rel="noopener noreferrer">House Clerk 披露</a><a href={data?.sourceLinks?.senate||'https://efdsearch.senate.gov/search/home/'} target="_blank" rel="noopener noreferrer">Senate eFD 披露</a></div></div>
     <div className="anchor-sources">口径提醒：STOCK Act 披露通常不是实时行情，法规允许在收到交易通知后 30 天内、且不晚于交易发生后 45 天提交；因此本模块建议作为“政策/主题观察器”，不作为自动买卖信号。</div>
   </div>;
 }
@@ -4476,11 +4525,10 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
     if(!nextUsYields)showToast('美股收益率数据暂时不可用，请稍后重试',ACC.amber);
     setRefreshing(false);
   };
-  const refresh=anchorMarket==='us'?refreshUs:anchorMarket==='cn'?refreshCn:()=>showToast('议员交易 Tab 通过原站入口查看，暂不自动抓取第三方页面',ACC.amber);
+  const refresh=anchorMarket==='us'?refreshUs:refreshCn;
   useEffect(()=>{
     if(!active)return undefined;
     let alive=true;
-    if(anchorMarket==='politicians')return()=>{alive=false;};
     // 进入“压舱石”页面时主动绕过代理缓存，避免首屏一直停留在旧快照。
     const load=()=>anchorMarket==='us'
       ? fetchAnchorUsYields(true).then(nextUsYields=>{if(alive)applyFetchedAnchorData(null,null,null,nextUsYields);})
@@ -4535,20 +4583,19 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
     <div className="anchor-panel anim-in">
       <div className="anchor-hero">
         <div>
-          <div className="cnopt-kicker">{anchorMarket==='us'?'US INCOME BASE · TREASURY SPREAD':anchorMarket==='politicians'?'US POLITICAL TRADES · STOCK ACT':'A-SHARE INCOME BASE · 159307'}</div>
+          <div className="cnopt-kicker">{anchorMarket==='us'?'US INCOME BASE · TREASURY SPREAD':'A-SHARE INCOME BASE · 159307'}</div>
           <h2>压舱石 <span>／磐石计划</span></h2>
-          <p>{anchorMarket==='us'?'用美国 10Y − 1Y 利差观察美股定投节奏，按历史分位分段执行。':anchorMarket==='politicians'?'跟踪美国国会议员公开交易披露，观察政策关联、主题集中度与披露延迟。':'以博时红利低波100为人民币定投底仓；分红到账当天，全额手动再买入。'}</p>
+          <p>{anchorMarket==='us'?'用美国 10Y − 1Y 利差观察美股定投节奏，按历史分位分段执行。':'以博时红利低波100为人民币定投底仓；分红到账当天，全额手动再买入。'}</p>
         </div>
         <div className="anchor-hero-actions">
-          {anchorMarket==='us'?<><span className="anchor-badge anchor-badge-us">美股</span><span className="anchor-badge">利差策略</span></>:anchorMarket==='politicians'?<><span className="anchor-badge anchor-badge-us">美股</span><span className="anchor-badge">议员交易</span></>:<><span className="anchor-badge anchor-badge-cn">A股</span><span className="anchor-badge">人民币定投</span><span className="anchor-badge">分红再投</span></>}
-          {anchorMarket==='politicians'?<a className="btn btn-primary" href="https://www.capitoltrades.com/trades" target="_blank" rel="noopener noreferrer">↗ 打开原站</a>:<button className="btn btn-primary" onClick={refresh} disabled={refreshing}>{refreshing?'同步中…':'↻ 刷新数据'}</button>}
+          {anchorMarket==='us'?<><span className="anchor-badge anchor-badge-us">美股</span><span className="anchor-badge">利差策略</span></>:<><span className="anchor-badge anchor-badge-cn">A股</span><span className="anchor-badge">人民币定投</span><span className="anchor-badge">分红再投</span></>}
+          <button className="btn btn-primary" onClick={refresh} disabled={refreshing}>{refreshing?'同步中…':'↻ 刷新数据'}</button>
         </div>
       </div>
 
       <div className="anchor-market-tabs" role="tablist" aria-label="压舱石市场策略">
         <button className={anchorMarket==='cn'?'active':''} role="tab" aria-selected={anchorMarket==='cn'} onClick={()=>setAnchorMarket('cn')}>🇨🇳 A股压舱石</button>
         <button className={anchorMarket==='us'?'active':''} role="tab" aria-selected={anchorMarket==='us'} onClick={()=>setAnchorMarket('us')}>🇺🇸 美股利差策略</button>
-        <button className={anchorMarket==='politicians'?'active':''} role="tab" aria-selected={anchorMarket==='politicians'} onClick={()=>setAnchorMarket('politicians')}>🏛️ 议员交易</button>
       </div>
 
       {anchorMarket==='cn'?<div className="anchor-market-content">
@@ -4625,7 +4672,7 @@ function AnchorPanel({anchor,onChange,showToast,active=false}){
         {!data.transactions.length?<div className="anchor-empty">还没有 159307 交易记录；从第一笔定投开始记录，持仓收益会自动滚动计算。</div>:<div className="anchor-ledger-list"><div className="anchor-ledger-head"><span>日期</span><span>类型</span><span>份额</span><span>成交价</span><span>金额</span><span>备注</span><span/></div>{data.transactions.map(tx=><div className="anchor-ledger-row" key={tx.id}><span>{tx.date}</span><strong className={tx.type==='sell'?'sell':tx.type==='dividend'?'dividend':''}>{tx.type==='sell'?'卖出':tx.type==='dividend'?'分红再投':'正常定投'}</strong><span>{fmt(tx.shares,0)}</span><span>¥{fmtPrice(tx.price)}</span><span>¥{fmt(tx.amount,2)}</span><span>{tx.note||'—'}</span><button onClick={()=>removeTransaction(tx.id)} title="删除流水">×</button></div>)}</div>}
       </div>
       <div className="anchor-sources">数据提示：PE / 股息率来自中证指数官方，PB 使用 ETF.run 公开估值备用源，CN10Y 使用新浪行情并可与 <a href="https://yield.chinabond.com.cn/cbweb-cbrc-web/cbrc/showCbrc" target="_blank" rel="noopener">中国债券信息网</a> 收盘曲线交叉核对。模块只做规则化记录与监控，不替代投资判断。</div>
-      </div>:anchorMarket==='us'?<UsAnchorPanel data={usYields}/>:<CapitolTradesPanel/>}
+      </div>:<UsAnchorPanel data={usYields}/>}
     </div>
   );
 }
@@ -5237,6 +5284,10 @@ function App(){
           </button>
           <div className="sidebar-sep"/>
           <div className="sidebar-section">工具</div>
+          <button className={`tab-btn${tab==='capitol'?' active':''}`} onClick={()=>setTab('capitol')}>
+            <span className="tab-anchor-icon" aria-hidden="true">🏛️</span>
+            <span className="tab-label tab-label-full">议员交易</span><span className="tab-label tab-label-short">议员</span>
+          </button>
           <button className={`tab-btn${tab==='finews'?' active':''}`} onClick={()=>setTab('finews')}>
             <span className="tab-dot" style={{background:ACC.blue}}/>
             <span className="tab-label tab-label-full">收藏网站</span><span className="tab-label tab-label-short">收藏</span>
@@ -5378,6 +5429,8 @@ function App(){
           <div style={{display:tab==='anchor'?'block':'none'}}>
             <AnchorPanel active={tab==='anchor'} anchor={anchor} onChange={mutateAnchor} showToast={showToast}/>
           </div>
+
+          <div style={{display:tab==='capitol'?'block':'none'}}><CapitolTradesPanel/></div>
 
           {/* 期权筛选暂时从导航隐藏，保留组件代码便于后续恢复 */}
           <div style={{display:tab==='scan'?'block':'none'}}><ScanPanel/></div>

@@ -193,6 +193,150 @@ async function fetchJson(url, options = {}) {
   return fetchUpstream(url, options, 'json');
 }
 
+function decodeCapitolHtml(value) {
+  return String(value || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&#x27;/gi, "'")
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#x2F;|&#47;/gi, '/')
+    .replace(/<!--([\s\S]*?)-->/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseCapitolDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function parseCapitolDelay(value) {
+  const match = String(value || '').match(/(\d+)\s*d/i);
+  return match ? Number(match[1]) : null;
+}
+
+function extractCapitolAnchor(rowHtml, pattern) {
+  const match = rowHtml.match(pattern);
+  return match ? decodeCapitolHtml(match[2]) : '';
+}
+
+function parseCapitolTraderRows(html) {
+  const rawHtml = String(html || '');
+  const tbody = rawHtml.match(/<tbody[^>]*>([\s\S]*?)<\/tbody>/i)?.[1] || rawHtml;
+  const rows = [...tbody.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)]
+    .map((match, index) => {
+      const rowHtml = match[1];
+      const cells = [...rowHtml.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((cell) => decodeCapitolHtml(cell[1]));
+      if (cells.length < 4) return null;
+      const politician = extractCapitolAnchor(rowHtml, /href=["']([^"']*\/congressman\/[^"']*)["'][^>]*>([\s\S]*?)<\/a>/i) || cells[0];
+      const ticker = extractCapitolAnchor(rowHtml, /href=["']([^"']*\/ticker\/[^"']*)["'][^>]*>([\s\S]*?)<\/a>/i) || cells[1];
+      const typeText = cells[2] || '';
+      const type = /purchase|buy/i.test(typeText) ? '买入'
+        : /sale|sell/i.test(typeText) ? '卖出'
+          : /exchange/i.test(typeText) ? '交换' : typeText || '其他';
+      // 当前公开列表是四列：议员 / 代码 / 方向 / 金额区间。
+      // 如果上游未来补充日期列，再兼容七列：交易日 / 披露日 / 延迟 / 金额区间。
+      const hasDateColumns = cells.length >= 7;
+      const tradeDate = hasDateColumns ? parseCapitolDate(cells[3]) : null;
+      const disclosedDate = hasDateColumns ? parseCapitolDate(cells[4]) : null;
+      const delayDays = hasDateColumns ? parseCapitolDelay(cells[5]) : null;
+      if (!ticker && !politician) return null;
+      return {
+        id: `${tradeDate || 'unknown'}-${ticker || 'unknown'}-${politician || index}-${index}`,
+        politician,
+        ticker: String(ticker || '').toUpperCase(),
+        type,
+        tradeDate,
+        disclosedDate,
+        delayDays,
+        amount: cells[hasDateColumns ? 6 : 3] || '—',
+        sourceUrl: 'https://capitoltrader.com/latest-trades',
+      };
+    })
+    .filter(Boolean);
+  return rows;
+}
+
+function summarizeCapitolTraderRows(rows) {
+  const validRows = Array.isArray(rows) ? rows : [];
+  const purchases = validRows.filter((row) => row.type === '买入');
+  const sales = validRows.filter((row) => row.type === '卖出');
+  const rank = (items, key) => {
+    const groups = new Map();
+    items.forEach((item) => {
+      const value = String(item[key] || '').trim();
+      if (!value) return;
+      groups.set(value, (groups.get(value) || 0) + 1);
+    });
+    return [...groups.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 8)
+      .map(([name, count]) => ({ name, count }));
+  };
+  const datedPurchases = purchases.filter((row) => row.tradeDate);
+  const clusteredBuys = [];
+  for (const ticker of rank(purchases, 'ticker').map((item) => item.name)) {
+    const tickerRows = datedPurchases.filter((row) => row.ticker === ticker).sort((a, b) => a.tradeDate.localeCompare(b.tradeDate));
+    const windowRows = tickerRows.filter((row, index) => {
+      const start = new Date(row.tradeDate).getTime();
+      const end = new Date(tickerRows[Math.min(tickerRows.length - 1, index + 2)]?.tradeDate || row.tradeDate).getTime();
+      return tickerRows.length >= 3 && Number.isFinite(start) && Number.isFinite(end) && end - start <= 14 * 86400000;
+    });
+    const people = [...new Set(windowRows.map((row) => row.politician).filter(Boolean))];
+    if (people.length >= 3) clusteredBuys.push({ ticker, count: people.length, politicians: people.slice(0, 5), latestTradeDate: windowRows.at(-1)?.tradeDate || null });
+  }
+  const delays = validRows.map((row) => row.delayDays).filter((value) => Number.isFinite(value));
+  const latestDisclosureDate = validRows.map((row) => row.disclosedDate).filter(Boolean).sort().at(-1) || null;
+  return {
+    rowCount: validRows.length,
+    purchaseCount: purchases.length,
+    saleCount: sales.length,
+    purchaseRate: validRows.length ? purchases.length / validRows.length * 100 : null,
+    averageDelayDays: delays.length ? delays.reduce((sum, value) => sum + value, 0) / delays.length : null,
+    latestDisclosureDate,
+    topTickers: rank(validRows, 'ticker'),
+    topPoliticians: rank(validRows, 'politician'),
+    clusteredBuys: clusteredBuys.slice(0, 8),
+  };
+}
+
+async function fetchCapitolTradesSummary() {
+  const html = await fetchText('https://capitoltrader.com/latest-trades', {
+    headers: {
+      Accept: 'text/html,application/xhtml+xml',
+      'Accept-Language': 'en-US,en;q=0.8',
+      Referer: 'https://capitoltrader.com/',
+      'User-Agent': BROWSER_USER_AGENT,
+    },
+    timeoutMs: 10000,
+    attempts: 2,
+  });
+  const rows = parseCapitolTraderRows(html).slice(0, 120);
+  if (!rows.length) throw new Error('议员交易公开页没有解析到最新披露');
+  const summary = summarizeCapitolTraderRows(rows);
+  const totalMatch = decodeCapitolHtml(html).match(/([\d,]+)\s+disclosed trades/i);
+  if (totalMatch) summary.totalDisclosedTrades = Number(totalMatch[1].replace(/,/g, ''));
+  return {
+    provider: 'Capitol Trader public fallback',
+    source: 'Capitol Trader 公开页（第三方汇总）',
+    sourceWarning: 'Capitol Trades 原站当前需要浏览器验证；此处显示的是第三方公开汇总，建议与官方披露原文交叉核对。',
+    fetchedAt: new Date().toISOString(),
+    asOf: summary.latestDisclosureDate || rows[0]?.disclosedDate || null,
+    summary,
+    rows,
+    sourceLinks: {
+      fallback: 'https://capitoltrader.com/latest-trades',
+      capitolTrades: 'https://www.capitoltrades.com/trades',
+      house: 'https://disclosures-clerk.house.gov/FinancialDisclosure/ViewReport',
+      senate: 'https://efdsearch.senate.gov/search/home/',
+    },
+  };
+}
+
 function quoteFreshness(source, quoteTime = null) {
   if (source === 'Tencent' || source === 'tencent-quote-index' || source === 'tencent-etf-realtime') return 'realtime';
   if (source === 'sse-official-realtime') return 'realtime';
@@ -1437,6 +1581,22 @@ module.exports = async function handler(req, res) {
       return res.status(200).json(payload);
     } catch (e) {
       return res.status(502).json({ error: '美股 10Y / 1Y 收益率暂时不可用', detail: e.message });
+    }
+  }
+
+  // ══════════════════════════════════════════════════
+  // 议员交易公开披露摘要
+  // 原站存在浏览器验证，当前使用明确标注的公开第三方回退页；
+  // 页面同时提供 Capitol Trades、House Clerk 和 Senate eFD 交叉核对入口。
+  // /api/capitol-trades
+  // ══════════════════════════════════════════════════
+  if (reqUrl.startsWith('/api/capitol-trades')) {
+    try {
+      const payload = await fetchCapitolTradesSummary();
+      res.setHeader('Cache-Control', reqUrl.includes('refresh=') ? 'no-store' : 'public, s-maxage=21600, stale-while-revalidate=43200');
+      return res.status(200).json(payload);
+    } catch (e) {
+      return res.status(502).json({ error: '议员交易摘要暂时不可用', detail: e.message });
     }
   }
 
