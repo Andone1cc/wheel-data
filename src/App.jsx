@@ -3962,7 +3962,24 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
   const autoCloseExpiredCnPositions=useCallback(async()=>{
     if(cnExpiryAutoRun.current||!cloudReady)return;
     const asOf=today();
-    const due=positions.filter((position)=>position?.expDate&&String(position.expDate).slice(0,10)<=asOf);
+    const seenAutoExpiry=new Set();
+    const dedupedClosed=closed.filter((record)=>{
+      if(!record?.autoExpiry||record.id==null)return true;
+      const id=String(record.id);
+      if(seenAutoExpiry.has(id))return false;
+      seenAutoExpiry.add(id);
+      return true;
+    });
+    const closedChanged=dedupedClosed.length!==closed.length;
+    const closedIds=new Set(dedupedClosed.map((record)=>String(record?.id)));
+    const alreadyClosed=positions.filter((position)=>position?.id!=null&&closedIds.has(String(position.id)));
+    if(closedChanged||alreadyClosed.length){
+      // 云端/旧版本重复写入时，已平仓记录是权威状态；清掉同 ID 的残留活跃仓位，避免继续重复结算。
+      onAccountChange(positions.filter((position)=>!closedIds.has(String(position.id))),dedupedClosed,stocks);
+      if(closedChanged)showToast(`已清理 ${closed.length-dedupedClosed.length} 条重复到期记录`,ACC.amber);
+      return;
+    }
+    const due=positions.filter((position)=>position?.expDate&&String(position.expDate).slice(0,10)<=asOf&&!closedIds.has(String(position.id)));
     if(!due.length){cnExpiryAutoRun.current=false;return;}
     cnExpiryAutoRun.current=true;
     const checked=await Promise.all(due.map(async(position)=>{
