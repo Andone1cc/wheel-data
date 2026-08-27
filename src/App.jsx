@@ -3686,10 +3686,15 @@ function scoreCnOption(p,r,totalMargin=0){
 
 function calcCnClosed(p){
   const r=calcCnOption(p,p.closePrice);
-  const closeFees=cnOptionFee(p.closeFees,r.qty,p.closeFeesManual===true);
+  const closeType=p.closeType||'manual';
+  const closeFees=closeType==='expired'||closeType==='assigned'
+    ?0
+    :cnOptionFee(p.closeFees,r.qty,p.closeFeesManual===true);
   const pnl=r.pnl-closeFees;
   const daysHeld=Math.max(1,daysBetween(p.openDate||today(),p.closeDate||today()));
-  const capital=num(p.marginUsed)||r.openCash||r.nominal;
+  // 卖方未手填保证金时，必须沿用活跃仓位的保证金估算（卖方名义本金），
+  // 不能退回用开仓权利金作本金，否则年化会被放大几十倍。
+  const capital=r.margin||r.openCash||r.nominal;
   return{...r,pnl,totalFees:r.fees+closeFees,daysHeld,annual:calcAnnual(pnl,capital,daysHeld)};
 }
 
