@@ -1925,6 +1925,23 @@ module.exports = async function handler(req, res) {
       return beforeOrOn || rows.sort((a, b) => a.ts - b.ts)[0];
     };
 
+    // 深交所官方接口可直接给出 159922 在指定交易日的标的收盘价。
+    // 到期行权判断必须使用这个“标的价格”，不能使用同日某张期权的结算价。
+    if (/^159922\.SZ$/i.test(ticker)) {
+      try {
+        const report = await fetchSzseReport({
+          CATALOGID: '1815_stock_snapshot', TABKEY: 'tab2', txtDMorJC: '159922',
+          txtBeginDate: date, txtEndDate: date, PAGENO: 1,
+        });
+        const row = (report.data || []).find((item) => marketNumber(item?.ss) > 0);
+        const price = marketNumber(row?.ss);
+        if (price > 0) {
+          res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=604800');
+          return res.status(200).json({ ticker, date, requestedDate: date, price, source: 'SZSE official close' });
+        }
+      } catch {}
+    }
+
     // Yahoo 的 query1 在云函数出口偶尔会返回 429；query2 使用同一数据但
     // 不同边缘节点，作为低成本的第二次尝试。
     for (const host of ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {

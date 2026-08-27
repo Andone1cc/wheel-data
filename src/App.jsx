@@ -443,13 +443,8 @@ async function fetchCnExpiryPrice(position,{force=false}={}){
   const suffix=position.exchange==='SSE'?'.SS':'.SZ';
   const history=await fetchStockCloseOnDate(`${position.underlying}${suffix}`,expiry,{force});
   if(history?.price&&String(history.date)===expiry)return{price:history.price,date:expiry,source:history.source||'History'};
-  // 到期后交易所期权链通常会保留结算价，作为历史 ETF 收盘价不可用时的可靠兜底。
-  try{
-    const snapshot=await fetchCnOptionSnapshot(position.underlying,cnOptionMonthFromDate(expiry),force,true);
-    const contract=findCnPositionContract(position,snapshot?.contracts);
-    const settlement=num(contract?.settlement,NaN);
-    if(Number.isFinite(settlement)&&settlement>0)return{price:settlement,date:expiry,source:contract?.priceSource||'Exchange settlement'};
-  }catch(error){console.warn(`CN expiry settlement ${position.underlying} ${expiry}:`,error.message);}
+  // 不能用期权合约的结算价替代标的 ETF 收盘价。两者含义不同，
+  // 混用会把本来价外的 Put 错判成 ITM，错误生成接货股票。
   return null;
 }
 
@@ -953,6 +948,23 @@ function applyCnAssignedSettlement(position,data,stocks){
     shortfall=remaining;
   }
   return{stocks:nextStocks,shortfall};
+}
+
+function removeCnAutoAssignedLots(record,stocks){
+  const optionId=String(record?.id??'');
+  if(!optionId)return stocks;
+  // 只移除自动行权生成、且明确关联到该期权的合成持仓，绝不碰手工录入的同代码持仓。
+  return stocks.filter((stock)=>!(stock?.source==='assigned'&&String(stock?.fromOptionId??'')===optionId));
+}
+
+function reopenCnPositionFromExpiry(record){
+  const {
+    closePrice,closeDate,closeFees,closeFeesManual,closeType,closedAt,autoExpiry,
+    expiryDecision,expiryStockPrice,expiryPriceDate,expiryPriceSource,expiryPriceKind,
+    assignedShares,assignedCostPerShare,assignedNetCostPerShare,assignedMarketValue,assignedTicker,
+    ...position
+  }=record||{};
+  return{...position,expiryPending:false};
 }
 
 function calcSgov(s){
@@ -3984,6 +3996,53 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
       if(closedChanged)showToast(`已清理 ${closed.length-dedupedClosed.length} 条重复到期记录`,ACC.amber);
       return;
     }
+    // 修复旧版本：旧逻辑曾把期权结算价当成 ETF 到期收盘价，可能误把价外 Put 标记为行权。
+    // 只对没有 expiryPriceKind 的历史自动记录复核；新记录已经明确使用标的收盘价。
+    const legacyAutoAssignments=dedupedClosed.filter((record)=>
+      record?.autoExpiry&&record?.closeType==='assigned'&&record?.type==='P'
+      &&(!record.expiryPriceKind||record.expiryPriceSource==='Exchange settlement')
+    );
+    if(legacyAutoAssignments.length){
+      cnExpiryAutoRun.current=true;
+      const reviewed=await Promise.all(legacyAutoAssignments.map(async(record)=>{
+        const quote=await fetchCnExpiryPrice(record,{force:true});
+        if(!quote?.price||String(quote.date)!==String(record.expDate).slice(0,10))return null;
+        const decision=calcExpiryDecision({type:record.type,strike:record.strike},quote.price);
+        return decision?{record,quote,decision}:null;
+      }));
+      const readyReviews=reviewed.filter(Boolean);
+      if(readyReviews.length){
+        let nextPositions=[...positions];
+        let nextClosed=[...dedupedClosed];
+        let nextStocks=[...stocks];
+        let corrected=0;
+        let keptAssignments=0;
+        readyReviews.forEach(({record,quote,decision})=>{
+          const index=nextClosed.findIndex((item)=>String(item?.id)===String(record.id));
+          if(index<0)return;
+          if(decision.wouldAssign){
+            nextClosed[index]={...record,
+              expiryStockPrice:decision.expiryStockPrice,
+              expiryPriceDate:quote.date,
+              expiryPriceSource:quote.source||'History',
+              expiryPriceKind:'underlying-close',
+            };
+            keptAssignments+=1;
+          }else{
+            nextClosed=nextClosed.filter((item)=>String(item?.id)!==String(record.id));
+            nextPositions.push(reopenCnPositionFromExpiry(record));
+            nextStocks=removeCnAutoAssignedLots(record,nextStocks);
+            corrected+=1;
+          }
+        });
+        onAccountChange(nextPositions,nextClosed,nextStocks);
+        cnExpiryAutoRun.current=false;
+        const detail=keptAssignments?`，保留 ${keptAssignments} 笔真实行权` : '';
+        showToast(`已复核 ${readyReviews.length} 笔历史到期记录，纠正 ${corrected} 笔误行权${detail}`,corrected?ACC.amber:ACC.green);
+        return;
+      }
+      cnExpiryAutoRun.current=false;
+    }
     const due=positions.filter((position)=>position?.expDate&&String(position.expDate).slice(0,10)<=asOf&&!closedIds.has(String(position.id)));
     if(!due.length){cnExpiryAutoRun.current=false;return;}
     cnExpiryAutoRun.current=true;
@@ -4025,6 +4084,7 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
         assignedNetCostPerShare:position.side==='SELL'?Math.max(0,Number(position.strike||0)-Number(position.openPrice||0)):Number(position.strike)||0,
         assignedMarketValue,
         assignedTicker:position.underlying,
+        expiryPriceKind:'underlying-close',
       };
       nextPositions=nextPositions.filter((item)=>item.id!==position.id);
       nextClosed=[record,...nextClosed];
