@@ -436,6 +436,23 @@ async function fetchStockCloseOnDate(ticker,date,{force=false}={}){
   }
 }
 
+async function fetchCnExpiryPrice(position,{force=false}={}){
+  const expiry=String(position?.expDate||'').slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(expiry))return null;
+  // 先尝试 ETF 历史收盘价；Yahoo 对深/沪市场分别使用 .SZ / .SS 后缀。
+  const suffix=position.exchange==='SSE'?'.SS':'.SZ';
+  const history=await fetchStockCloseOnDate(`${position.underlying}${suffix}`,expiry,{force});
+  if(history?.price&&String(history.date)===expiry)return{price:history.price,date:expiry,source:history.source||'History'};
+  // 到期后交易所期权链通常会保留结算价，作为历史 ETF 收盘价不可用时的可靠兜底。
+  try{
+    const snapshot=await fetchCnOptionSnapshot(position.underlying,cnOptionMonthFromDate(expiry),force,true);
+    const contract=findCnPositionContract(position,snapshot?.contracts);
+    const settlement=num(contract?.settlement,NaN);
+    if(Number.isFinite(settlement)&&settlement>0)return{price:settlement,date:expiry,source:contract?.priceSource||'Exchange settlement'};
+  }catch(error){console.warn(`CN expiry settlement ${position.underlying} ${expiry}:`,error.message);}
+  return null;
+}
+
 /* ═══════════════════════════════════════════════════
    OCC 合约代码解析（从 CBOE 返回的 option 字段解析）
    格式：MRVL  260702P00190000（ticker可变长，后跟6位日期+P/C+8位行权价）
@@ -900,6 +917,42 @@ function applyAssignedSettlement(position,data,stocks,sgov){
   }
 
   return{stocks:nextStocks,sgov:nextSgov,shortfall};
+}
+
+function applyCnAssignedSettlement(position,data,stocks){
+  const symbol=String(data.assignedTicker||position.underlying).trim().toUpperCase();
+  const assignedShares=Number(data.assignedShares)||0;
+  const assignedCostPerShare=Number(data.assignedCostPerShare)||0;
+  let nextStocks=[...stocks];
+  let shortfall=0;
+  if(position.type==='P'){
+    const existingIndex=nextStocks.findIndex((stock)=>String(stock.ticker||'').trim().toUpperCase()===symbol&&stock.market!=='HK');
+    if(existingIndex>=0){
+      const existing=nextStocks[existingIndex];
+      const oldShares=Number(existing.shares)||0;
+      const totalShares=oldShares+assignedShares;
+      const totalCost=oldShares*Number(existing.costPerShare||0)+assignedShares*assignedCostPerShare;
+      nextStocks[existingIndex]={...existing,shares:totalShares,costPerShare:totalShares?totalCost/totalShares:0,currentPrice:position.underlyingPrice??existing.currentPrice,source:'assigned'};
+    }else nextStocks.push({
+      id:Date.now(),ticker:symbol,name:position.underlyingName||'',market:'CN',shares:assignedShares,
+      costPerShare:assignedCostPerShare,acquireDate:data.closeDate,source:'assigned',
+      currentPrice:position.underlyingPrice??null,currency:'CNY',fromOptionId:position.id,
+    });
+  }else{
+    let remaining=assignedShares;
+    nextStocks=[];
+    stocks.forEach((stock)=>{
+      const same=stock.market!=='HK'&&String(stock.ticker||'').trim().toUpperCase()===symbol;
+      const shares=Number(stock.shares)||0;
+      if(!same||remaining<=0){nextStocks.push(stock);return;}
+      const delivered=Math.min(shares,remaining);
+      const left=shares-delivered;
+      if(left>0)nextStocks.push({...stock,shares:left});
+      remaining-=delivered;
+    });
+    shortfall=remaining;
+  }
+  return{stocks:nextStocks,shortfall};
 }
 
 function calcSgov(s){
@@ -3718,6 +3771,7 @@ function CnOptionRow({p,totalMargin,currentIndex,onUpdate,onClose,onDelete}){
   const [edit,setEdit]=useState({currentPrice:p.currentPrice??'',underlyingPrice:p.underlyingPrice??'',indexPrice:currentIndex??p.indexPrice??'',delta:p.delta??'',iv:p.iv==null?'':p.iv*100,marginUsed:p.marginUsed??''});
   const [close,setClose]=useState({closePrice:p.currentPrice??'',closeDate:today(),closeFees:String(Math.max(1,num(p.qty,1))*CN_OPTION_FEE_PER_CONTRACT)});
   const r=calcCnOption(p),health=scoreCnOption(p,r,totalMargin);
+  const expired=String(p.expDate||'').slice(0,10)<today();
   const expiryYield=calcCnExpiryYield(p,r);
   const indexPrice=currentIndex??p.indexPrice;
   const indexStrike=cnIndexEquivalent(p.strike,p.underlyingPrice,indexPrice);
@@ -3729,7 +3783,7 @@ function CnOptionRow({p,totalMargin,currentIndex,onUpdate,onClose,onDelete}){
         <div className="cn-position-id"><div><strong>{p.underlying}</strong><span>{p.underlyingName||p.contractCode||'A股期权'}</span></div><div className="cn-chips"><b className={p.side==='SELL'?'sell':'buy'}>{p.side==='SELL'?'卖出':'买入'}</b><b>{p.type==='P'?'PUT 认沽':'CALL 认购'}</b><i>{p.exchange==='SSE'?'上交所':'深交所'}</i></div></div>
         <div className="cn-position-metrics">
           <Stat label="行权价" value={`¥${fmt(p.strike,3)}`} sub={`${r.qty}张 × ${fmt(r.multiplier,0)}`}/>
-          <Stat label="到期" value={`${r.daysLeft}天`} sub={p.expDate}/>
+          <Stat label="到期" value={expired?'已到期':`${r.daysLeft}天`} sub={p.expDate}/>
           <Stat label="开仓 / 现价" value={`${fmt(p.openPrice,4)} / ${fmt(p.currentPrice,4)}`} sub={p.contractCode||'手动录入'}/>
           <Stat label="ETF现价 / 行权价等效指数" value={p.underlyingPrice==null?'待录入':`¥${fmt(p.underlyingPrice,3)} → ${indexStrike==null?'—':fmt(indexStrike,0)}点`} sub={`${indexPrice?`现指数 ${fmt(indexPrice,0)} · `:''}${r.buffer==null?'未计算缓冲':`行权价缓冲 ${fmt(r.buffer,1)}%`}`}/>
           <Stat label="IV / Delta" value={`${p.iv==null?'—':fmt(p.iv*100,1)+'%'} / ${p.delta==null?'—':fmt(p.delta,3)}`} sub={`保证金 ${cnMoney(r.margin)}`}/>
@@ -3804,7 +3858,7 @@ function CnStockRow({stock,hkdCnyRate,onClose,onDelete}){
   );
 }
 
-function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,onClosed,onStocks,onAccountChange,showToast}){
+function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,onClosed,onStocks,onAccountChange,showToast,cloudReady=true}){
   const [view,setView]=useState('options');
   const [showForm,setShowForm]=useState(false);
   const [indexQuote,setIndexQuote]=useState(()=>readCsi500Cache());
@@ -3817,6 +3871,7 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
   const [stockQuery,setStockQuery]=useState('');
   const [closedFilter,setClosedFilter]=useState('ALL');
   const [hkdCnyQuote,setHkdCnyQuote]=useState(()=>readHkdCnyCache(30*24*60*60*1000)||{rate:DEFAULT_HKD_CNY_RATE,source:'fallback'});
+  const cnExpiryAutoRun=React.useRef(false);
   useEffect(()=>{
     let alive=true;
     loadCsi500Index().then(payload=>{if(alive&&payload?.price>0)setIndexQuote(payload);});
@@ -3904,6 +3959,71 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
     initialOptionSync.current=true;
     refreshOptionPositions();
   },[positions.length]);
+  const autoCloseExpiredCnPositions=useCallback(async()=>{
+    if(cnExpiryAutoRun.current||!cloudReady)return;
+    const asOf=today();
+    const due=positions.filter((position)=>position?.expDate&&String(position.expDate).slice(0,10)<=asOf);
+    if(!due.length){cnExpiryAutoRun.current=false;return;}
+    cnExpiryAutoRun.current=true;
+    const checked=await Promise.all(due.map(async(position)=>{
+      const expiry=String(position.expDate).slice(0,10);
+      const quote=await fetchCnExpiryPrice(position,{force:expiry===asOf});
+      if(!quote?.price||String(quote.date)!==expiry)return null;
+      const decision=calcExpiryDecision({type:position.type,strike:position.strike},quote.price);
+      return decision?{position,quote,decision}:null;
+    }));
+    const ready=checked.filter(Boolean);
+    if(!ready.length){cnExpiryAutoRun.current=false;return;}
+    let nextPositions=[...positions];
+    let nextClosed=[...closed];
+    let nextStocks=[...stocks];
+    let assignedCount=0;
+    let expiredCount=0;
+    let assignmentShortfall=0;
+    ready.forEach(({position,quote,decision})=>{
+      const qty=Math.max(1,num(position.qty,1));
+      const multiplier=Math.max(1,num(position.multiplier,10000));
+      const assignedShares=qty*multiplier;
+      const assignedMarketValue=Number(position.strike||0)*assignedShares;
+      const record={
+        ...position,
+        closePrice:0,
+        closeDate:position.expDate,
+        closeFees:0,
+        closeFeesManual:true,
+        closeType:decision.wouldAssign?'assigned':'expired',
+        closedAt:Date.now(),
+        autoExpiry:true,
+        expiryDecision:decision.wouldAssign?'assigned':'expired',
+        expiryStockPrice:decision.expiryStockPrice,
+        expiryPriceDate:quote.date||position.expDate,
+        expiryPriceSource:quote.source||'History',
+        assignedShares,
+        assignedCostPerShare:Number(position.strike)||0,
+        assignedNetCostPerShare:position.side==='SELL'?Math.max(0,Number(position.strike||0)-Number(position.openPrice||0)):Number(position.strike)||0,
+        assignedMarketValue,
+        assignedTicker:position.underlying,
+      };
+      nextPositions=nextPositions.filter((item)=>item.id!==position.id);
+      nextClosed=[record,...nextClosed];
+      if(decision.wouldAssign){
+        assignedCount+=1;
+        const applied=applyCnAssignedSettlement(position,record,nextStocks);
+        nextStocks=applied.stocks;
+        assignmentShortfall+=applied.shortfall||0;
+      }else expiredCount+=1;
+    });
+    onAccountChange(nextPositions,nextClosed,nextStocks);
+    cnExpiryAutoRun.current=ready.length===due.length;
+    const warning=assignmentShortfall?`，Call 股票短缺 ${assignmentShortfall}股`:'';
+    showToast(`A股期权自动到期处理：${assignedCount} 笔行权、${expiredCount} 笔归零${warning}`,assignmentShortfall?ACC.loss:ACC.amber);
+  },[positions,closed,stocks,cloudReady,onAccountChange,showToast]);
+  useEffect(()=>{autoCloseExpiredCnPositions();},[autoCloseExpiredCnPositions]);
+  useEffect(()=>{
+    if(!cloudReady||!positions.some((position)=>position?.expDate&&String(position.expDate).slice(0,10)<=today()))return undefined;
+    const timer=window.setInterval(()=>{cnExpiryAutoRun.current=false;autoCloseExpiredCnPositions();},5*60*1000);
+    return()=>window.clearInterval(timer);
+  },[positions,cloudReady,autoCloseExpiredCnPositions]);
   const refreshStocks=async(force=false)=>{
     if(!stocks.length||refreshingStocks)return;
     setRefreshingStocks(true);
@@ -3980,7 +4100,7 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
           {[['options','活跃期权',positions.length],['stocks','股票持仓',stocks.length],['closed','已平仓',closed.length],['chain','期权数据',null]].map(([key,label,count])=><button key={key} className={view===key?'active':''} onClick={()=>{setView(key);setShowForm(false);}}><span>{label}</span>{count!=null&&<b>{count}</b>}</button>)}
         </div>
         <div className="cn-account-actions">
-          {view==='options'&&<button className="btn cn-account-refresh" onClick={refreshOptionPositions} disabled={refreshingOptions||!positions.length}>{refreshingOptions?'同步行情中…':'↻ 获取最新数据'}</button>}
+          {view==='options'&&<button className="btn cn-account-refresh" onClick={async()=>{await refreshOptionPositions();cnExpiryAutoRun.current=false;await autoCloseExpiredCnPositions();}} disabled={refreshingOptions||!positions.length}>{refreshingOptions?'同步行情中…':'↻ 获取最新数据'}</button>}
           {view==='stocks'&&<button className="btn cn-account-refresh" onClick={()=>refreshStocks(true)} disabled={refreshingStocks||!stocks.length}>{refreshingStocks?'同步行情中…':'↻ 刷新行情'}</button>}
           {view==='chain'&&<button className="btn cn-account-refresh" onClick={()=>optionDataRefreshRef.current?.()} disabled={refreshingOptionData}>{refreshingOptionData?'同步中…':'↻ 刷新数据'}</button>}
           {addLabel&&<button className="btn cn-account-add" onClick={()=>setShowForm(!showForm)}>{showForm?'✕ 取消':`＋ ${addLabel}`}</button>}
@@ -5441,7 +5561,7 @@ function App(){
           {/* A/H 股账户工作台：内部包含活跃期权、股票、已平仓和期权数据 */}
           <div style={{display:tab==='cnaccount'||tab==='cnoptions'?'block':'none'}}>
             <CnAccountPanel positions={cnPositions} closed={cnClosed} stocks={cnStocks} recovery={cnRecovery} onRecover={recoverCnPositions}
-              onPositions={mutateCnPositions} onClosed={mutateCnClosed} onStocks={mutateCnStocks}
+              onPositions={mutateCnPositions} onClosed={mutateCnClosed} onStocks={mutateCnStocks} cloudReady={!cloudPwd||cloudStatus==='ok'}
               onAccountChange={mutateCnAccount} showToast={showToast}/>
           </div>
 
