@@ -172,7 +172,7 @@ select{-webkit-appearance:none;appearance:none}
 .risk-itm{color:#f46a5a;background:rgba(244,106,90,.12);border:1px solid rgba(244,106,90,.25)}
 
 /* ── 收藏网站 / 外部工具入口 ── */
-.link-hub{max-width:980px;margin:0 auto;padding:38px 10px}
+.link-hub{width:100%;max-width:none;box-sizing:border-box;margin:0;padding:38px clamp(24px,3vw,56px)}
 .link-hub-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px}
 .link-hub-title{font-size:22px;font-weight:700;color:var(--ink);letter-spacing:.02em}
 .link-hub-sub{font-size:13px;color:var(--dim);margin-top:6px;line-height:1.6}

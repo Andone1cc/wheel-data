@@ -35,6 +35,84 @@ const normalizeUsStock=(stock)=>{
     quoteFreshness:stock.quoteFreshness||quote?.freshness||null,
   };
 };
+const stockSymbol=(stock)=>String(stock?.ticker||'').trim().toUpperCase();
+const stockLotIds=(stock)=>Array.isArray(stock?.lotIds)&&stock.lotIds.length?stock.lotIds:[stock?.id];
+const updateStockLots=(stocks,stock,patch)=>{
+  const ids=new Set(stockLotIds(stock).filter(id=>id!=null).map(id=>String(id)));
+  return stocks.map(item=>ids.has(String(item?.id))?{...item,...patch}:item);
+};
+const reduceStockLots=(stocks,stock,sharesToClose)=>{
+  const ids=new Set(stockLotIds(stock).filter(id=>id!=null).map(id=>String(id)));
+  let remaining=Math.max(0,Number(sharesToClose)||0);
+  return stocks.flatMap(item=>{
+    if(!ids.has(String(item?.id))||remaining<=0)return[item];
+    const held=Math.max(0,Number(item?.shares)||0);
+    const left=held-Math.min(held,remaining);
+    remaining=Math.max(0,remaining-held);
+    return left>0?[{...item,shares:left}]:[];
+  });
+};
+const stockCostForShares=(stocks,stock,sharesToClose,costOf)=>{
+  const ids=new Set(stockLotIds(stock).filter(id=>id!=null).map(id=>String(id)));
+  let remaining=Math.max(0,Number(sharesToClose)||0),shares=0,cost=0;
+  for(const item of stocks){
+    if(!ids.has(String(item?.id))||remaining<=0)continue;
+    const take=Math.min(Math.max(0,Number(item?.shares)||0),remaining);
+    shares+=take;cost+=take*(Number(costOf(item))||0);remaining-=take;
+  }
+  return shares>0?cost/shares:0;
+};
+const removeStockLots=(stocks,stock)=>{
+  const ids=new Set(stockLotIds(stock).filter(id=>id!=null).map(id=>String(id)));
+  return stocks.filter(item=>!ids.has(String(item?.id)));
+};
+const aggregateStockRecords=(stocks=[],keyOf=stockSymbol)=>{
+  const groups=new Map();
+  stocks.forEach(stock=>{
+    if(!stock||!(Number(stock.shares)>0))return;
+    const key=keyOf(stock);
+    if(!key)return;
+    let group=groups.get(key);
+    if(!group){
+      group={...stock,lotIds:[],lots:[],shares:0,_cashCost:0,_netCost:0,_netCostShares:0,_sources:new Set()};
+      groups.set(key,group);
+    }
+    const shares=Math.max(0,Number(stock.shares)||0);
+    const cashCost=finitePrice(stock.cashCostPerShare)??finitePrice(stock.costPerShare)??0;
+    const netCost=finitePrice(stock.netCostPerShare);
+    group.lotIds.push(stock.id);
+    group.lots.push(stock);
+    group.shares+=shares;
+    group._cashCost+=shares*cashCost;
+    if(netCost!=null){group._netCost+=shares*netCost;group._netCostShares+=shares;}
+    group._sources.add(stock.source||'manual');
+    if(!group.name&&stock.name)group.name=stock.name;
+    if(!group.currentPrice&&finitePrice(stock.currentPrice)!=null)group.currentPrice=finitePrice(stock.currentPrice);
+    if(stock.quoteTime&&(!group.quoteTime||String(stock.quoteTime)>String(group.quoteTime))){
+      group.currentPrice=finitePrice(stock.currentPrice)??group.currentPrice;
+      group.quoteSource=stock.quoteSource||group.quoteSource;
+      group.quoteTime=stock.quoteTime;
+      group.quoteFreshness=stock.quoteFreshness||group.quoteFreshness;
+    }
+    if(stock.acquireDate&&(!group.acquireDate||String(stock.acquireDate)<String(group.acquireDate)))group.acquireDate=stock.acquireDate;
+  });
+  return [...groups.values()].map(group=>{
+    const next={...group,
+      shares:group.shares,
+      costPerShare:group.shares?group._cashCost/group.shares:0,
+      cashCostPerShare:group.shares?group._cashCost/group.shares:0,
+      netCostPerShare:group._netCostShares?group._netCost/group._netCostShares:null,
+      source:group._sources.size===1&&group._sources.has('assigned')?'assigned':group._sources.size>1?'mixed':'manual',
+    };
+    delete next._cashCost;delete next._netCost;delete next._netCostShares;delete next._sources;
+    return next;
+  });
+};
+const aggregateUsStocks=(stocks=[])=>aggregateStockRecords(stocks,stockSymbol);
+const aggregateCnStocks=(stocks=[])=>aggregateStockRecords(stocks,stock=>{
+  const market=stock?.market==='HK'?'HK':'CN';
+  return `${market}:${stockSymbol(stock)}`;
+});
 const daysBetween=(a,b)=>Math.round((new Date(b)-new Date(a))/86400000);
 const today=()=>new Date().toISOString().slice(0,10);
 const calcAnnual=(profit,capital,days)=>{
@@ -3342,7 +3420,7 @@ function StockRow({s,onUpdatePrice,onClose,onDelete}){
         <div style={{padding:'0 14px',display:'flex',flexDirection:'column',gap:2}}>
           <span className="pos-ticker" style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:15,color:V('ink'),transition:'color .18s'}}>{s.ticker}</span>
           <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:V('faint'),letterSpacing:'.04em'}}>
-            {s.source==='assigned'?'📦 接货':'手动录入'}
+            {s.source==='assigned'?'📦 接货':s.source==='mixed'?'多笔合并':'手动录入'}
           </span>
         </div>
         <div style={{display:'flex',flexDirection:'column',gap:2}}>
@@ -3401,8 +3479,9 @@ function StocksTableHeader(){
 }
 
 function StocksSummary({stocks}){
-  if(!stocks.length)return null;
-  const priced=stocks.map(st=>({
+  const grouped=aggregateUsStocks(stocks);
+  if(!grouped.length)return null;
+  const priced=grouped.map(st=>({
     shares:num(st.shares),
     costPerShare:usStockCashCost(st),
     currentPrice:finitePrice(st.currentPrice),
@@ -3431,7 +3510,7 @@ function StocksSummary({stocks}){
         </div>}
         <div style={{display:'flex',flexDirection:'column',gap:4}}>
           <span className="section-label">持股标的</span>
-          <span style={{fontSize:26,fontWeight:700,color:V('dim'),fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{stocks.length}</span>
+          <span style={{fontSize:26,fontWeight:700,color:V('dim'),fontFamily:'IBM Plex Mono,monospace',lineHeight:1}}>{grouped.length}</span>
         </div>
       </div>
     </div>
@@ -3915,9 +3994,10 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
   const filteredClosed=closed.filter(item=>closedFilter==='ALL'||(closedFilter==='STOCK'?item?.assetType==='stock':item?.assetType!=='stock'));
   const scores=positions.map(p=>scoreCnOption(p,calcCnOption(p),totalMargin).score);
   const avgScore=scores.length?Math.round(scores.reduce((a,b)=>a+b,0)/scores.length):null;
-  const cnStocks=stocks.filter(s=>s.market!=='HK'),hkStocks=stocks.filter(s=>s.market==='HK');
+  const groupedStocks=aggregateCnStocks(stocks);
+  const cnStocks=groupedStocks.filter(s=>s.market!=='HK'),hkStocks=groupedStocks.filter(s=>s.market==='HK');
   const normalizedStockQuery=stockQuery.trim().toLowerCase();
-  const filteredStocks=stocks.filter(stock=>{
+  const filteredStocks=groupedStocks.filter(stock=>{
     if(stockMarketFilter==='CN'&&stock.market==='HK')return false;
     if(stockMarketFilter==='HK'&&stock.market!=='HK')return false;
     if(!normalizedStockQuery)return true;
@@ -4152,9 +4232,9 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
   const closeStockPosition=(stock,data)=>{
     const closeShares=Math.min(num(data.closeShares,stock.shares),num(stock.shares));
     if(!(closeShares>0))return;
-    const record={...stock,...data,assetType:'stock',closeShares,closedAt:Date.now()};
-    const remainingShares=num(stock.shares)-closeShares;
-    const nextStocks=remainingShares>0?stocks.map(item=>item.id===stock.id?{...item,shares:remainingShares}:item):stocks.filter(item=>item.id!==stock.id);
+    const costPerShare=stockCostForShares(stocks,stock,closeShares,item=>item.costPerShare);
+    const record={...stock,...data,assetType:'stock',costPerShare,closeShares,closedAt:Date.now()};
+    const nextStocks=reduceStockLots(stocks,stock,closeShares);
     const result=calcCnStockClosed(record,hkdCnyRate);
     onAccountChange(positions,[record,...closed],nextStocks);
     showToast(`${stock.ticker} 已平仓 · ${cnMoney(result.pnl,'CNY',true)}`);
@@ -4172,7 +4252,7 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
       <div className="cn-account-overview">
         <div><span>活跃期权</span><strong>{positions.length}</strong><small>浮盈 {cnMoney(optionPnl,'CNY',true)}</small></div>
         <div><span>期权保证金</span><strong>{cnMoney(totalMargin)}</strong><small>未填则按仓位估算</small></div>
-        <div><span>股票持仓</span><strong>{stocks.length}</strong><small>A 股 {cnStocks.length} · 港股通 {hkStocks.length}</small></div>
+        <div><span>股票持仓</span><strong>{groupedStocks.length}</strong><small>A 股 {cnStocks.length} · 港股通 {hkStocks.length}</small></div>
         <div><span>到期年化</span><strong className={(expiryAnnual??0)>=0?'pos':'neg'}>{fmtA(expiryAnnual)}</strong><small>{positions.length?`预计 ${cnMoney(expiryPnl,'CNY',true)} · ${fmt(expiryDays,0)}天`:'暂无仓位'}</small></div>
         <div><span>已实现收益</span><strong className={closedPnl>=0?'pos':'neg'}>{cnMoney(closedPnl,'CNY',true)}</strong><small>{closed.length} 笔期权/股票记录</small></div>
         <div><span>期权健康分</span><strong style={{color:avgScore==null?V('dim'):scoreColor(avgScore)}}>{avgScore??'—'}</strong><small>{avgScore==null?'暂无仓位':scoreLabel(avgScore)}</small></div>
@@ -4196,16 +4276,16 @@ function CnAccountPanel({positions,closed,stocks,recovery,onRecover,onPositions,
 
       {view==='stocks'&&<>
         {showForm&&<CnStockForm onAdd={s=>{onStocks([...stocks,s]);setShowForm(false);showToast(`已添加 ${s.market==='HK'?'港股通':'A股'} ${s.ticker}${s.currentPrice==null?' · 行情稍后自动重试':` · 当前价 ${cnMoney(cnStockCny(s,s.currentPrice,hkdCnyRate))}`}`);}} onCancel={()=>setShowForm(false)}/>}
-        {!!stocks.length&&<div className="cn-stock-summary"><div><span>A 股 · 人民币</span><strong>{cnMoney(cnTotal.value)}</strong><small>成本 {cnMoney(cnTotal.cost)} · {cnTotal.priced}/{cnStocks.length} 已录价</small></div><div className="hk"><span>港股通 · 折人民币</span><strong>{cnMoney(hkTotal.value)}</strong><small>成本 {cnMoney(hkTotal.cost)} · <button className="cn-fx-button" onClick={editHkdCnyRate} title="点击手动修正 HKD/CNY">HKD/CNY {fmt(hkdCnyRate,4)}{hkdCnyQuote?.manual?' 手动':''}</button> · {hkTotal.priced}/{hkStocks.length} 已录价</small></div></div>}
-        {!!stocks.length&&<div className="cn-stock-toolbar">
+        {!!groupedStocks.length&&<div className="cn-stock-summary"><div><span>A 股 · 人民币</span><strong>{cnMoney(cnTotal.value)}</strong><small>成本 {cnMoney(cnTotal.cost)} · {cnTotal.priced}/{cnStocks.length} 已录价</small></div><div className="hk"><span>港股通 · 折人民币</span><strong>{cnMoney(hkTotal.value)}</strong><small>成本 {cnMoney(hkTotal.cost)} · <button className="cn-fx-button" onClick={editHkdCnyRate} title="点击手动修正 HKD/CNY">HKD/CNY {fmt(hkdCnyRate,4)}{hkdCnyQuote?.manual?' 手动':''}</button> · {hkTotal.priced}/{hkStocks.length} 已录价</small></div></div>}
+        {!!groupedStocks.length&&<div className="cn-stock-toolbar">
           <div className="cnopt-segmented">
             {[['ALL','全部'],['CN','A 股'],['HK','港股通']].map(([value,label])=><button key={value} className={stockMarketFilter===value?'active':''} onClick={()=>setStockMarketFilter(value)}>{label}</button>)}
           </div>
           <input value={stockQuery} onChange={e=>setStockQuery(e.target.value)} placeholder="代码 / 名称筛选"/>
-          <span>{filteredStocks.length}/{stocks.length}</span>
+          <span>{filteredStocks.length}/{groupedStocks.length}</span>
         </div>}
-        {!stocks.length&&!showForm?<div className="cn-account-empty"><span>沪港</span><strong>还没有股票持仓</strong><p>支持 A 股和港股通；成本价、当前价按原币种显示，汇总统一折成人民币。</p><button className="btn btn-primary" onClick={()=>setShowForm(true)}>＋ 录入第一笔</button></div>:(
-          filteredStocks.length?<div className="cn-stock-list">{filteredStocks.map(s=><CnStockRow key={s.id} stock={s} hkdCnyRate={hkdCnyRate} onClose={closeStockPosition} onDelete={id=>onStocks(stocks.filter(item=>item.id!==id))}/>)}</div>
+        {!groupedStocks.length&&!showForm?<div className="cn-account-empty"><span>沪港</span><strong>还没有股票持仓</strong><p>支持 A 股和港股通；成本价、当前价按原币种显示，汇总统一折成人民币。</p><button className="btn btn-primary" onClick={()=>setShowForm(true)}>＋ 录入第一笔</button></div>:(
+          filteredStocks.length?<div className="cn-stock-list">{filteredStocks.map(s=><CnStockRow key={s.id} stock={s} hkdCnyRate={hkdCnyRate} onClose={closeStockPosition} onDelete={()=>onStocks(removeStockLots(stocks,s))}/>)}</div>
           :<div className="cn-account-empty compact"><span>筛选</span><strong>没有匹配的股票持仓</strong><p>换一个市场、代码或名称试试。</p></div>
         )}
       </>}
@@ -5364,10 +5444,9 @@ function App(){
     const closePrice=finitePrice(data.closePrice);
     if(!(closeShares>0)&&closePrice==null)return;
     if(!(closeShares>0)||closePrice==null||closeShares>heldShares)return;
-    const cashCost=usStockCashCost(stock);
+    const cashCost=stockCostForShares(stocks,stock,closeShares,usStockCashCost);
     const record={...stock,assetType:'stock',shares:closeShares,closeShares,closePrice,closeDate:data.closeDate||today(),closeFees:Math.max(0,num(data.closeFees)),cashCostPerShare:cashCost,costPerShare:cashCost,closedAt:Date.now()};
-    const remaining=heldShares-closeShares;
-    mutateStocks(remaining>0?stocks.map(item=>item.id===stock.id?{...item,shares:remaining}:item):stocks.filter(item=>item.id!==stock.id));
+    mutateStocks(reduceStockLots(stocks,stock,closeShares));
     mutateClosed([record,...closed]);
     const result=calcUsStockClosed(record);
     showToast(`${stock.ticker} 股票已平仓，收益 ${fmtM(result.profit)}`,result.profit>=0?ACC.profit:ACC.loss);
@@ -5402,11 +5481,10 @@ function App(){
     mutateClosed(next);
     showToast('股票平仓记录已更新',ACC.teal);
   };
-  const updateStockPrice=(id,price)=>mutateStocks(stocks.map(s=>s.id===id?{...s,currentPrice:price}:s));
-  const removeStock=(id)=>{mutateStocks(stocks.filter(s=>s.id!==id));showToast('已删除股票仓位',ACC.loss);};
   const usOptionClosed=closed.filter(c=>c?.assetType!=='stock');
   const usStockClosed=closed.filter(c=>c?.assetType==='stock');
   const filteredUsClosed=usClosedFilter==='OPTION'?usOptionClosed:usClosedFilter==='STOCK'?usStockClosed:closed;
+  const groupedStocks=aggregateUsStocks(stocks);
 
   const totalMarginUsed=positions.reduce((s,p)=>s+positionMargin(p),0);
 
@@ -5491,13 +5569,13 @@ function App(){
             <span className="tab-dot" style={{background:ACC.profit}}/>
             <span className="tab-label tab-label-full">美股账户</span><span className="tab-label tab-label-short">美股</span>
             <span className="tab-unit">USD</span>
-            <span className="tab-count">{positions.length+stocks.length}</span>
+            <span className="tab-count">{positions.length+groupedStocks.length}</span>
           </button>
           <button className={`tab-btn${tab==='cnaccount'?' active':''}`} onClick={()=>setTab('cnaccount')}>
             <span className="tab-dot" style={{background:ACC.loss}}/>
             <span className="tab-label tab-label-full">A/H 股账户</span><span className="tab-label tab-label-short">A/H</span>
             <span className="tab-unit">CNY</span>
-            <span className="tab-count">{cnPositions.length+cnStocks.length}</span>
+            <span className="tab-count">{cnPositions.length+aggregateCnStocks(cnStocks).length}</span>
           </button>
           <button className={`tab-btn${tab==='anchor'?' active':''}`} onClick={()=>setTab('anchor')}>
             <span className="tab-anchor-icon" aria-hidden="true">⚓</span>
@@ -5532,7 +5610,7 @@ function App(){
               <div className="market-account-nav">
                 <div className="market-account-tabs">
                   {[
-                    ['active','活跃期权',positions.length],['stocks','股票持仓',stocks.length],
+                    ['active','活跃期权',positions.length],['stocks','股票持仓',groupedStocks.length],
                     ['closed','已平仓',closed.length],['sgov','SGOV 底仓',null],
                   ].map(([key,label,count])=><button key={key} className={tab===key?'active':''} onClick={()=>setTab(key)}><span>{label}</span>{count!=null&&<b>{count}</b>}</button>)}
                 </div>
@@ -5547,7 +5625,7 @@ function App(){
                       style={{background:ACC.amberSoft,color:ACC.amber,border:`1.5px solid ${ACC.amber}44`,fontWeight:600}}>
                       {showForm?'✕ 取消':'＋ 录入期权'}
                     </button>}
-                    {tab==='stocks'&&<button onClick={refreshStockPrices} disabled={refreshingStocks||!stocks.length} className="btn"
+                    {tab==='stocks'&&<button onClick={refreshStockPrices} disabled={refreshingStocks||!groupedStocks.length} className="btn"
                       style={{background:refreshingStocks?V('line'):ACC.tealBg,color:refreshingStocks?V('faint'):ACC.teal,border:`1.5px solid ${refreshingStocks?V('line'):`${ACC.teal}44`}`,fontWeight:600}}>
                       {refreshingStocks?'拉取中…':'↻ 刷新股价'}
                     </button>}
@@ -5619,15 +5697,15 @@ function App(){
                 onAdd={s=>{mutateStocks([...stocks,s]);setShowStockForm(false);showToast(`已添加 ${s.ticker} ${s.shares}股`);}}
                 onCancel={()=>setShowStockForm(false)}/>}
               <StocksSummary stocks={stocks}/>
-              {stocks.length===0&&!showStockForm?(
+              {groupedStocks.length===0&&!showStockForm?(
                 <div style={{textAlign:'center',padding:'60px 20px',color:V('faint'),border:`1.5px dashed ${V('line')}`,borderRadius:16}}>
                   <div style={{fontSize:38,marginBottom:12,opacity:.3}}>📊</div>
                   <div style={{fontSize:15,marginBottom:6,color:V('dim')}}>暂无股票仓位</div>
                   <div style={{fontSize:13}}>期权被行权「接货」时自动建仓 · 或点击「录入股票」</div>
                 </div>
-              ):(stocks.length>0&&<>
+              ):(groupedStocks.length>0&&<>
                 <StocksTableHeader/>
-                {stocks.map(s=><StockRow key={s.id} s={s} onUpdatePrice={updateStockPrice} onClose={closeStockPosition} onDelete={removeStock}/>)}
+                {groupedStocks.map(s=><StockRow key={s.id} s={s} onUpdatePrice={price=>mutateStocks(updateStockLots(stocks,s,{currentPrice:price}))} onClose={closeStockPosition} onDelete={()=>mutateStocks(removeStockLots(stocks,s))}/>)}
               </>)}
             </>
           )}
