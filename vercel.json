@@ -31,6 +31,7 @@
     { "source": "/api/cron/cn-options-510500", "destination": "/api/data?cronSymbol=510500" },
     { "source": "/api/cron/cn-options-159922", "destination": "/api/data?cronSymbol=159922" },
     { "source": "/api/cron/qqq-strategy", "destination": "/api/data?cronQqqStrategy=1" },
+    { "source": "/api/qqq-strategy", "destination": "/api/data" },
     { "source": "/api/health",          "destination": "/api/data" },
     { "source": "/api/cboe/:ticker",    "destination": "/api/data" },
     { "source": "/api/quote/:ticker",   "destination": "/api/data" },
