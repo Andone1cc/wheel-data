@@ -78,6 +78,10 @@ const UPSTREAM_POLICY = {
 };
 const upstreamState = new Map();
 const upstreamLocks = new Map();
+let qqqStrategyMemoryCache = { time: 0, data: null };
+const QQQ_STRATEGY_CACHE_KEY = 'wheel_qqq_strategy_latest';
+let qqqPriceHistoryMemoryCache = { time: 0, data: null };
+const QQQ_PRICE_HISTORY_CACHE_KEY = 'wheel_qqq_strategy_price_history';
 const SZSE_HEADERS = {
   Accept: 'application/json, text/plain, */*',
   'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
@@ -1020,7 +1024,8 @@ async function fetchYahooDailySeries(ticker, range = '2y') {
   try {
     const end = new Date();
     const start = new Date(end);
-    start.setUTCFullYear(start.getUTCFullYear() - (range === '5y' ? 5 : 2));
+    if (range === '5d') start.setUTCDate(start.getUTCDate() - 14);
+    else start.setUTCFullYear(start.getUTCFullYear() - (range === '5y' ? 5 : 2));
     const compact = (date) => date.toISOString().slice(0, 10).replace(/-/g, '');
     const raw = await fetchText(
       `https://stooq.com/q/d/l/?s=${encodeURIComponent(stooqSymbol)}&d1=${compact(start)}&d2=${compact(end)}&i=d`,
@@ -1145,19 +1150,104 @@ function calculateQqqLiveSnapshot(series) {
   };
 }
 
-async function fetchQqqStrategySnapshot() {
-  const [ndx, qqq, tqqq] = await Promise.all([
-    fetchYahooDailySeries('^NDX'),
-    fetchYahooDailySeries('QQQ'),
-    fetchYahooDailySeries('TQQQ'),
-  ]);
-  return calculateQqqLiveSnapshot({
-    ndx,
-    qqq,
-    tqqq,
-    qqqByDate: new Map(qqq.map((row) => [row.date, row])),
-    tqqqByDate: new Map(tqqq.map((row) => [row.date, row])),
+async function saveQqqStrategySnapshot(snapshot) {
+  const data = { ...snapshot, cachedAt: new Date().toISOString(), cacheKey: QQQ_STRATEGY_CACHE_KEY };
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (redisUrl && redisToken) {
+    const ok = await redisSet(redisUrl, redisToken, QQQ_STRATEGY_CACHE_KEY, JSON.stringify(data));
+    if (!ok) throw new Error('QQQ 策略快照写入 Redis 失败');
+  }
+  qqqStrategyMemoryCache = { time: Date.now(), data };
+  return data;
+}
+
+async function readQqqStrategySnapshot() {
+  if (qqqStrategyMemoryCache.data) return qqqStrategyMemoryCache.data;
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!redisUrl || !redisToken) return null;
+  const raw = await redisGet(redisUrl, redisToken, QQQ_STRATEGY_CACHE_KEY);
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw);
+    if (data?.current && Array.isArray(data?.halfYearAnnualized)) {
+      qqqStrategyMemoryCache = { time: Date.now(), data };
+      return data;
+    }
+  } catch {}
+  return null;
+}
+
+async function readQqqPriceHistory() {
+  if (qqqPriceHistoryMemoryCache.data) return qqqPriceHistoryMemoryCache.data;
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!redisUrl || !redisToken) return null;
+  const raw = await redisGet(redisUrl, redisToken, QQQ_PRICE_HISTORY_CACHE_KEY);
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw);
+    if (Array.isArray(data) && data.length) {
+      qqqPriceHistoryMemoryCache = { time: Date.now(), data };
+      return data;
+    }
+  } catch {}
+  return null;
+}
+
+async function saveQqqPriceHistory(history) {
+  const data = history.slice(-900);
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (redisUrl && redisToken) {
+    const ok = await redisSet(redisUrl, redisToken, QQQ_PRICE_HISTORY_CACHE_KEY, JSON.stringify(data));
+    if (!ok) throw new Error('QQQ 历史价格写入 Redis 失败');
+  }
+  qqqPriceHistoryMemoryCache = { time: Date.now(), data };
+  return data;
+}
+
+function mergeQqqPriceHistory(history, series) {
+  const merged = new Map((Array.isArray(history) ? history : []).map((row) => [row.date, row]));
+  const qqqByDate = new Map(series.qqq.map((row) => [row.date, row.close]));
+  const tqqqByDate = new Map(series.tqqq.map((row) => [row.date, row.close]));
+  series.ndx.forEach((row) => {
+    const qqq = qqqByDate.get(row.date);
+    const tqqq = tqqqByDate.get(row.date);
+    if (row.close > 0 && qqq > 0 && tqqq > 0) merged.set(row.date, { date: row.date, ndx: row.close, qqq, tqqq });
   });
+  return [...merged.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-900);
+}
+
+async function refreshQqqCachedSnapshot() {
+  let history = await readQqqPriceHistory();
+  if (!history || history.length < 200) {
+    const [ndx, qqq, tqqq] = await Promise.all([
+      fetchYahooDailySeries('^NDX'),
+      fetchYahooDailySeries('QQQ'),
+      fetchYahooDailySeries('TQQQ'),
+    ]);
+    history = mergeQqqPriceHistory([], { ndx, qqq, tqqq });
+  } else {
+    // 历史缓存已经足够计算 MA175 / σ20 / 半年年化，此后只取最近几天补齐
+    // 周末、节假日和上游延迟造成的缺口，不再每次重拉两年历史。
+    const [ndx, qqq, tqqq] = await Promise.all([
+      fetchYahooDailySeries('^NDX', '5d'),
+      fetchYahooDailySeries('QQQ', '5d'),
+      fetchYahooDailySeries('TQQQ', '5d'),
+    ]);
+    history = mergeQqqPriceHistory(history, { ndx, qqq, tqqq });
+  }
+  if (history.length < 200) throw new Error('QQQ 历史价格缓存不足 200 个共同交易日');
+  await saveQqqPriceHistory(history);
+  return saveQqqStrategySnapshot(calculateQqqLiveSnapshot({
+    ndx: history.map((row) => ({ date: row.date, close: row.ndx })),
+    qqq: history.map((row) => ({ date: row.date, close: row.qqq })),
+    tqqq: history.map((row) => ({ date: row.date, close: row.tqqq })),
+    qqqByDate: new Map(history.map((row) => [row.date, { date: row.date, close: row.qqq }])),
+    tqqqByDate: new Map(history.map((row) => [row.date, { date: row.date, close: row.tqqq }])),
+  }));
 }
 
 function normalCdf(x) {
@@ -1885,6 +1975,26 @@ module.exports = async function handler(req, res) {
   }
 
   // ══════════════════════════════════════════════════
+  // QQQ 策略日线缓存任务（Vercel Cron 专用）
+  // 页面不触发上游请求，只读取 wheel_qqq_strategy_latest。
+  // ══════════════════════════════════════════════════
+  if (reqUrl.startsWith('/api/cron/qqq-strategy') || reqUrl.includes('cronQqqStrategy=1')) {
+    if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+    const cronSecret = process.env.CRON_SECRET;
+    const cronAuthorized = cronSecret && safeEqual(token, cronSecret);
+    if (process.env.NODE_ENV === 'production' && !cronAuthorized) {
+      return res.status(401).json({ error: 'Cron secret 不正确' });
+    }
+    try {
+      const snapshot = await refreshQqqCachedSnapshot();
+      return res.status(200).json({ ok: true, asOf: snapshot.asOf, cachedAt: snapshot.cachedAt, source: snapshot.source });
+    } catch (error) {
+      // 不覆盖上一次成功快照；下一次定时任务继续重试。
+      return res.status(502).json({ error: 'QQQ 策略缓存刷新失败', detail: error.message });
+    }
+  }
+
+  // ══════════════════════════════════════════════════
   // 富途 OpenD API 代理（需密码 —— 这条链路能直接访问你的
   // 真实交易网关，不鉴权=任何人都能读写你的行情/仓位接口）
   // /api/futu/* → 转发到富途服务器
@@ -2009,11 +2119,12 @@ module.exports = async function handler(req, res) {
   // ══════════════════════════════════════════════════
   if (reqUrl.startsWith('/api/qqq-strategy')) {
     try {
-      const snapshot = await fetchQqqStrategySnapshot();
-      res.setHeader('Cache-Control', reqUrl.includes('refresh=') ? 'no-store' : 'public, s-maxage=900, stale-while-revalidate=3600');
-      return res.status(200).json(snapshot);
+      const snapshot = await readQqqStrategySnapshot();
+      if (!snapshot) return res.status(503).json({ error: 'QQQ 策略缓存尚未生成，请等待定时任务完成' });
+      res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=1800');
+      return res.status(200).json({ ...snapshot, cached: true });
     } catch (e) {
-      return res.status(502).json({ error: 'QQQ 策略行情暂时不可用', detail: e.message });
+      return res.status(503).json({ error: 'QQQ 策略缓存读取失败', detail: e.message });
     }
   }
 
