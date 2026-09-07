@@ -1147,24 +1147,43 @@ function calculateQqqLiveSnapshot(series) {
     };
   }).slice(-126);
   const latestOperationCutoff = new Date(`${latest.date}T00:00:00Z`).getTime() - 31 * 86400000;
-  const operations = points.filter((point) => new Date(`${point.date}T00:00:00Z`).getTime() >= latestOperationCutoff)
-    .map((point) => {
-      const previous = points[points.indexOf(point) - 1];
-      const targetChanged = previous && Math.abs(point.tqqqWeight - previous.tqqqWeight) >= 4;
-      const day = new Date(`${point.date}T00:00:00Z`).getUTCDay();
-      const action = !point.bullish
-        ? (previous?.bullish ? '趋势破位 · 次日防守' : '防守观察 · 不调仓')
-        : (!previous || !previous.bullish ? '恢复多头 · 执行日调仓' : day === 5 && targetChanged ? '周度调仓' : '观察 · 不调仓');
-      return {
-        date: point.date,
-        action,
-        trend: point.bullish ? '多头' : '防守',
-        sigma20: Number(point.sigma20.toFixed(2)),
-        tqqq: Number(point.tqqqWeight.toFixed(1)),
-        qqq: Number(point.qqqWeight.toFixed(1)),
-        cash: Number(point.cashWeight.toFixed(1)),
-      };
-    });
+  // 目标仓位每天都会随 σ20 变化，但实际仓位只在周度决策日更新。
+  // 4% 无操作带必须与“上次已执行仓位”比较，不能与前一天目标比较。
+  let executedTqqq = 0;
+  const operationHistory = points.map((point, index) => {
+    const previous = points[index - 1];
+    const next = points[index + 1];
+    const pointDay = new Date(`${point.date}T00:00:00Z`).getUTCDay();
+    const nextDay = next ? new Date(`${next.date}T00:00:00Z`).getUTCDay() : null;
+    const isWeekLast = !next || nextDay <= pointDay;
+    const currentTqqq = executedTqqq;
+    const rebalanceDiff = point.tqqqWeight - currentTqqq;
+    const needsRebalance = Math.abs(rebalanceDiff) >= 4 || (point.tqqqWeight === 0 && currentTqqq > 0);
+    let action;
+    if (!point.bullish) {
+      action = previous?.bullish ? '趋势破位 · 次日防守' : '防守观察 · 不调仓';
+      executedTqqq = 0;
+    } else if (isWeekLast && needsRebalance) {
+      action = previous && !previous.bullish ? '恢复多头 · 下周一调仓' : '周度调仓 · 下周一执行';
+      executedTqqq = point.tqqqWeight;
+    } else if (previous && !previous.bullish) {
+      action = '恢复多头 · 等周度调仓';
+    } else {
+      action = '观察 · 不调仓';
+    }
+    return {
+      date: point.date,
+      action,
+      trend: point.bullish ? '多头' : '防守',
+      sigma20: Number(point.sigma20.toFixed(2)),
+      tqqq: Number(point.tqqqWeight.toFixed(1)),
+      qqq: Number(point.qqqWeight.toFixed(1)),
+      cash: Number(point.cashWeight.toFixed(1)),
+      currentTqqq: Number(currentTqqq.toFixed(1)),
+      rebalanceDiff: Number(rebalanceDiff.toFixed(1)),
+    };
+  });
+  const operations = operationHistory.filter((row) => new Date(`${row.date}T00:00:00Z`).getTime() >= latestOperationCutoff);
   const latestQqq = rows.at(-1);
   const latestTqqq = rows.at(-1);
   return {
