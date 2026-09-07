@@ -71,6 +71,7 @@ const UPSTREAM_POLICY = {
   'qt.gtimg.cn': { minIntervalMs: 120, cooldownMs: 5000 },
   'cdn.cboe.com': { minIntervalMs: 220, cooldownMs: 8000 },
   'query1.finance.yahoo.com': { minIntervalMs: 180, cooldownMs: 8000 },
+  'api.nasdaq.com': { minIntervalMs: 280, cooldownMs: 8000 },
   'yunhq.sse.com.cn': { minIntervalMs: 180, cooldownMs: 5000 },
   'szse.cn': { minIntervalMs: 180, cooldownMs: 5000 },
   'open.er-api.com': { minIntervalMs: 120, cooldownMs: 5000 },
@@ -122,7 +123,7 @@ async function beforeUpstreamRequest(url) {
   const policy = upstreamPolicy(url);
   // 深交所报告接口并发请求容易触发网关限流；上交所行情接口支持并行拉取
   // 合约链和标的行情，不能让两次请求排队后把 Vercel 函数拖过超时上限。
-  const serialized = host === 'www.szse.cn';
+  const serialized = host === 'www.szse.cn' || host === 'api.nasdaq.com';
   const previous = serialized ? (upstreamLocks.get(host) || Promise.resolve()) : Promise.resolve();
   let release;
   const current = new Promise((resolve) => { release = resolve; });
@@ -987,6 +988,47 @@ async function fetchUsAnchorYields() {
 
 async function fetchYahooDailySeries(ticker, range = '2y') {
   let lastError;
+  // Nasdaq 历史接口对 NDX、QQQ、TQQQ 都能返回完整日线；优先使用它，
+  // 避免 Vercel 出口同时访问 Yahoo 时被 429 限流。
+  try {
+    const symbol = ticker === '^NDX' ? 'NDX' : ticker.toUpperCase().split('.')[0];
+    const assetClass = ticker === '^NDX' ? 'index' : 'etf';
+    const end = new Date();
+    const start = new Date(end);
+    if (range === '5d') start.setUTCDate(start.getUTCDate() - 14);
+    else start.setUTCFullYear(start.getUTCFullYear() - (range === '5y' ? 5 : 2));
+    const day = (date) => date.toISOString().slice(0, 10);
+    const url = new URL(`https://api.nasdaq.com/api/quote/${encodeURIComponent(symbol)}/historical`);
+    url.searchParams.set('assetclass', assetClass);
+    url.searchParams.set('fromdate', day(start));
+    url.searchParams.set('todate', day(end));
+    url.searchParams.set('limit', range === '5d' ? '50' : '1000');
+    const payload = await fetchJson(url.toString(), {
+      headers: {
+        Accept: 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        Origin: 'https://www.nasdaq.com',
+        Referer: 'https://www.nasdaq.com/',
+        'User-Agent': BROWSER_USER_AGENT,
+      },
+      timeoutMs: 12000,
+      attempts: 1,
+    });
+    const rows = (payload?.data?.tradesTable?.rows || []).map((row) => {
+      const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(row.date || ''));
+      if (!match) return null;
+      const close = marketNumber(row.close);
+      return {
+        date: `${match[3]}-${match[1]}-${match[2]}`,
+        close,
+      };
+    }).filter((row) => row && /^\d{4}-\d{2}-\d{2}$/.test(row.date) && row.close > 0)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    if (rows.length) return rows;
+    lastError = new Error(`${ticker} Nasdaq 没有可用日线`);
+  } catch (error) {
+    lastError = error;
+  }
   for (const host of ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {
     try {
       const payload = await fetchJson(
@@ -1146,7 +1188,7 @@ function calculateQqqLiveSnapshot(series) {
     },
     halfYearAnnualized: halfYearSeries,
     recentOperations: operations,
-    source: 'Yahoo Finance；限流时回退 Stooq · NDX / QQQ / TQQQ 日收盘（延迟）',
+    source: 'Nasdaq 历史日线；失败时回退 Yahoo Finance / Stooq · NDX / QQQ / TQQQ 日收盘（延迟）',
   };
 }
 
