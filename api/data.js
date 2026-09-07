@@ -981,6 +981,185 @@ async function fetchUsAnchorYields() {
   };
 }
 
+async function fetchYahooDailySeries(ticker, range = '2y') {
+  let lastError;
+  for (const host of ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {
+    try {
+      const payload = await fetchJson(
+        `https://${host}/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=${range}&events=div%2Csplits`,
+        {
+          headers: {
+            Accept: 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            Referer: 'https://finance.yahoo.com/',
+            'User-Agent': BROWSER_USER_AGENT,
+          },
+          timeoutMs: 8000,
+          attempts: 1,
+        },
+      );
+      const result = payload?.chart?.result?.[0];
+      const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
+      const closes = Array.isArray(result?.indicators?.quote?.[0]?.close)
+        ? result.indicators.quote[0].close
+        : [];
+      const rows = timestamps.map((timestamp, index) => {
+        const close = finiteNumber(closes[index]);
+        return {
+          date: new Date(Number(timestamp) * 1000).toISOString().slice(0, 10),
+          close,
+        };
+      }).filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date) && row.close > 0);
+      if (rows.length) return rows;
+      lastError = new Error(`${ticker} 没有可用日线`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  const stooqSymbol = ticker === '^NDX' ? '^ndx' : `${ticker.toLowerCase()}.us`;
+  try {
+    const end = new Date();
+    const start = new Date(end);
+    start.setUTCFullYear(start.getUTCFullYear() - (range === '5y' ? 5 : 2));
+    const compact = (date) => date.toISOString().slice(0, 10).replace(/-/g, '');
+    const raw = await fetchText(
+      `https://stooq.com/q/d/l/?s=${encodeURIComponent(stooqSymbol)}&d1=${compact(start)}&d2=${compact(end)}&i=d`,
+      { headers: { Accept: 'text/csv,text/plain,*/*', 'User-Agent': BROWSER_USER_AGENT }, timeoutMs: 8000, attempts: 1 },
+    );
+    const rows = String(raw || '').trim().split(/\r?\n/).slice(1).map((line) => {
+      const fields = line.split(',');
+      const close = finiteNumber(fields[4]);
+      return { date: fields[0], close };
+    }).filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date || '') && row.close > 0);
+    if (rows.length) return rows;
+  } catch (error) {
+    lastError = error;
+  }
+  throw lastError || new Error(`${ticker} 日线暂时不可用`);
+}
+
+function calculateQqqLiveSnapshot(series) {
+  const byDate = new Map(series.ndx.map((row) => [row.date, {
+    date: row.date,
+    ndx: row.close,
+    qqq: series.qqqByDate.get(row.date)?.close ?? null,
+    tqqq: series.tqqqByDate.get(row.date)?.close ?? null,
+  }]));
+  const rows = [...byDate.values()]
+    .filter((row) => row.qqq > 0 && row.tqqq > 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (rows.length < 200) throw new Error('QQQ / TQQQ / NDX 共同日线不足，暂时无法计算');
+
+  const mean = (values) => values.reduce((sum, value) => sum + value, 0) / values.length;
+  const sampleStd = (values) => {
+    if (values.length < 2) return null;
+    const average = mean(values);
+    return Math.sqrt(values.reduce((sum, value) => sum + (value - average) ** 2, 0) / (values.length - 1));
+  };
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+  const points = [];
+  for (let index = 175; index < rows.length; index += 1) {
+    const row = rows[index];
+    const maWindow = rows.slice(index - 174, index + 1).map((item) => item.ndx);
+    const returns = rows.slice(Math.max(1, index - 19), index + 1)
+      .map((item, offset) => item.ndx / rows[Math.max(1, index - 19) + offset - 1].ndx - 1);
+    if (returns.length < 20) continue;
+    const sigma = sampleStd(returns) * Math.sqrt(252) * 100;
+    const bullish = row.ndx > mean(maWindow);
+    const tqqqWeight = bullish ? clamp(19 / (3 * sigma), 0, 1) * 100 : 0;
+    const qqqWeight = bullish ? 100 - tqqqWeight : 50;
+    points.push({ ...row, ma: mean(maWindow), sigma20: sigma, bullish, tqqqWeight, qqqWeight, cashWeight: 100 - tqqqWeight - qqqWeight });
+  }
+  const latest = points.at(-1);
+  if (!latest) throw new Error('QQQ 策略没有最新计算点');
+
+  const dailyStrategyReturns = [];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const current = points[index];
+    const next = points[index + 1];
+    const qqqReturn = next.qqq / current.qqq;
+    const tqqqReturn = next.tqqq / current.tqqq;
+    const factor = current.qqqWeight / 100 * qqqReturn
+      + current.tqqqWeight / 100 * tqqqReturn
+      + current.cashWeight / 100;
+    if (Number.isFinite(factor) && factor > 0) dailyStrategyReturns.push({ date: next.date, factor });
+  }
+  const window = dailyStrategyReturns.slice(-252);
+  const factor = window.reduce((product, item) => product * item.factor, 1);
+  const rollingAnnualized = window.length ? (factor ** (252 / window.length) - 1) * 100 : null;
+  const halfYearSeries = dailyStrategyReturns.map((item, index) => {
+    const halfYearWindow = dailyStrategyReturns.slice(Math.max(0, index - 125), index + 1);
+    const halfYearFactor = halfYearWindow.reduce((product, row) => product * row.factor, 1);
+    const point = points.find((row) => row.date === item.date);
+    return {
+      date: item.date,
+      annualized: Number(((halfYearFactor ** (252 / halfYearWindow.length) - 1) * 100).toFixed(2)),
+      sigma20: Number((point?.sigma20 || 0).toFixed(2)),
+      tqqq: Number((point?.tqqqWeight || 0).toFixed(1)),
+      qqq: Number((point?.qqqWeight || 0).toFixed(1)),
+    };
+  }).slice(-126);
+  const latestOperationCutoff = new Date(`${latest.date}T00:00:00Z`).getTime() - 31 * 86400000;
+  const operations = points.filter((point) => new Date(`${point.date}T00:00:00Z`).getTime() >= latestOperationCutoff)
+    .map((point) => {
+      const previous = points[points.indexOf(point) - 1];
+      const targetChanged = previous && Math.abs(point.tqqqWeight - previous.tqqqWeight) >= 4;
+      const day = new Date(`${point.date}T00:00:00Z`).getUTCDay();
+      const action = !point.bullish
+        ? (previous?.bullish ? '趋势破位 · 次日防守' : '防守观察 · 不调仓')
+        : (!previous || !previous.bullish ? '恢复多头 · 执行日调仓' : day === 5 && targetChanged ? '周度调仓' : '观察 · 不调仓');
+      return {
+        date: point.date,
+        action,
+        trend: point.bullish ? '多头' : '防守',
+        sigma20: Number(point.sigma20.toFixed(2)),
+        tqqq: Number(point.tqqqWeight.toFixed(1)),
+        qqq: Number(point.qqqWeight.toFixed(1)),
+        cash: Number(point.cashWeight.toFixed(1)),
+      };
+    });
+  const latestQqq = rows.at(-1);
+  const latestTqqq = rows.at(-1);
+  return {
+    asOf: latest.date,
+    current: {
+      ndx: Number(latest.ndx.toFixed(2)),
+      ma: Number(latest.ma.toFixed(2)),
+      maDistance: Number(((latest.ndx / latest.ma - 1) * 100).toFixed(2)),
+      trend: latest.tqqqWeight > 0 ? '多头' : '防守',
+      sigma20: Number(latest.sigma20.toFixed(2)),
+      tqqq: Number(latest.tqqqWeight.toFixed(1)),
+      qqq: Number(latest.qqqWeight.toFixed(1)),
+      cash: Number(latest.cashWeight.toFixed(1)),
+      qqqPrice: Number(latestQqq.qqq.toFixed(4)),
+      tqqqPrice: Number(latestTqqq.tqqq.toFixed(4)),
+    },
+    performance: {
+      rollingAnnualized: rollingAnnualized == null ? null : Number(rollingAnnualized.toFixed(2)),
+      windowDays: window.length,
+      basis: '最近 252 个交易日 · QQQ/TQQQ 股票层 · 不含 Put 收益',
+    },
+    halfYearAnnualized: halfYearSeries,
+    recentOperations: operations,
+    source: 'Yahoo Finance；限流时回退 Stooq · NDX / QQQ / TQQQ 日收盘（延迟）',
+  };
+}
+
+async function fetchQqqStrategySnapshot() {
+  const [ndx, qqq, tqqq] = await Promise.all([
+    fetchYahooDailySeries('^NDX'),
+    fetchYahooDailySeries('QQQ'),
+    fetchYahooDailySeries('TQQQ'),
+  ]);
+  return calculateQqqLiveSnapshot({
+    ndx,
+    qqq,
+    tqqq,
+    qqqByDate: new Map(qqq.map((row) => [row.date, row])),
+    tqqqByDate: new Map(tqqq.map((row) => [row.date, row])),
+  });
+}
+
 function normalCdf(x) {
   const sign = x < 0 ? -1 : 1;
   const z = Math.abs(x) / Math.sqrt(2);
@@ -1828,6 +2007,16 @@ module.exports = async function handler(req, res) {
   // ══════════════════════════════════════════════════
   // 股价代理（Yahoo v8，给主面板刷新用）
   // ══════════════════════════════════════════════════
+  if (reqUrl.startsWith('/api/qqq-strategy')) {
+    try {
+      const snapshot = await fetchQqqStrategySnapshot();
+      res.setHeader('Cache-Control', reqUrl.includes('refresh=') ? 'no-store' : 'public, s-maxage=900, stale-while-revalidate=3600');
+      return res.status(200).json(snapshot);
+    } catch (e) {
+      return res.status(502).json({ error: 'QQQ 策略行情暂时不可用', detail: e.message });
+    }
+  }
+
   if (reqUrl.startsWith('/api/quote/')) {
     const ticker = decodeURIComponent(reqUrl.replace('/api/quote/', '').split('?')[0]);
     try {

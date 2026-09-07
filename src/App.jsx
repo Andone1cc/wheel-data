@@ -497,6 +497,18 @@ async function fetchCapitolTrades(force=false){
   return null;
 }
 
+async function fetchQqqStrategySnapshot(force=false){
+  const bases=[localStorage.getItem('whl-cloud-url'),DEFAULT_CLOUD_URL,window.location.origin].filter(Boolean).filter((base,index,list)=>list.indexOf(base)===index);
+  for(const proxyBase of bases){
+    try{
+      const query=force?`?refresh=${Date.now()}`:'';
+      const response=await fetch(`${proxyBase}/api/qqq-strategy${query}`,{signal:AbortSignal.timeout(20000),cache:force?'no-store':'default'});
+      if(response.ok)return await response.json();
+    }catch(error){console.warn('QQQ strategy snapshot fetch:',proxyBase,error.message);}
+  }
+  return null;
+}
+
 async function fetchStockCloseOnDate(ticker,date,{force=false}={}){
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
   try{
@@ -4682,10 +4694,86 @@ function UsAnchorPanel({data}){
   </div>;
 }
 
+function QqqAnnualizedChart({rows}){
+  const [activeIndex,setActiveIndex]=useState(Math.max(0,rows.length-1));
+  const [dragging,setDragging]=useState(false);
+  const width=1000,height=320,left=62,right=20,top=22,bottom=40;
+  if(!rows.length)return <div className="anchor-empty">最新行情同步后展示半年滚动年化曲线。</div>;
+  const clamp=(value,minValue,maxValue)=>Math.min(maxValue,Math.max(minValue,value));
+  const safeIndex=clamp(activeIndex,0,rows.length-1);
+  const values=rows.map(row=>Number(row.annualized)).filter(Number.isFinite);
+  const rawMin=Math.min(...values),rawMax=Math.max(...values),padding=Math.max((rawMax-rawMin)*.12,1);
+  const min=rawMin-padding,max=rawMax+padding,plotWidth=width-left-right,plotHeight=height-top-bottom;
+  const xFor=(index)=>left+(rows.length===1?plotWidth/2:index/(rows.length-1)*plotWidth);
+  const yFor=(value)=>top+(max-Number(value))/(max-min)*plotHeight;
+  const grid=Array.from({length:5},(_,index)=>{const value=max-(max-min)*index/4;return{value,y:top+plotHeight*index/4};});
+  const tickIndexes=[0,Math.floor((rows.length-1)/2),rows.length-1];
+  const activeRow=rows[safeIndex],activeX=xFor(safeIndex);
+  const updatePointer=(event)=>{
+    const rect=event.currentTarget.getBoundingClientRect();
+    const svgX=clamp((event.clientX-rect.left)/rect.width*width,0,width);
+    const x=clamp((svgX-left)/plotWidth,0,1);
+    setActiveIndex(Math.round(x*(rows.length-1)));
+  };
+  const handlePointerDown=(event)=>{event.currentTarget.setPointerCapture?.(event.pointerId);setDragging(true);updatePointer(event);};
+  const handlePointerUp=(event)=>{event.currentTarget.releasePointerCapture?.(event.pointerId);setDragging(false);};
+  const tooltipWidth=235,tooltipHeight=112;
+  const tooltipX=activeX>width-right-tooltipWidth?activeX-tooltipWidth-14:activeX+14;
+  return <div className="qqq-chart-wrap">
+    <div className="qqq-chart-hint">悬停、点击或拖动查看日期 · 半年滚动年化按最近 126 个交易日折算</div>
+    <svg className={`qqq-chart${dragging?' is-dragging':''}`} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="QQQ 策略最近半年滚动年化收益率图表" onPointerMove={updatePointer} onPointerDown={handlePointerDown} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onPointerLeave={()=>{if(!dragging)setActiveIndex(rows.length-1);}}>
+      <text x={left} y="12" className="qqq-chart-axis-title">年化收益率</text>
+      {grid.map(line=><g key={line.value}><line x1={left} x2={width-right} y1={line.y} y2={line.y} className="qqq-chart-grid-line"/><text x={left-10} y={line.y+4} textAnchor="end" className="qqq-chart-axis-label">{line.value.toFixed(1)}%</text></g>)}
+      {tickIndexes.map(index=><text key={index} x={xFor(index)} y={height-12} textAnchor={index===0?'start':index===rows.length-1?'end':'middle'} className="qqq-chart-axis-label">{rows[index].date}</text>)}
+      <polyline points={rows.map((row,index)=>`${xFor(index).toFixed(1)},${yFor(row.annualized).toFixed(1)}`).join(' ')} fill="none" stroke="var(--purple)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"/>
+      <line x1={activeX} x2={activeX} y1={top} y2={top+plotHeight} className="qqq-chart-crosshair"/>
+      <circle cx={activeX} cy={yFor(activeRow.annualized)} r="5" fill="var(--purple)" className="qqq-chart-point"/>
+      <g className="qqq-chart-tooltip" transform={`translate(${tooltipX},${top+10})`} pointerEvents="none"><rect width={tooltipWidth} height={tooltipHeight} rx="10"/><text x="13" y="22" className="qqq-chart-tooltip-date">{activeRow.date}</text><text x="13" y="47" className="qqq-chart-tooltip-value"><tspan fill="var(--purple)">半年年化 {Number(activeRow.annualized).toFixed(2)}%</tspan><tspan x="13" dy="20" fill="var(--teal)">σ20 {Number(activeRow.sigma20).toFixed(2)}%</tspan><tspan x="13" dy="20" fill="var(--blue)">TQQQ {Number(activeRow.tqqq).toFixed(0)}% · QQQ {Number(activeRow.qqq).toFixed(0)}%</tspan></text></g>
+      <rect x={left} y={top} width={plotWidth} height={plotHeight} fill="transparent" className="qqq-chart-hit-area"/>
+    </svg>
+    <div className="qqq-chart-legend"><span><i/>半年滚动年化</span><span>当前：{Number(activeRow.annualized).toFixed(2)}%</span></div>
+  </div>;
+}
+
+function QqqOperationsTable({rows}){
+  const recent=[...(Array.isArray(rows)?rows:[])].reverse();
+  if(!recent.length)return <div className="anchor-empty">最新行情同步后展示最近一个月操作明细。</div>;
+  const actionClass=(action)=>/调仓|防守|破位|恢复/.test(action)?'is-action':'';
+  return <div className="qqq-operations-wrap"><div className="qqq-operations-table"><div className="qqq-operations-head"><span>日期</span><span>操作判断</span><span>σ20</span><span>目标仓位</span><span>趋势</span></div>{recent.map(row=><div className={`qqq-operations-row ${actionClass(row.action)}`} key={row.date}><strong>{row.date}</strong><b>{row.action}</b><span>{Number(row.sigma20).toFixed(2)}%</span><span>TQQQ {Number(row.tqqq).toFixed(0)}% · QQQ {Number(row.qqq).toFixed(0)}%{Number(row.cash)>0?` · 短债 ${Number(row.cash).toFixed(0)}%`:''}</span><em>{row.trend}</em></div>)}</div></div>;
+}
+
 function QqqStrategyPanel(){
   const data=QQQ_STRATEGY_DATA;
-  const current=data.current;
+  const [live,setLive]=useState(null);
+  const [liveLoading,setLiveLoading]=useState(true);
+  const [liveError,setLiveError]=useState('');
+  const loadLive=useCallback(async(force=false)=>{
+    setLiveLoading(true);
+    const next=await fetchQqqStrategySnapshot(force);
+    if(next?.current){setLive(next);setLiveError('');}
+    else setLiveError('行情接口暂不可用，显示最近快照');
+    setLiveLoading(false);
+  },[]);
+  useEffect(()=>{
+    loadLive(true);
+    const timer=window.setInterval(()=>loadLive(false),30*60*1000);
+    return()=>window.clearInterval(timer);
+  },[loadLive]);
+  const current={...data.current,...(live?.current||{})};
+  const annualizedRows=Array.isArray(live?.halfYearAnnualized)?live.halfYearAnnualized:[];
+  const operationRows=Array.isArray(live?.recentOperations)?live.recentOperations:[];
   const tone={profit:ACC.profit,loss:ACC.loss,blue:ACC.blue,amber:ACC.amber};
+  const rollingAnnualized=Number(live?.performance?.rollingAnnualized);
+  const performanceCards=[
+    ['策略滚动年化',Number.isFinite(rollingAnnualized)?`${rollingAnnualized>=0?'+':''}${rollingAnnualized.toFixed(2)}%`:'—',live?.performance?.basis||'等待最新行情计算',rollingAnnualized>=0?'profit':'loss'],
+    ...data.performance,
+  ];
+  const sigma=Number(current.sigma20);
+  const sigmaBand=sigma<10
+    ? {label:'低波动 · 增强',color:ACC.profit,desc:'波动较低，公式会提高 TQQQ 权重'}
+    : sigma<20
+      ? {label:'中波动 · 平衡',color:ACC.blue,desc:'按公式维持 QQQ / TQQQ 平衡'}
+      : {label:'高波动 · 降杠杆',color:ACC.amber,desc:'波动升高，公式会自动降低 TQQQ 权重'};
   const dailyRows=[
     ['收盘后 · 每个交易日','检查 NDX 是否 ≤ MA175','未破位：不重算、不调仓。只要破位，标记为次日开盘执行。'],
     ['次日开盘 · 破位时','清空全部 TQQQ；买回未到期 Sell Put','剩余资金配置为 50% QQQ + 50% 短债，三步必须一起做。'],
@@ -4703,13 +4791,15 @@ function QqqStrategyPanel(){
   ];
   const renderRows=(rows)=><div className="qqq-action-table"><div className="qqq-action-head"><span>时点</span><span>动作</span><span>执行口径</span></div>{rows.map(([when,action,detail])=><div className="qqq-action-row" key={`${when}-${action}`}><strong>{when}</strong><b>{action}</b><span>{detail}</span></div>)}</div>;
   return <div className="qqq-panel anim-in">
-    <div className="qqq-hero"><div><span className="section-label">US MOMENTUM · QQQ / TQQQ</span><h2>QQQ 趋势与波动率策略</h2><p>以 QQQ 承担底层 Beta，以 TQQQ 动态增强；周频调仓、每日盯破位，每月在多头环境中卖出现金担保 QQQ Put。</p></div><div className="qqq-hero-badges"><span>🇺🇸 美股</span><span>MA175</span><span>VOL TARGET 19%</span></div></div>
-    <div className="qqq-snapshot"><div className="qqq-snapshot-main"><span className="section-label">最近回测快照 · {data.currentAsOf}</span><strong><i>●</i>{current.trend} · 维持多头组合</strong><p>NDX {fmt(current.ndx,2)} 高于 MA175 {fmt(current.ma,2)}，距离均线 {current.maDistance>=0?'+':''}{fmt(current.maDistance,2)}%；未触发破位防守。</p></div><div className="qqq-snapshot-side"><span>目标 TQQQ <b>{fmt(current.tqqq,0)}%</b></span><span>目标 QQQ <b>{fmt(current.qqq,0)}%</b></span><span>σ20 <b>{fmt(current.sigma20,1)}%</b></span></div></div>
-    <div className="qqq-metric-grid">{data.performance.map(([label,value,sub,key])=><div className="qqq-metric-card" key={label}><span>{label}</span><strong style={{color:tone[key]}}>{value}</strong><small>{sub}</small></div>)}</div>
+    <div className="qqq-hero"><div><span className="section-label">US MOMENTUM · QQQ / TQQQ</span><h2>QQQ 趋势与波动率策略</h2><p>以 QQQ 承担底层 Beta，以 TQQQ 动态增强；周频调仓、每日盯破位，每月在多头环境中卖出现金担保 QQQ Put。</p></div><div className="qqq-hero-actions"><div className="qqq-hero-badges"><span>🇺🇸 美股</span><span>MA175</span><span>VOL TARGET 19%</span></div><button className="btn btn-primary qqq-refresh-btn" onClick={()=>loadLive(true)} disabled={liveLoading}>{liveLoading?'↻ 更新中…':'↻ 刷新策略数据'}</button></div></div>
+    <div className="qqq-snapshot"><div className="qqq-snapshot-main"><span className="section-label">{live?'动态行情':'最近回测快照'} · {live?.asOf||data.currentAsOf}</span><strong><i>●</i>{current.trend} · {current.trend==='多头'?'维持多头组合':'进入防守组合'}</strong><p>NDX {fmt(current.ndx,2)} {current.maDistance>=0?'高于':'低于'} MA175 {fmt(current.ma,2)}，距离均线 {current.maDistance>=0?'+':''}{fmt(current.maDistance,2)}%；{current.trend==='多头'?'未触发破位防守。':'已按规则将 TQQQ 降至 0%。'}</p><small className="qqq-live-status">{liveLoading?'↻ 正在更新行情…':live?`✓ 每 30 分钟检查 · ${live.source}`:`! ${liveError}`}</small></div><div className="qqq-target-allocation"><div className="qqq-target-card qqq-target-tqqq"><span>目标 TQQQ</span><b>{fmt(current.tqqq,0)}%</b><small>3× 增强</small></div><div className="qqq-target-card qqq-target-qqq"><span>目标 QQQ</span><b>{fmt(current.qqq,0)}%</b><small>底层 Beta</small></div><div className="qqq-target-card qqq-target-sigma"><span>σ20</span><b>{fmt(current.sigma20,1)}%</b><small style={{color:sigmaBand.color}}>{sigmaBand.label}</small></div></div></div>
+    <div className="qqq-metric-grid">{performanceCards.map(([label,value,sub,key])=><div className="qqq-metric-card" key={label}><span>{label}</span><strong style={{color:tone[key]}}>{value}</strong><small>{sub}</small></div>)}</div>
     <section className="qqq-section"><div className="qqq-section-head"><div><span className="section-label">01 · 执行日历</span><h3>每天、每周、每月照这个节奏</h3></div><span className="qqq-rule-badge">机械执行</span></div><div className="qqq-cadence-grid"><div className="glass-card qqq-cadence-card"><span className="qqq-cadence-icon">◷</span><h4>每日 · 30 秒</h4><p>只盯 NDX 收盘是否跌破 MA175。破位后次日开盘清 TQQQ、平 Put、转防守配置。</p>{renderRows(dailyRows)}</div><div className="glass-card qqq-cadence-card"><span className="qqq-cadence-icon">▣</span><h4>每周五 → 下周一</h4><p>周五收盘计算目标，周一开盘执行；目标与当前仓位差小于 4 个百分点不动。</p>{renderRows(weeklyRows)}</div><div className="glass-card qqq-cadence-card"><span className="qqq-cadence-icon">◫</span><h4>每月首个执行日</h4><p>多头环境才卖 Put，现金担保、限价成交；破位后本月不补卖。</p>{renderRows(monthlyRows)}</div></div><div className="qqq-quarter-note"><b>每季度复核</b><span>重跑回测，核对实际净值与策略轨迹；检查期权滑点是否明显高于 3bp，并重新确认账户能承受约 35% 的历史最大回撤。</span></div></section>
-    <section className="qqq-section"><div className="qqq-section-head"><div><span className="section-label">02 · 当前参数</span><h3>当前快照下怎么执行</h3></div></div><div className="qqq-current-grid"><div className="glass-card qqq-current-card"><span className="section-label">趋势与仓位</span><div className="qqq-current-line"><b>NDX {fmt(current.ndx,2)}</b><span>›</span><b>MA175 {fmt(current.ma,2)}</b></div><div className="qqq-bar"><i style={{width:`${current.tqqq}%`}}/><em style={{width:`${current.qqq}%`}}/></div><div className="qqq-bar-label"><span>TQQQ {fmt(current.tqqq,0)}%</span><span>QQQ {fmt(current.qqq,0)}%</span></div><p>当前属于多头状态；只有目标与实际 TQQQ 权重相差 ≥ 4pp，才在下周一调仓。</p></div><div className="glass-card qqq-current-card"><span className="section-label">期权层 · 模型参考</span><div className="qqq-option-grid"><span>NDX 模型行权价 <b>{fmt(current.putStrikeNdx,0)}</b></span><span>虚值幅度 <b>{fmt(current.putOtm,2)}%</b></span><span>模型权利金 <b>{fmt(current.putPremium,3)}%</b></span><span>折算年化 <b>{fmt(current.putAnnualized,1)}%</b></span></div><p>实盘应在 QQQ 期权链中选 Delta ≈ -0.175 的 45DTE 合约；这里的 NDX 行权价只是回测代理，不能直接下单。</p></div></div></section>
-    <section className="qqq-section"><div className="qqq-section-head"><div><span className="section-label">03 · 近期收益</span><h3>回测收益怎么读</h3></div><span className="qqq-rule-badge">截至 {data.backtestEnd}</span></div><div className="qqq-recent-grid">{data.recent.map(([period,value,sub,key])=><div className="qqq-recent-row" key={period}><strong>{period}</strong><b style={{color:tone[key]}}>{value}</b><span>{sub}</span></div>)}</div><div className="qqq-table-wrap"><div className="qqq-table-head"><span>年度</span><span>策略收益</span><span>QQQ 收益</span><span>TQQQ 平均仓位</span></div>{data.annual.map(([year,strategy,qqq,weight])=><div className="qqq-table-row" key={year}><strong>{year}</strong><b className={strategy.startsWith('-')?'negative':'positive'}>{strategy}</b><span>{qqq}</span><span>{weight}</span></div>)}</div></section>
-    <section className="qqq-section"><div className="qqq-section-head"><div><span className="section-label">04 · 数据校验与风险边界</span><h3>这份 CSV 能不能信</h3></div><span className="qqq-rule-badge qqq-rule-badge-warn">已校验快照</span></div><div className="qqq-validation-grid"><div className="glass-card qqq-validation-card"><strong>结构校验通过</strong><p>option_trades {data.validation.optionRows} 笔 · monthly_summary {data.validation.monthlyRows} 行 · weekly_operations {data.validation.weeklyRows} 行</p><ul>{data.validation.checks.map(item=><li key={item}>✓ {item}</li>)}</ul></div><div className="glass-card qqq-validation-card qqq-warning-card"><strong>最重要的限制</strong><p>策略年化 {data.performance[0][1]} 是历史回测 CAGR，不是未来承诺；最大回撤 {data.performance[1][1]} 也不是上限。</p><p>回测期权层用 NDX + Black-Scholes/VXN 合成，实际执行却是 QQQ Put。期权贡献、行权率和滑点必须用真实 QQQ 历史链重新验证。</p></div></div></section>
+    <section className="qqq-section"><div className="qqq-section-head"><div><span className="section-label">02 · 当前参数</span><h3>当前快照下怎么执行</h3></div></div><div className="qqq-current-grid"><div className="glass-card qqq-current-card"><span className="section-label">趋势与仓位</span><div className="qqq-current-line"><b>NDX {fmt(current.ndx,2)}</b><span>›</span><b>MA175 {fmt(current.ma,2)}</b></div><div className="qqq-bar"><i style={{width:`${current.tqqq}%`}}/><em style={{width:`${current.qqq}%`}}/><u style={{width:`${current.cash||0}%`}}/></div><div className="qqq-bar-label"><span>TQQQ {fmt(current.tqqq,0)}%</span><span>QQQ {fmt(current.qqq,0)}%</span><span>短债 {fmt(current.cash||0,0)}%</span></div><div className="qqq-vol-formula">TQQQ = clamp(0%, 100%, 19% ÷ (3 × σ20))</div><div className="qqq-vol-examples"><span>σ20 10% → TQQQ 63%</span><span>σ20 15% → 42%</span><span>σ20 20% → 32%</span></div><div className="qqq-vol-band"><b style={{color:sigmaBand.color}}>{sigmaBand.label}</b><span>σ20 {fmt(current.sigma20,1)}% → TQQQ {fmt(current.tqqq,0)}% · QQQ {fmt(current.qqq,0)}%{current.cash>0?` · 短债 ${fmt(current.cash,0)}%`:''}</span></div><p>{current.trend==='多头'?`${sigmaBand.desc}；目标与实际 TQQQ 权重相差 ≥ 4pp，才在下周一调仓。`:'NDX 跌破 MA175，TQQQ 归零，QQQ 50% + 短债 50% 防守。'}</p></div><div className="glass-card qqq-current-card"><span className="section-label">期权层 · 模型参考</span><div className="qqq-option-grid"><span>NDX 模型行权价 <b>{fmt(current.putStrikeNdx,0)}</b></span><span>虚值幅度 <b>{fmt(current.putOtm,2)}%</b></span><span>模型权利金 <b>{fmt(current.putPremium,3)}%</b></span><span>折算年化 <b>{fmt(current.putAnnualized,1)}%</b></span></div><p>实盘应在 QQQ 期权链中选 Delta ≈ -0.175 的 45DTE 合约；这里的 NDX 行权价只是回测代理，不能直接下单。</p></div></div></section>
+    <section className="qqq-section"><div className="qqq-section-head"><div><span className="section-label">03 · 半年收益</span><h3>最近半年滚动年化走势</h3></div><span className="qqq-rule-badge">动态 · {live?.asOf||'等待同步'}</span></div><QqqAnnualizedChart rows={annualizedRows}/></section>
+    <section className="qqq-section"><div className="qqq-section-head"><div><span className="section-label">04 · 执行记录</span><h3>最近一个月操作明细</h3></div><span className="qqq-rule-badge">按收盘信号</span></div><p className="qqq-section-note">记录每日收盘后的判断；只有趋势切换或周度目标偏离达到 4 个百分点，才会产生实际调仓。</p><QqqOperationsTable rows={operationRows}/></section>
+    <section className="qqq-section"><div className="qqq-section-head"><div><span className="section-label">05 · 近期收益</span><h3>回测收益怎么读</h3></div><span className="qqq-rule-badge">截至 {data.backtestEnd}</span></div><div className="qqq-recent-grid">{data.recent.map(([period,value,sub,key])=><div className="qqq-recent-row" key={period}><strong>{period}</strong><b style={{color:tone[key]}}>{value}</b><span>{sub}</span></div>)}</div><div className="qqq-table-wrap"><div className="qqq-table-head"><span>年度</span><span>策略收益</span><span>QQQ 收益</span><span>TQQQ 平均仓位</span></div>{data.annual.map(([year,strategy,qqq,weight])=><div className="qqq-table-row" key={year}><strong>{year}</strong><b className={strategy.startsWith('-')?'negative':'positive'}>{strategy}</b><span>{qqq}</span><span>{weight}</span></div>)}</div></section>
+    <section className="qqq-section"><div className="qqq-section-head"><div><span className="section-label">06 · 数据校验与风险边界</span><h3>这份 CSV 能不能信</h3></div><span className="qqq-rule-badge qqq-rule-badge-warn">已校验快照</span></div><div className="qqq-validation-grid"><div className="glass-card qqq-validation-card"><strong>结构校验通过</strong><p>option_trades {data.validation.optionRows} 笔 · monthly_summary {data.validation.monthlyRows} 行 · weekly_operations {data.validation.weeklyRows} 行</p><ul>{data.validation.checks.map(item=><li key={item}>✓ {item}</li>)}</ul></div><div className="glass-card qqq-validation-card qqq-warning-card"><strong>最重要的限制</strong><p>策略年化 {data.performance[0][1]} 是历史回测 CAGR，不是未来承诺；最大回撤 {data.performance[1][1]} 也不是上限。</p><p>回测期权层用 NDX + Black-Scholes/VXN 合成，实际执行却是 QQQ Put。期权贡献、行权率和滑点必须用真实 QQQ 历史链重新验证。</p></div></div></section>
     <div className="anchor-sources">数据来源：用户提供的 EXECUTION_MANUAL.md、execution_plan.py、results_exec.json 及三张 CSV；快照生成于 {data.generatedAt}。本模块是执行清单与回测摘要，不构成投资建议。</div>
   </div>;
 }
