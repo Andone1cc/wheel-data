@@ -1994,6 +1994,18 @@ module.exports = async function handler(req, res) {
     }
   }
 
+  // 页面手动刷新 QQQ 策略缓存（复用登录密码，不暴露 CRON_SECRET）
+  if (reqUrl.startsWith('/api/qqq-strategy/refresh') || reqUrl.includes('manualQqqStrategy=1')) {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    if (!passwordOk) return res.status(401).json({ error: '请先登录后再刷新 QQQ 策略缓存' });
+    try {
+      const snapshot = await refreshQqqCachedSnapshot();
+      return res.status(200).json({ ...snapshot, cached: true, manual: true });
+    } catch (error) {
+      return res.status(502).json({ error: 'QQQ 策略缓存刷新失败', detail: error.message });
+    }
+  }
+
   // ══════════════════════════════════════════════════
   // 富途 OpenD API 代理（需密码 —— 这条链路能直接访问你的
   // 真实交易网关，不鉴权=任何人都能读写你的行情/仓位接口）

@@ -509,6 +509,24 @@ async function fetchQqqStrategySnapshot(force=false){
   return null;
 }
 
+async function refreshQqqStrategyCache(){
+  const bases=[localStorage.getItem('whl-cloud-url'),DEFAULT_CLOUD_URL,window.location.origin].filter(Boolean).filter((base,index,list)=>list.indexOf(base)===index);
+  const pwd=localStorage.getItem('whl-cloud-pwd')||'';
+  for(const proxyBase of bases){
+    try{
+      const response=await fetch(`${proxyBase}/api/qqq-strategy/refresh`,{
+        method:'POST',
+        headers:pwd?{Authorization:`Bearer ${pwd}`}: {},
+        signal:AbortSignal.timeout(120000),
+        cache:'no-store',
+      });
+      if(response.ok)return await response.json();
+      if(response.status===401)return {error:'请先登录云端账户，再手动刷新策略缓存'};
+    }catch(error){console.warn('QQQ strategy cache refresh:',proxyBase,error.message);}
+  }
+  return null;
+}
+
 async function fetchStockCloseOnDate(ticker,date,{force=false}={}){
   const proxyBase=localStorage.getItem('whl-cloud-url')||DEFAULT_CLOUD_URL;
   try{
@@ -4749,13 +4767,13 @@ function QqqStrategyPanel(){
   const [liveError,setLiveError]=useState('');
   const loadLive=useCallback(async(force=false)=>{
     setLiveLoading(true);
-    const next=await fetchQqqStrategySnapshot(force);
+    const next=force?await refreshQqqStrategyCache():await fetchQqqStrategySnapshot(false);
     if(next?.current){setLive(next);setLiveError('');}
-    else setLiveError('策略缓存暂不可用，显示最近快照');
+    else setLiveError(next?.error||'策略缓存暂不可用，显示最近快照');
     setLiveLoading(false);
   },[]);
   useEffect(()=>{
-    loadLive(true);
+    loadLive(false);
     const timer=window.setInterval(()=>loadLive(false),30*60*1000);
     return()=>window.clearInterval(timer);
   },[loadLive]);
@@ -4791,7 +4809,7 @@ function QqqStrategyPanel(){
   ];
   const renderRows=(rows)=><div className="qqq-action-table"><div className="qqq-action-head"><span>时点</span><span>动作</span><span>执行口径</span></div>{rows.map(([when,action,detail])=><div className="qqq-action-row" key={`${when}-${action}`}><strong>{when}</strong><b>{action}</b><span>{detail}</span></div>)}</div>;
   return <div className="qqq-panel anim-in">
-    <div className="qqq-hero"><div><span className="section-label">US MOMENTUM · QQQ / TQQQ</span><h2>QQQ 趋势与波动率策略</h2><p>以 QQQ 承担底层 Beta，以 TQQQ 动态增强；周频调仓、每日盯破位，每月在多头环境中卖出现金担保 QQQ Put。</p></div><div className="qqq-hero-actions"><div className="qqq-hero-badges"><span>🇺🇸 美股</span><span>MA175</span><span>VOL TARGET 19%</span></div><button className="btn btn-primary qqq-refresh-btn" onClick={()=>loadLive(true)} disabled={liveLoading}>{liveLoading?'↻ 读取中…':'↻ 读取最新缓存'}</button></div></div>
+    <div className="qqq-hero"><div><span className="section-label">US MOMENTUM · QQQ / TQQQ</span><h2>QQQ 趋势与波动率策略</h2><p>以 QQQ 承担底层 Beta，以 TQQQ 动态增强；周频调仓、每日盯破位，每月在多头环境中卖出现金担保 QQQ Put。</p></div><div className="qqq-hero-actions"><div className="qqq-hero-badges"><span>🇺🇸 美股</span><span>MA175</span><span>VOL TARGET 19%</span></div><button className="btn btn-primary qqq-refresh-btn" onClick={()=>loadLive(true)} disabled={liveLoading}>{liveLoading?'↻ 刷新中…':'↻ 手动刷新缓存'}</button></div></div>
     <div className="qqq-snapshot"><div className="qqq-snapshot-main"><span className="section-label">{live?'缓存行情':'最近回测快照'} · {live?.asOf||data.currentAsOf}</span><strong><i>●</i>{current.trend} · {current.trend==='多头'?'维持多头组合':'进入防守组合'}</strong><p>NDX {fmt(current.ndx,2)} {current.maDistance>=0?'高于':'低于'} MA175 {fmt(current.ma,2)}，距离均线 {current.maDistance>=0?'+':''}{fmt(current.maDistance,2)}%；{current.trend==='多头'?'未触发破位防守。':'已按规则将 TQQQ 降至 0%。'}</p><small className="qqq-live-status">{liveLoading?'↻ 正在读取缓存…':live?`✓ 后台每日更新 · ${live.cachedAt?new Date(live.cachedAt).toLocaleString('zh-CN',{hour12:false}):live.source}`:`! ${liveError}`}</small></div><div className="qqq-target-allocation"><div className="qqq-target-card qqq-target-tqqq"><span>目标 TQQQ</span><b>{fmt(current.tqqq,0)}%</b><small>3× 增强</small></div><div className="qqq-target-card qqq-target-qqq"><span>目标 QQQ</span><b>{fmt(current.qqq,0)}%</b><small>底层 Beta</small></div><div className="qqq-target-card qqq-target-sigma"><span>σ20</span><b>{fmt(current.sigma20,1)}%</b><small style={{color:sigmaBand.color}}>{sigmaBand.label}</small></div></div></div>
     <div className="qqq-metric-grid">{performanceCards.map(([label,value,sub,key])=><div className="qqq-metric-card" key={label}><span>{label}</span><strong style={{color:tone[key]}}>{value}</strong><small>{sub}</small></div>)}</div>
     <section className="qqq-section"><div className="qqq-section-head"><div><span className="section-label">01 · 执行日历</span><h3>每天、每周、每月照这个节奏</h3></div><span className="qqq-rule-badge">机械执行</span></div><div className="qqq-cadence-grid"><div className="glass-card qqq-cadence-card"><span className="qqq-cadence-icon">◷</span><h4>每日 · 30 秒</h4><p>只盯 NDX 收盘是否跌破 MA175。破位后次日开盘清 TQQQ、平 Put、转防守配置。</p>{renderRows(dailyRows)}</div><div className="glass-card qqq-cadence-card"><span className="qqq-cadence-icon">▣</span><h4>每周五 → 下周一</h4><p>周五收盘计算目标，周一开盘执行；目标与当前仓位差小于 4 个百分点不动。</p>{renderRows(weeklyRows)}</div><div className="glass-card qqq-cadence-card"><span className="qqq-cadence-icon">◫</span><h4>每月首个执行日</h4><p>多头环境才卖 Put，现金担保、限价成交；破位后本月不补卖。</p>{renderRows(monthlyRows)}</div></div><div className="qqq-quarter-note"><b>每季度复核</b><span>重跑回测，核对实际净值与策略轨迹；检查期权滑点是否明显高于 3bp，并重新确认账户能承受约 35% 的历史最大回撤。</span></div></section>
