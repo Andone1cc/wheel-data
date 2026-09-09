@@ -2061,6 +2061,7 @@ module.exports = async function handler(req, res) {
     if (!passwordOk) return res.status(401).json({ error: '请先登录后再刷新 QQQ 策略缓存' });
     try {
       const snapshot = await refreshQqqCachedSnapshot();
+      res.setHeader('Cache-Control', 'no-store');
       return res.status(200).json({ ...snapshot, cached: true, manual: true });
     } catch (error) {
       return res.status(502).json({ error: 'QQQ 策略缓存刷新失败', detail: error.message });
