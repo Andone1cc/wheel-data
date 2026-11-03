@@ -1426,7 +1426,11 @@ function RollModal({pos,commPerSide,onConfirm,onClose}){
   const [newStrike,setNewStrike]=useState(String(pos.strike));
   const [newPremium,setNewPremium]=useState('');
   const [rollDate,setRollDate]=useState(today());
-  const qty=pos.qty||1;
+  const availableQty=Math.max(1,Math.floor(num(pos.qty,1)));
+  const [rollQty,setRollQty]=useState(String(availableQty));
+  const parsedQty=Number(rollQty);
+  const validQty=Number.isInteger(parsedQty)&&parsedQty>=1&&parsedQty<=availableQty;
+  const qty=validQty?parsedQty:0;
 
   // 计算
   const bbPrice=parseFloat(buybackPrice)||0;
@@ -1435,14 +1439,23 @@ function RollModal({pos,commPerSide,onConfirm,onClose}){
   const newIncome=newPrem*100*qty;
   const rollComm=commPerSide*qty*2*2; // 两次交易各双边
   const netCredit=newIncome-bbCost-rollComm;
-  const valid=buybackPrice&&newExpiry&&newStrike&&newPremium;
+  const valid=buybackPrice&&newExpiry&&newStrike&&newPremium&&validQty;
 
   return(
     <Modal title="↻ Roll 滚仓" onClose={onClose} maxW={600}>
       <div style={{background:V('surface'),borderRadius:10,padding:'10px 14px',marginBottom:16,display:'flex',gap:16,flexWrap:'wrap',alignItems:'center'}}>
         <span style={{fontFamily:'IBM Plex Mono,monospace',fontWeight:700,fontSize:15,color:V('ink')}}>{pos.ticker}</span>
         <span style={{fontFamily:'IBM Plex Mono,monospace',color:ACC.amber}}>{'卖 '+(pos.type==='P'?'Put':'Call')+' $'+fmt(pos.strike,0)}</span>
-        <span style={{fontFamily:'IBM Plex Mono,monospace',color:V('dim')}}>{qty+'手 · 到期 '+pos.expDate}</span>
+        <span style={{fontFamily:'IBM Plex Mono,monospace',color:V('dim')}}>{'可滚 '+availableQty+'手 · 到期 '+pos.expDate}</span>
+      </div>
+
+      <div style={{background:ACC.amberSoft,border:'1px solid '+ACC.amber+'33',borderRadius:10,padding:'12px 14px',marginBottom:16,display:'grid',gridTemplateColumns:'minmax(160px,220px) 1fr',gap:14,alignItems:'end'}}>
+        <NumField label="本次滚仓手数" value={rollQty} onChange={setRollQty} suffix={'/ '+availableQty+'手'} />
+        <div style={{fontSize:11,color:V('dim'),lineHeight:1.7}}>
+          {validQty
+            ? (qty<availableQty?`本次将滚仓 ${qty} 手，剩余 ${availableQty-qty} 手继续保留原仓。`:`本次将滚仓全部 ${qty} 手。`)
+            : `请输入 1 至 ${availableQty} 之间的整数手数。`}
+        </div>
       </div>
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
@@ -1479,7 +1492,7 @@ function RollModal({pos,commPerSide,onConfirm,onClose}){
 
       <div style={{display:'flex',gap:8}}>
         <button disabled={!valid} onClick={()=>onConfirm({
-          buybackPrice:bbPrice,rollDate,
+          buybackPrice:bbPrice,rollDate,rollQty:qty,
           newExpiry,newStrike:parseFloat(newStrike),newPremium:newPrem,
           netCredit,rollComm,
         })} className="btn btn-primary" style={{minWidth:120}}>{'确认 Roll'}</button>
@@ -5633,11 +5646,21 @@ function App(){
     showToast(`${stock.ticker} 股票已平仓，收益 ${fmtM(result.profit)}`,result.profit>=0?ACC.profit:ACC.loss);
   };
   const confirmRoll=(pos,data)=>{
+    const availableQty=Math.max(1,Math.floor(num(pos.qty,1)));
+    const rawRollQty=Number(data.rollQty);
+    const rollQty=Number.isInteger(rawRollQty)?rawRollQty:0;
+    if(!Number.isInteger(rollQty)||rollQty<1||rollQty>availableQty){
+      showToast(`滚仓手数必须是 1-${availableQty} 的整数`,ACC.loss);
+      return;
+    }
     const {buybackPrice,rollDate,newExpiry,newStrike,newPremium,netCredit,rollComm}=data;
-    const newId=Date.now();
+    const closedRecordId=Date.now();
+    const newId=closedRecordId+1;
     // 1. 关闭旧仓位（记录为 roll）
     const closedRecord={
       ...pos,
+      id:closedRecordId,
+      qty:rollQty,
       closePrice:buybackPrice,closeDate:rollDate,closeType:'roll',closedAt:Date.now(),
       rollNetCredit:netCredit,rollComm,
       rollToPositionId:newId,rollToExpiry:newExpiry,rollToStrike:newStrike,rollToPremium:newPremium,
@@ -5645,15 +5668,17 @@ function App(){
     mutateClosed([closedRecord,...closed]);
     // 2. 创建新仓位
     const newPos={
-      id:newId,ticker:pos.ticker,type:pos.type,strike:newStrike,qty:pos.qty||1,
+      ...pos,
+      id:newId,ticker:pos.ticker,type:pos.type,strike:newStrike,qty:rollQty,
       openDate:rollDate,expDate:newExpiry,premium:newPremium,
-      marginType:pos.marginType,customMargin:pos.customMargin||0,
       currentPrice:pos.currentPrice,optionPrice:null,
       rolledFrom:pos.id,
     };
-    mutate([...positions.filter(p=>p.id!==pos.id),newPos]);
+    const remainingQty=availableQty-rollQty;
+    const remaining=remainingQty>0?{...pos,qty:remainingQty}:null;
+    mutate([...positions.filter(p=>p.id!==pos.id),...(remaining?[remaining]:[]),newPos]);
     setRollTarget(null);setExpanded(newPos.id);
-    showToast('↻ Roll 完成 · 净'+fmtM(netCredit),netCredit>=0?ACC.profit:ACC.amber);
+    showToast(`↻ Roll 完成 · ${rollQty}手 · 净${fmtM(netCredit)}${remaining?` · 原仓剩余 ${remainingQty}手`:''}`,netCredit>=0?ACC.profit:ACC.amber);
   };
 
   const removeClosedRecord=(id)=>{mutateClosed(closed.filter(c=>c.id!==id));showToast('已删除记录',ACC.loss);};
